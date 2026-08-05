@@ -4,6 +4,7 @@ export default function GoalScorers() {
   const [goalStats, setGoalStats] = useState(() => {
     try {
       const saved =
+        localStorage.getItem("sscup-goal-scorers") ||
         localStorage.getItem("sscup-goals");
 
       return saved ? JSON.parse(saved) : [];
@@ -16,6 +17,7 @@ export default function GoalScorers() {
     function loadGoals() {
       try {
         const saved =
+          localStorage.getItem("sscup-goal-scorers") ||
           localStorage.getItem("sscup-goals");
 
         setGoalStats(
@@ -107,11 +109,18 @@ export default function GoalScorers() {
     }
 
     localStorage.setItem(
+      "sscup-goal-scorers",
+      JSON.stringify([])
+    );
+    localStorage.setItem(
       "sscup-goals",
       JSON.stringify([])
     );
 
     setGoalStats([]);
+    window.dispatchEvent(
+      new CustomEvent("sscup-goals-updated", { detail: [] })
+    );
   }
 
   return (

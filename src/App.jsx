@@ -182,6 +182,12 @@ function calculateStandings(teams, fixtures) {
 }
 
 export default function App() {
+  const isPublicTracking = (() => {
+    const params = new URLSearchParams(window.location.search);
+    const path = window.location.pathname.replace(/\/+$/, "");
+    return params.get("page") === "takip" || path.endsWith("/takip");
+  })();
+
   const [activePage, setActivePage] =
     useState("home");
 
@@ -580,6 +586,20 @@ export default function App() {
           />
         );
     }
+  }
+
+  if (isPublicTracking) {
+    return (
+      <main className="public-tracking-shell">
+        <PublicTournament
+          teams={teams}
+          fixtures={fixtures}
+          standings={standings}
+          goalScorers={goalScorers}
+          settings={settings}
+        />
+      </main>
+    );
   }
 
   const activeMenuItem = menuItems.find(

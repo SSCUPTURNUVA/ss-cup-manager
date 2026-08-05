@@ -461,8 +461,7 @@ export default function MatchCenter({
 
     updatedFixtures.forEach((match) => {
       const events = getMatchEvents(match).filter(
-        (event) =>
-          EVENT_TYPES[event.type]?.countsGoal === true
+        (event) => EVENT_TYPES[event.type]?.countsGoal === true
       );
 
       events.forEach((goal) => {
@@ -490,19 +489,69 @@ export default function MatchCenter({
       });
     });
 
+    // Daha önce elle kaydedilmiş golcüleri silme.
+    // Maç olaylarından yeniden hesaplanan sayı daha yüksekse onu kullan;
+    // aksi halde mevcut kayıt korunur.
+    let savedScorers = [];
+    try {
+      const raw =
+        localStorage.getItem("sscup-goal-scorers") ||
+        localStorage.getItem("sscup-goals") ||
+        "[]";
+      const parsed = JSON.parse(raw);
+      savedScorers = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      savedScorers = [];
+    }
+
+    savedScorers.forEach((player, index) => {
+      const team = player.team || player.teamName || "";
+      const playerId =
+        player.playerId ||
+        player.id ||
+        `${player.playerName || player.name || "Oyuncu"}-${index}`;
+
+      if (!team || !playerId) return;
+
+      const key = `${team}-${playerId}`;
+      const savedGoals = Math.max(0, safeNumber(player.goals));
+
+      if (!totals[key]) {
+        totals[key] = {
+          ...player,
+          id: player.id || key,
+          playerId,
+          name: player.name || player.playerName || "Oyuncu",
+          playerName: player.playerName || player.name || "Oyuncu",
+          team,
+          teamName: team,
+          shirtNumber: player.shirtNumber || "",
+          goals: savedGoals,
+        };
+      } else {
+        totals[key] = {
+          ...player,
+          ...totals[key],
+          goals: Math.max(savedGoals, safeNumber(totals[key].goals)),
+        };
+      }
+    });
+
     const updatedScorers = Object.values(totals).sort((a, b) => {
-      if (b.goals !== a.goals) return b.goals - a.goals;
-      return a.name.localeCompare(b.name, "tr");
+      if (safeNumber(b.goals) !== safeNumber(a.goals)) {
+        return safeNumber(b.goals) - safeNumber(a.goals);
+      }
+      return String(a.name || a.playerName || "").localeCompare(
+        String(b.name || b.playerName || ""),
+        "tr"
+      );
     });
 
     localStorage.setItem(
       "sscup-goal-scorers",
       JSON.stringify(updatedScorers)
     );
-    localStorage.setItem(
-      "sscup-goals",
-      JSON.stringify(updatedScorers)
-    );
+    localStorage.setItem("sscup-goals", JSON.stringify(updatedScorers));
 
     window.dispatchEvent(
       new CustomEvent("sscup-goals-updated", {
@@ -874,9 +923,16 @@ export default function MatchCenter({
 
     const isDraw = safeNumber(liveMatch.homeScore) === safeNumber(liveMatch.awayScore);
 
-    // Eğer normal süre berabere bitti ve henüz penaltılara geçilmediyse yönlendir
-    if (isDraw && matchPhase !== "penalty") {
-      alert(`Maç berabere bitti (${liveMatch.homeScore} - ${liveMatch.awayScore})!\n\nEşitlik olduğu için Seri Penaltı Atışlarına geçiliyor...`);
+    // Sadece eleme maçlarında beraberlik olursa penaltıya geç.
+    // Lig maçları beraberlikle normal şekilde tamamlanır.
+    if (
+      liveMatch.isKnockout === true &&
+      isDraw &&
+      matchPhase !== "penalty"
+    ) {
+      alert(
+        `Maç berabere bitti (${liveMatch.homeScore} - ${liveMatch.awayScore})!\n\nSeri Penaltı Atışlarına geçiliyor...`
+      );
       updateLiveMatch({
         matchPhase: "penalty",
         timerRunning: false,
@@ -1091,7 +1147,9 @@ export default function MatchCenter({
                 </button>
               )}
 
-              {matchPhase === "second_half" && isScoreDrawn && (
+              {liveMatch.isKnockout === true &&
+                matchPhase === "second_half" &&
+                isScoreDrawn && (
                 <button
                   type="button"
                   className="primary-button"
