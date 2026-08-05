@@ -215,6 +215,7 @@ export default function PublicTournament({
 
             return (
               <article
+                className="public-match-card"
                 key={`${timeRange}-${match?.id || index}`}
                 style={{
                   display: "grid",
@@ -405,111 +406,36 @@ export default function PublicTournament({
             Puan durumu henüz oluşmadı.
           </p>
         ) : (
-          <div style={{ overflowX: "auto" }}>
-            <div
-              style={{
-                minWidth: "720px",
-                display: "grid",
-                gridTemplateColumns: "64px minmax(220px, 1fr) repeat(6, 70px)",
-                alignItems: "center",
-                padding: "13px 18px",
-                color: "#f7d76d",
-                background: "rgba(212,175,55,.08)",
-                borderBottom: "1px solid rgba(212,175,55,.22)",
-                fontSize: "12px",
-                fontWeight: 1000,
-                letterSpacing: ".7px",
-                textAlign: "center",
-              }}
-            >
-              <span>SIRA</span>
-              <span style={{ textAlign: "left" }}>TAKIM</span>
-              <span>O</span>
-              <span>G</span>
-              <span>B</span>
-              <span>M</span>
-              <span>AV</span>
-              <span>PUAN</span>
-            </div>
-
+          <div className="public-standing-cards">
             {standings.slice(0, 8).map((team, index) => {
               const goalDifference = Number(team.goalDifference || 0);
-              const medal = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : "";
+              const medal = index === 0 ? "🥇" : index === 1 ? "🥈" : index === 2 ? "🥉" : index + 1;
 
               return (
                 <article
+                  className={`public-standing-card ${index === 0 ? "is-leader" : ""}`}
                   key={team.team}
-                  style={{
-                    minWidth: "720px",
-                    display: "grid",
-                    gridTemplateColumns: "64px minmax(220px, 1fr) repeat(6, 70px)",
-                    alignItems: "center",
-                    padding: "15px 18px",
-                    borderBottom:
-                      index === Math.min(standings.length, 8) - 1
-                        ? "none"
-                        : "1px solid rgba(255,255,255,.08)",
-                    background:
-                      index === 0
-                        ? "linear-gradient(90deg, rgba(212,175,55,.18), rgba(212,175,55,.05))"
-                        : index % 2 === 0
-                        ? "rgba(255,255,255,.018)"
-                        : "rgba(255,255,255,.04)",
-                    textAlign: "center",
-                  }}
                 >
-                  <span
-                    style={{
-                      width: "38px",
-                      height: "38px",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      margin: "0 auto",
-                      borderRadius: "12px",
-                      color: index === 0 ? "#111827" : "#f7d76d",
-                      background:
-                        index === 0
-                          ? "linear-gradient(135deg, #f7df7a, #d4af37)"
-                          : "rgba(212,175,55,.1)",
-                      border: "1px solid rgba(212,175,55,.25)",
-                      fontWeight: 1000,
-                    }}
-                  >
-                    {medal || index + 1}
-                  </span>
+                  <div className="public-standing-rank">{medal}</div>
 
-                  <strong
-                    style={{
-                      textAlign: "left",
-                      fontSize: "16px",
-                      color: index === 0 ? "#f7d76d" : "white",
-                    }}
-                  >
-                    {team.team}
-                  </strong>
+                  <div className="public-standing-main">
+                    <strong>{team.team}</strong>
+                    <div className="public-standing-stats">
+                      <span><small>O</small><b>{team.played || 0}</b></span>
+                      <span><small>G</small><b>{team.won || 0}</b></span>
+                      <span><small>B</small><b>{team.drawn || 0}</b></span>
+                      <span><small>M</small><b>{team.lost || 0}</b></span>
+                      <span className={goalDifference >= 0 ? "positive" : "negative"}>
+                        <small>AV</small>
+                        <b>{goalDifference > 0 ? `+${goalDifference}` : goalDifference}</b>
+                      </span>
+                    </div>
+                  </div>
 
-                  <span>{team.played || 0}</span>
-                  <span>{team.won || 0}</span>
-                  <span>{team.drawn || 0}</span>
-                  <span>{team.lost || 0}</span>
-                  <span style={{ color: goalDifference >= 0 ? "#4ade80" : "#f87171" }}>
-                    {goalDifference > 0 ? `+${goalDifference}` : goalDifference}
-                  </span>
-                  <b
-                    style={{
-                      display: "inline-flex",
-                      justifyContent: "center",
-                      minWidth: "52px",
-                      padding: "8px 10px",
-                      margin: "0 auto",
-                      borderRadius: "12px",
-                      color: "#111827",
-                      background: "linear-gradient(135deg, #f7df7a, #d4af37)",
-                    }}
-                  >
-                    {team.points || 0}
-                  </b>
+                  <div className="public-standing-points">
+                    <strong>{team.points || 0}</strong>
+                    <small>PUAN</small>
+                  </div>
                 </article>
               );
             })}
@@ -563,6 +489,7 @@ export default function PublicTournament({
 
               return (
                 <article
+                  className={`public-scorer-card ${index === 0 ? "is-leader" : ""}`}
                   key={`${playerName}-${teamName}-${index}`}
                   style={{
                     display: "grid",
@@ -665,26 +592,163 @@ export default function PublicTournament({
       </section>
 
       <style>{`
+        .public-standing-cards {
+          display: grid;
+          gap: 12px;
+          padding: 16px;
+        }
+
+        .public-standing-card {
+          display: grid;
+          grid-template-columns: 58px minmax(0, 1fr) 82px;
+          align-items: center;
+          gap: 14px;
+          padding: 16px;
+          border-radius: 18px;
+          border: 1px solid rgba(255,255,255,.09);
+          background: linear-gradient(145deg, rgba(255,255,255,.045), rgba(255,255,255,.018));
+          box-shadow: inset 0 1px rgba(255,255,255,.035);
+        }
+
+        .public-standing-card.is-leader {
+          border-color: rgba(212,175,55,.5);
+          background: linear-gradient(100deg, rgba(212,175,55,.22), rgba(212,175,55,.055));
+        }
+
+        .public-standing-rank {
+          width: 46px;
+          height: 46px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 14px;
+          color: #f7d76d;
+          background: rgba(212,175,55,.1);
+          border: 1px solid rgba(212,175,55,.28);
+          font-size: 20px;
+          font-weight: 1000;
+        }
+
+        .public-standing-card.is-leader .public-standing-rank {
+          color: #111827;
+          background: linear-gradient(135deg, #f7df7a, #d4af37);
+        }
+
+        .public-standing-main { min-width: 0; }
+        .public-standing-main > strong {
+          display: block;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          color: white;
+          font-size: 18px;
+        }
+        .public-standing-card.is-leader .public-standing-main > strong { color: #f7d76d; }
+
+        .public-standing-stats {
+          display: grid;
+          grid-template-columns: repeat(5, minmax(42px, 1fr));
+          gap: 8px;
+          margin-top: 11px;
+        }
+        .public-standing-stats span {
+          display: flex;
+          align-items: baseline;
+          justify-content: center;
+          gap: 5px;
+          padding: 7px 6px;
+          border-radius: 10px;
+          background: rgba(255,255,255,.045);
+        }
+        .public-standing-stats small { color: #94a3b8; font-size: 10px; font-weight: 900; }
+        .public-standing-stats b { color: white; font-size: 14px; }
+        .public-standing-stats .positive b { color: #4ade80; }
+        .public-standing-stats .negative b { color: #f87171; }
+
+        .public-standing-points {
+          min-width: 70px;
+          padding: 10px 8px;
+          text-align: center;
+          border-radius: 14px;
+          color: #111827;
+          background: linear-gradient(135deg, #f7df7a, #d4af37);
+          box-shadow: 0 8px 20px rgba(212,175,55,.17);
+        }
+        .public-standing-points strong { display: block; font-size: 23px; line-height: 1; }
+        .public-standing-points small { display: block; margin-top: 4px; font-size: 9px; font-weight: 1000; letter-spacing: .8px; }
+
         @media (max-width: 760px) {
-          .public-tournament-page article[style*="grid-template-columns"] {
+          .public-tournament-page { gap: 14px !important; }
+
+          .public-match-card {
             grid-template-columns: 1fr !important;
+            min-height: auto !important;
           }
 
-          .public-tournament-page article[style*="grid-template-columns"] > div:first-child {
+          .public-match-card > div:first-child {
             align-items: center;
             text-align: center;
+            padding: 13px 14px !important;
           }
 
-          .public-tournament-page article[style*="grid-template-columns"] > div:nth-child(2) {
-            padding: 20px 14px !important;
+          .public-match-card > div:nth-child(2) {
+            padding: 18px 12px !important;
             grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) !important;
-            gap: 10px !important;
+            gap: 8px !important;
           }
 
-          .public-tournament-page article[style*="grid-template-columns"] > div:last-child {
-            min-height: 52px;
+          .public-match-card > div:nth-child(2) strong {
+            font-size: 14px !important;
+            overflow-wrap: anywhere;
+          }
+
+          .public-match-card > div:nth-child(2) > div {
+            min-width: 58px !important;
+            padding: 9px 8px !important;
+            font-size: 17px !important;
+          }
+
+          .public-match-card > div:last-child {
+            min-height: 48px;
             border-left: none !important;
             border-top: 1px solid rgba(255,255,255,.08);
+          }
+
+          .public-standing-cards { padding: 12px; gap: 10px; }
+          .public-standing-card {
+            grid-template-columns: 48px minmax(0,1fr) 64px;
+            gap: 10px;
+            padding: 13px 12px;
+            border-radius: 16px;
+          }
+          .public-standing-rank { width: 40px; height: 40px; border-radius: 12px; font-size: 17px; }
+          .public-standing-main > strong { font-size: 17px; }
+          .public-standing-stats { grid-template-columns: repeat(5, 1fr); gap: 5px; margin-top: 9px; }
+          .public-standing-stats span { flex-direction: column; gap: 1px; padding: 5px 2px; }
+          .public-standing-stats small { font-size: 9px; }
+          .public-standing-stats b { font-size: 13px; }
+          .public-standing-points { min-width: 58px; padding: 9px 5px; border-radius: 12px; }
+          .public-standing-points strong { font-size: 20px; }
+
+          .public-scorer-card {
+            grid-template-columns: 54px minmax(0, 1fr) 78px !important;
+            gap: 8px !important;
+            min-height: 76px !important;
+            padding: 12px 10px !important;
+          }
+          .public-scorer-card > span {
+            width: 40px !important;
+            height: 40px !important;
+            border-radius: 12px !important;
+            font-size: 18px !important;
+          }
+          .public-scorer-card strong { font-size: 15px !important; }
+          .public-scorer-card small { font-size: 11px !important; }
+          .public-scorer-card > b {
+            min-width: 68px !important;
+            padding: 9px 6px !important;
+            border-radius: 12px !important;
+            font-size: 12px !important;
           }
         }
       `}</style>
