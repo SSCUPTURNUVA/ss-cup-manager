@@ -75,13 +75,14 @@ function startLocalServer() {
 
 async function createWindow() {
   const win = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 1050,
-    minHeight: 700,
+    width: 1600,
+    height: 950,
+    minWidth: 1200,
+    minHeight: 750,
     backgroundColor: "#071a3d",
     autoHideMenuBar: true,
     show: false,
+    center: true,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -89,6 +90,7 @@ async function createWindow() {
   });
 
   win.once("ready-to-show", () => {
+    win.maximize();
     win.show();
     win.focus();
   });

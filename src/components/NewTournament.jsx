@@ -29,7 +29,7 @@ export default function NewTournament({
     }));
   }
 
-  function clearTournamentData() {
+  async function clearTournamentData() {
     setTeams([]);
     setFixtures([]);
 
@@ -76,15 +76,14 @@ export default function NewTournament({
       localStorage.removeItem(key);
     });
 
-    // Supabase tarafındaki maç ve gol kayıtlarını temizle
-    Promise.all([
+    // Supabase tarafındaki tüm turnuva kayıtlarını temizle
+    await Promise.all([
+      supabase.from("teams").delete().not("name", "is", null),
       supabase.from("fixtures").delete().neq("id", 0),
-      supabase.from("goal_scorers").delete().neq("id", ""),
-      supabase.from("match_events").delete().neq("id", ""),
+      supabase.from("goal_scorers").delete().neq("id", 0),
+      supabase.from("match_events").delete().neq("id", 0),
       supabase.from("app_state").delete().eq("id", "knockout"),
-    ]).catch((error) => {
-      console.error("Supabase sıfırlama hatası:", error);
-    });
+    ]);
   }
 
   function notifyApplication() {
@@ -109,15 +108,18 @@ export default function NewTournament({
     );
   }
 
-  function startNewTournament() {
+  async function startNewTournament() {
     const confirmed = window.confirm(
       "Aktif turnuvanın takım, fikstür, skor, golcü ve eleme verileri silinecek. Devam etmek istiyor musunuz?"
     );
 
     if (!confirmed) return;
 
-    clearTournamentData();
+    await clearTournamentData();
+
     notifyApplication();
+
+    setForm(DEFAULT_SETUP);
     setShowSetup(true);
   }
 

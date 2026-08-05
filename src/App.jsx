@@ -257,12 +257,7 @@ export default function App() {
     );
   }, [tournamentFormat]);
 
-  useEffect(() => {
-    localStorage.setItem(
-      "sscup-teams",
-      JSON.stringify(teams)
-    );
-  }, [teams]);
+  
 
   useEffect(() => {
     localStorage.setItem(

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { supabase } from "../supabase";
+
 export default function TeamManager({
   teams,
   setTeams,
@@ -17,69 +18,41 @@ export default function TeamManager({
     );
   }, [teams, drawOrder]);
 
+
   async function clearCompetitionData() {
     try {
       await supabase.from("fixtures").delete().neq("id", 0);
       await supabase.from("goal_scorers").delete().neq("id", 0);
+      await supabase.from("teams").delete().neq("id", 0);
     } catch (error) {
-      console.error("Turnuva temizleme Supabase hatası:", error);
+      console.error(
+        "Turnuva temizleme hatası:",
+        error
+      );
     }
 
+    setTeams([]);
     setFixtures([]);
     setDrawOrder([]);
 
-    localStorage.setItem(
-      "sscup-fixtures",
-      JSON.stringify([])
-    );
+    localStorage.removeItem("sscup-teams");
+    localStorage.removeItem("sscup-fixtures");
+    localStorage.removeItem("sscup-draw-order");
+    localStorage.removeItem("sscup-scores");
+    localStorage.removeItem("sscup-goals");
 
-    localStorage.setItem(
-      "sscup-draw-order",
-      JSON.stringify([])
-    );
-
-    localStorage.setItem(
-      "sscup-scores",
-      JSON.stringify({})
-    );
-
-    localStorage.setItem(
-      "sscup-match-goals",
-      JSON.stringify({})
-    );
-
-    localStorage.setItem(
-      "sscup-goals",
-      JSON.stringify([])
-    );
-
-    /*
-      Eleme turu bileşeninde kullanılan kayıt
-      isimleri farklı olabileceği için muhtemel
-      kayıtlar da temizlenir.
-    */
-    localStorage.removeItem("sscup-knockout");
-    localStorage.removeItem("sscup-knockout-data");
-    localStorage.removeItem("sscup-quarterfinals");
-    localStorage.removeItem("sscup-semifinals");
-    localStorage.removeItem("sscup-final");
-    localStorage.removeItem("sscup-champion");
-
-    window.dispatchEvent(
-      new CustomEvent("sscup-goals-updated", {
-        detail: [],
-      })
-    );
   }
+
 
   async function addTeam() {
 
     if (drawCompleted) {
       alert(
-        "Fanus kurası tamamlandığı için takım listesi değiştirilemez."
+        "Kura tamamlandıktan sonra takım eklenemez."
       );
       return;
     }
+
 
     const name = teamName.trim();
 
@@ -88,210 +61,176 @@ export default function TeamManager({
       return;
     }
 
-    const duplicateTeam = teams.some(
-      (team) =>
+
+    const duplicate = teams.some(
+      (team)=>
         team.toLocaleLowerCase("tr-TR") ===
         name.toLocaleLowerCase("tr-TR")
     );
 
-    if (duplicateTeam) {
-      alert("Bu takım zaten eklendi.");
+
+    if (duplicate) {
+      alert("Bu takım zaten var.");
       return;
     }
 
+
     if (teams.length >= 30) {
-      alert("En fazla 30 takım eklenebilir.");
+      alert("En fazla 30 takım olabilir.");
       return;
     }
+
 
     const { error } = await supabase
       .from("teams")
       .insert([
         {
-          name: name,
-        },
+          name:name
+        }
       ]);
 
-    if (error) {
+
+    if(error){
       console.error(
-        "Supabase takım ekleme hatası:",
+        "Takım ekleme hatası:",
         error
       );
-
-      setTeams([...teams, name]);
-      localStorage.setItem(
-        "sscup-teams",
-        JSON.stringify([...teams, name])
-      );
-      setTeamName("");
+      alert("Takım eklenemedi.");
       return;
     }
 
-    setTeams([...teams, name]);
-    localStorage.setItem(
-      "sscup-teams",
-      JSON.stringify([...teams, name])
-    );
+
+    setTeams([
+      ...teams,
+      name
+    ]);
+
     setTeamName("");
+  }
+
+
+
+  async function deleteTeam(index){
+
+    const team = teams[index];
+
+    if(!team) return;
+
+
+    const ok = window.confirm(
+      `${team} silinsin mi?`
+    );
+
+
+    if(!ok) return;
+
+
+    await supabase
+      .from("teams")
+      .delete()
+      .eq("name",team);
+
+
+    setTeams(
+      teams.filter(
+        (_,i)=>i!==index
+      )
+    );
+
+
+    setFixtures([]);
+    setDrawOrder([]);
+
+    localStorage.removeItem(
+      "sscup-fixtures"
+    );
+
+    localStorage.removeItem(
+      "sscup-draw-order"
+    );
 
   }
 
-  function deleteTeam(index) {
-    if (drawCompleted) {
-      alert(
-        "Fanus kurası tamamlandığı için takım silinemez."
-      );
-      return;
-    }
 
-    const teamToDelete = teams[index];
-
-    if (!teamToDelete) {
-      return;
-    }
-
-    const isLastTeam = teams.length === 1;
-
-    const message = isLastTeam
-      ? `"${teamToDelete}" son takım.\n\nBu takım silinirse fikstür, kura sırası, skorlar, gol krallığı ve turnuva verileri temizlenecek.\n\nDevam edilsin mi?`
-      : `"${teamToDelete}" takımı silinsin mi?\n\nTakım silindiğinde mevcut kura, fikstür, skor ve golcü kayıtları sıfırlanacaktır.`;
-
-    const confirmed = window.confirm(message);
-
-    if (!confirmed) {
-      return;
-    }
-
-    const updatedTeams = teams.filter(
-      (_, teamIndex) => teamIndex !== index
-    );
-
-    /*
-      Silinen takımın kadrosunu da temizler.
-      Diğer takımların kadroları korunur.
-    */
-    try {
-      const savedSquads =
-        localStorage.getItem("sscup-squads");
-
-      const squads = savedSquads
-        ? JSON.parse(savedSquads)
-        : {};
-
-      if (isLastTeam) {
-        localStorage.setItem(
-          "sscup-squads",
-          JSON.stringify({})
-        );
-      } else {
-        delete squads[teamToDelete];
-
-        localStorage.setItem(
-          "sscup-squads",
-          JSON.stringify(squads)
-        );
-      }
-    } catch {
-      localStorage.setItem(
-        "sscup-squads",
-        JSON.stringify({})
-      );
-    }
-
-    setTeams(updatedTeams);
-    clearCompetitionData();
-
-    setTeamName("");
-
-    if (isLastTeam) {
-      alert(
-        "Turnuvadaki bütün takımlar ve turnuva verileri temizlendi."
-      );
-    } else {
-      alert(
-        `${teamToDelete} silindi. Takım listesi değiştiği için eski kura ve fikstür temizlendi.`
-      );
-    }
-  }
-
-  function handleKeyDown(event) {
-    if (event.key === "Enter") {
+  function handleKeyDown(e){
+    if(e.key==="Enter"){
       addTeam();
     }
   }
 
+
+
   return (
     <div className="card">
-      <h2>👥 Takımlar ({teams.length}/30)</h2>
 
-      {drawCompleted && (
-        <div
-          style={{
-            padding: "14px",
-            marginBottom: "16px",
-            border: "2px solid #d6a800",
-            borderRadius: "10px",
-            backgroundColor: "rgba(214, 168, 0, 0.1)",
-          }}
-        >
-          <b>🔒 Takım listesi kilitlendi</b>
+      <h2>
+        👥 Takımlar ({teams.length}/30)
+      </h2>
 
-          <p style={{ marginBottom: 0 }}>
-            Fanus kurası tamamlandığı için artık
-            takım eklenemez veya silinemez.
-          </p>
-        </div>
-      )}
 
       <div className="addRow">
+
         <input
-          type="text"
-          placeholder={
-            drawCompleted
-              ? "Kura tamamlandı — takım listesi kilitli"
-              : "Takım adı"
-          }
+          placeholder="Takım adı"
           value={teamName}
           disabled={drawCompleted}
-          onChange={(event) =>
-            setTeamName(event.target.value)
+          onChange={
+            e=>setTeamName(e.target.value)
           }
           onKeyDown={handleKeyDown}
         />
 
+
         <button
-          type="button"
           onClick={addTeam}
           disabled={drawCompleted}
         >
-          {drawCompleted
-            ? "🔒 Kilitli"
-            : "Takım Ekle"}
+          Takım Ekle
         </button>
+
       </div>
 
-      {teams.length === 0 ? (
-        <p>Henüz takım eklenmedi.</p>
-      ) : (
-        <ul className="teamList">
-          {teams.map((team, index) => (
-            <li key={team}>
-              <span>
-                <b>{index + 1}.</b> {team}
-              </span>
 
-              <button
-                type="button"
-                className="deleteBtn"
-                disabled={drawCompleted}
-                onClick={() => deleteTeam(index)}
-              >
-                {drawCompleted ? "🔒" : "Sil"}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+      {
+        teams.length===0 ? (
+          <p>
+            Henüz takım yok.
+          </p>
+        )
+        :
+        (
+          <ul className="teamList">
+
+          {
+            teams.map(
+              (team,index)=>(
+                <li key={team}>
+
+                  <span>
+                    <b>{index+1}.</b> {team}
+                  </span>
+
+
+                  <button
+                    className="deleteBtn"
+                    disabled={drawCompleted}
+                    onClick={()=>
+                      deleteTeam(index)
+                    }
+                  >
+                    Sil
+                  </button>
+
+                </li>
+              )
+            )
+          }
+
+          </ul>
+        )
+      }
+
+
     </div>
   );
 }
