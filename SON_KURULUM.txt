@@ -1,0 +1,21 @@
+S&S CUP MANAGER - SON KURULUM
+
+1) SUPABASE (SADECE BİR KEZ)
+- Supabase Dashboard > SQL Editor bölümünü açın.
+- supabase-app-state.sql dosyasının tamamını yapıştırıp RUN düğmesine basın.
+- Bu işlem eleme turlarını PC ve telefon arasında ortak hale getirir.
+
+2) TELEFONDAN KULLANIM
+- Projeyi internette yayınladığınız mevcut adres telefonda açılır.
+- PC ve telefon aynı Supabase projesini kullandığı için eleme sonuçları eşit görünür.
+- Yerel ağ testi için: npm run dev -- --host 0.0.0.0
+  Sonra telefonda PC'nin IP adresi ve 5173 portu ile açın.
+
+3) WINDOWS EXE
+- İlk kez: npm install
+- Kurulum dosyası üretmek için: npm run dist:win
+- Çıktı release klasöründe oluşur.
+
+4) NORMAL WEB DERLEMESİ
+- npm run build
+- dist klasörü yayınlanabilir son web sürümüdür.

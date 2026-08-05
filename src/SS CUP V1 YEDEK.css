@@ -1,0 +1,254 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+body {
+  background: #0f172a;
+  color: white;
+}
+
+.container {
+  max-width: 900px;
+  margin: 40px auto;
+  padding: 20px;
+}
+
+h1 {
+  text-align: center;
+  margin-bottom: 30px;
+  color: #38bdf8;
+}
+
+.card {
+  background: #1e293b;
+  border-radius: 15px;
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 10px 25px rgba(0,0,0,.35);
+}
+
+h2 {
+  margin-bottom: 15px;
+}
+
+.addRow {
+  display: flex;
+  gap: 10px;
+}
+
+.addRow input {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  border-radius: 10px;
+  font-size: 16px;
+}
+
+.addRow button {
+  padding: 12px 22px;
+  border: none;
+  border-radius: 10px;
+  background: #0ea5e9;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+  transition: .2s;
+}
+
+.addRow button:hover {
+  transform: scale(1.05);
+}
+
+.teamList {
+  list-style: none;
+}
+
+.teamList li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #334155;
+  padding: 12px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+}
+
+.deleteBtn {
+  background: crimson;
+  color: white;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.deleteBtn:hover {
+  opacity: .85;
+}
+
+@media (max-width:600px){
+
+.addRow{
+flex-direction:column;
+}
+
+.addRow button{
+width:100%;
+}
+
+}
+/* ===== S&S CUP PUAN DURUMU ===== */
+
+.standings {
+  margin-top: 35px;
+  padding: 25px;
+  background: white;
+  border-radius: 15px;
+}
+
+
+.standings h2 {
+  text-align: center;
+  margin-bottom: 25px;
+  font-size: 28px;
+}
+
+
+.standings table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0 10px;
+}
+
+
+.standings thead th {
+  background: #1e293b;
+  color: white;
+  padding: 15px;
+  font-size: 14px;
+}
+
+
+.standings tbody tr {
+  background: #f8fafc;
+  transition: 0.2s;
+}
+
+
+.standings tbody tr:hover {
+  transform: scale(1.02);
+}
+
+
+.standings tbody td {
+  padding: 15px;
+  text-align: center;
+  font-size: 15px;
+}
+
+
+.standings tbody td:first-child {
+  border-radius: 12px 0 0 12px;
+}
+
+
+.standings tbody td:last-child {
+  border-radius: 0 12px 12px 0;
+}
+
+
+.standings .teamName {
+  text-align: left;
+  font-weight: bold;
+  min-width: 200px;
+}
+
+
+.standings .points {
+  font-size: 20px;
+  font-weight: bold;
+}
+.standings .teamName {
+  color: #111827;
+  text-align: left;
+  font-weight: 700;
+  min-width: 200px;
+}
+.standings tbody td {
+  color: #111827;
+  padding: 15px;
+  text-align: center;
+  font-size: 15px;
+}
+/* ===== S&S CUP FİKSTÜR TASARIM ===== */
+
+.card h2 {
+  margin-bottom: 25px;
+}
+
+
+.teamList {
+  list-style: none;
+  padding: 0;
+}
+
+
+.teamList li {
+  background: #f8fafc;
+  margin-bottom: 15px;
+  padding: 20px;
+  border-radius: 15px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+}
+
+
+.teamList strong {
+  display: block;
+  font-size: 18px;
+  color: #111827;
+  margin-bottom: 15px;
+}
+
+
+.teamList input {
+  width: 60px;
+  height: 40px;
+  text-align: center;
+  font-size: 18px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+}
+
+
+.teamList button {
+  background: #2563eb;
+  color: white;
+  border: none;
+  padding: 10px 18px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+
+.teamList button:hover {
+  background: #1d4ed8;
+}
+/* FİKSTÜR TAKIM İSİMLERİ */
+
+.teamList strong {
+  color: #111827;
+  font-weight: 700;
+}
+
+.teamList li {
+  color: #111827;
+}
+
+.teamList input {
+  color: #111827;
+  background: white;
+}
