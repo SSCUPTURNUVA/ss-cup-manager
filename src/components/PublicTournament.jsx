@@ -460,15 +460,25 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const playedCount = displayFixtures.filter((match) => match?.played === true).length;
   const tournamentName = settings.tournamentName || settings.title || "S&S CUP";
 
-  // Final tamamlandığında takip ekranının tepesinde şampiyonu otomatik göster.
-  // Canlı maç / senkron mantığına dokunmaz; yalnızca tamamlanmış final verisini okur.
-  const finalMatch = knockoutMatches.find((match) => match.knockoutKey === "final-0");
-  const championName = finalMatch?.played === true
-    ? koWinner(finalMatch, finalMatch.home, finalMatch.away)
+  // Final tamamlandığında şampiyonu doğrudan final skorundan/penaltısından bul.
+  // Böylece app_state içinde ayrıca winner/champion alanı tutulmasına ihtiyaç kalmaz.
+  const finalMatch = knockoutMatches.find((match) => match?.knockoutKey === "final-0");
+  const finalCompleted = Boolean(
+    finalMatch && (
+      finalMatch.played === true ||
+      finalMatch.match_phase === "completed" ||
+      finalMatch.matchPhase === "completed" ||
+      finalMatch.status === "completed"
+    )
+  );
+  const championName = finalCompleted
+    ? koWinner(finalMatch, finalMatch?.home, finalMatch?.away)
     : "";
-  const finalWentToPenalties = finalMatch?.played === true
-    && safeNumber(finalMatch.homeScore) === safeNumber(finalMatch.awayScore)
-    && (safeNumber(finalMatch.homePenalties ?? finalMatch.homePen) !== safeNumber(finalMatch.awayPenalties ?? finalMatch.awayPen));
+  const championPenaltyText = finalMatch &&
+    safeNumber(finalMatch.homeScore) === safeNumber(finalMatch.awayScore) &&
+    (finalMatch.homePenalties != null || finalMatch.awayPenalties != null || finalMatch.homePen != null || finalMatch.awayPen != null)
+      ? `PEN ${safeNumber(finalMatch.homePenalties ?? finalMatch.homePen)} - ${safeNumber(finalMatch.awayPenalties ?? finalMatch.awayPen)}`
+      : "";
 
   return (
     <div className="public-live-page">
@@ -484,17 +494,22 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
       <main className="public-live-shell">
         {championName && (
-          <section className="public-champion-banner">
-            <div className="public-champion-crown">🏆</div>
-            <div className="public-champion-copy">
-              <span>S&S CUP ŞAMPİYONU</span>
+          <section className="public-champion-card">
+            <div className="public-champion-glow glow-left" />
+            <div className="public-champion-glow glow-right" />
+            <div className="public-champion-trophy trophy-left">🏆</div>
+            <div className="public-champion-trophy trophy-right">🏆</div>
+            <div className="public-champion-content">
+              <span className="public-champion-kicker">🏆 S&S CUP ŞAMPİYONU 🏆</span>
               <h2>{championName}</h2>
               <strong>{settings.season || "2026"} ŞAMPİYONU</strong>
-            </div>
-            <div className="public-champion-final">
-              <small>FİNAL</small>
-              <div><b>{finalMatch.home}</b><strong>{scoreText(finalMatch.homeScore)} - {scoreText(finalMatch.awayScore)}</strong><b>{finalMatch.away}</b></div>
-              {finalWentToPenalties && <em>PEN {safeNumber(finalMatch.homePenalties ?? finalMatch.homePen)} - {safeNumber(finalMatch.awayPenalties ?? finalMatch.awayPen)}</em>}
+              <div className="public-champion-final">
+                <span>FİNAL</span>
+                <b>{finalMatch.home}</b>
+                <strong>{scoreText(finalMatch.homeScore)} - {scoreText(finalMatch.awayScore)}</strong>
+                <b className="champion-winner-side">{finalMatch.away}</b>
+                {championPenaltyText && <em>{championPenaltyText}</em>}
+              </div>
             </div>
           </section>
         )}
