@@ -249,8 +249,8 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes }) {
 
 export default function PublicTournament({ teams = [], fixtures = [], standings = [], goalScorers = [], settings = {} }) {
   const [activeTab, setActiveTab] = useState("overview");
-  const [remoteFixtures, setRemoteFixtures] = useState([]);
-  const [remoteTeams, setRemoteTeams] = useState([]);
+  const [remoteFixtures, setRemoteFixtures] = useState(null);
+  const [remoteTeams, setRemoteTeams] = useState(null);
   const [remoteKnockout, setRemoteKnockout] = useState([]);
   const [now, setNow] = useState(Date.now());
   const [lastSync, setLastSync] = useState(null);
@@ -370,8 +370,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     return () => window.removeEventListener("keydown", handler);
   }, [selectedMatch]);
 
-  const displayTeams = remoteTeams.length > 0 ? remoteTeams : teams;
-  const leagueFixtures = remoteFixtures.length > 0 ? remoteFixtures : fixtures;
+  const displayTeams = Array.isArray(remoteTeams) ? remoteTeams : teams;
+  const leagueFixtures = Array.isArray(remoteFixtures) ? remoteFixtures : fixtures;
   const localKnockout = (fixtures || []).filter((match) => match?.isKnockout === true);
   const rawKnockoutMatches = remoteKnockout.length > 0 ? remoteKnockout : localKnockout;
 
