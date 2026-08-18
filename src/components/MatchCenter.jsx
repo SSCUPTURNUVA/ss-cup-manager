@@ -868,16 +868,16 @@ export default function MatchCenter({
     }
   }
 
-  // GÜNCELLENEN MAÇ BİTİRME MANTIĞI: Berabere ise otomatik Penaltılara yönlendirir
+  // LİG: beraberlik normal sonuçtur. ELEME: beraberlikte penaltı gerekir.
   async function handleFinishMatch() {
     if (!liveMatch) return;
 
     const isDraw = safeNumber(liveMatch.homeScore) === safeNumber(liveMatch.awayScore);
 
-    // Eğer normal süre berabere bitti ve henüz penaltılara geçilmediyse yönlendir
-    if (isDraw && matchPhase !== "penalty") {
-      alert(`Maç berabere bitti (${liveMatch.homeScore} - ${liveMatch.awayScore})!\n\nEşitlik olduğu için Seri Penaltı Atışlarına geçiliyor...`);
-      updateLiveMatch({
+    // Penaltı yalnızca eleme maçlarında devreye girer.
+    if (liveMatch.isKnockout === true && isDraw && matchPhase !== "penalty") {
+      alert(`Eleme maçı berabere bitti (${liveMatch.homeScore} - ${liveMatch.awayScore})!\n\nKazananı belirlemek için seri penaltı atışlarına geçiliyor...`);
+      await updateLiveMatch({
         matchPhase: "penalty",
         timerRunning: false,
         timerStartedAt: null,
@@ -885,7 +885,7 @@ export default function MatchCenter({
       return;
     }
 
-    if (matchPhase === "penalty" && safeNumber(liveMatch.homePen) === safeNumber(liveMatch.awayPen)) {
+    if (liveMatch.isKnockout === true && matchPhase === "penalty" && safeNumber(liveMatch.homePen) === safeNumber(liveMatch.awayPen)) {
       alert("Penaltı serisi henüz eşit. Kazanan belli olmadan maç bitirilemez.");
       return;
     }
@@ -1091,7 +1091,7 @@ export default function MatchCenter({
                 </button>
               )}
 
-              {matchPhase === "second_half" && isScoreDrawn && (
+              {matchPhase === "second_half" && liveMatch.isKnockout === true && isScoreDrawn && (
                 <button
                   type="button"
                   className="primary-button"

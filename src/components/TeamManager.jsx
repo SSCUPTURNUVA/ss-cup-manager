@@ -248,7 +248,7 @@ export default function TeamManager({
     cancelEditTeam();
   }
 
-  function deleteTeam(index) {
+  async function deleteTeam(index) {
     if (drawCompleted) {
       alert(
         "Fanus kurası tamamlandığı için takım silinemez."
@@ -311,7 +311,23 @@ export default function TeamManager({
     }
 
     setTeams(updatedTeams);
-    clearCompetitionData();
+    localStorage.setItem("sscup-teams", JSON.stringify(updatedTeams));
+
+    try {
+      const { error: deleteError } = await supabase
+        .from("teams")
+        .delete()
+        .eq("name", teamToDelete);
+
+      if (deleteError) {
+        console.error("Supabase takım silme hatası:", deleteError);
+        alert("Takım PC'den silindi ancak canlı takip verisinden silinemedi. Takip Sayfasıyla Eşitle butonuna basın.");
+      }
+    } catch (error) {
+      console.error("Supabase takım silme hatası:", error);
+    }
+
+    await clearCompetitionData();
 
     setTeamName("");
 
@@ -323,6 +339,37 @@ export default function TeamManager({
       alert(
         `${teamToDelete} silindi. Takım listesi değiştiği için eski kura ve fikstür temizlendi.`
       );
+    }
+  }
+
+  async function syncTeamsToCloud() {
+    const confirmed = window.confirm(
+      `PC'deki ${teams.length} takım canlı takip sayfasına aynen aktarılsın mı?\n\nBuluttaki eski takım listesi bununla değiştirilecek.`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      const { error: clearError } = await supabase
+        .from("teams")
+        .delete()
+        .neq("id", 0);
+
+      if (clearError) throw clearError;
+
+      if (teams.length > 0) {
+        const { error: insertError } = await supabase
+          .from("teams")
+          .insert(teams.map((name) => ({ name })));
+
+        if (insertError) throw insertError;
+      }
+
+      localStorage.setItem("sscup-teams", JSON.stringify(teams));
+      alert(`✅ Canlı takip takım listesi eşitlendi. Şu an ${teams.length} takım var.`);
+    } catch (error) {
+      console.error("Takım eşitleme hatası:", error);
+      alert("Takım listesi canlı takiple eşitlenemedi. İnternet/Supabase bağlantısını kontrol edin.");
     }
   }
 
@@ -341,9 +388,19 @@ export default function TeamManager({
           <p>Takımları ekleyin, isimlerini düzenleyin veya kura öncesinde silin.</p>
         </div>
 
-        <div className="team-manager-count">
-          <strong>{teams.length}</strong>
-          <span>/ 30 TAKIM</span>
+        <div className="team-manager-actions">
+          <button
+            type="button"
+            className="team-sync-button"
+            onClick={syncTeamsToCloud}
+            title="PC'deki takım listesini canlı takip sayfasıyla eşitle"
+          >
+            ☁️ Takip Sayfasıyla Eşitle
+          </button>
+          <div className="team-manager-count">
+            <strong>{teams.length}</strong>
+            <span>/ 30 TAKIM</span>
+          </div>
         </div>
       </div>
 

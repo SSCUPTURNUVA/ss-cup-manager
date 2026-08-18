@@ -38,7 +38,7 @@ const menuItems = [
   { id: "teamcontacts", icon: "📲", label: "Takım Bilgileri" },
   { id: "draw", icon: "🎲", label: "Lig Kurası" },
   { id: "fixture", icon: "📅", label: "Lig Fikstürü" },
-  { id: "dailyschedule", icon: "📋", label: "Günlük Program (WhatsApp)" },
+  { id: "dailyschedule", icon: "🖼️", label: "Gecenin Maçları Görseli" },
   { id: "group-fixture", icon: "🗓️", label: "Grup Fikstürü" },
   { id: "group-standings", icon: "📊", label: "Grup Puan Durumu" },
   { id: "matchcenter", icon: "📺", label: "Maç Merkezi" },
