@@ -29,62 +29,40 @@ export default function NewTournament({
     }));
   }
 
-  function clearTournamentData() {
-    setTeams([]);
-    setFixtures([]);
-
-    if (typeof setDrawOrder === "function") {
-      setDrawOrder([]);
-    }
-
-    if (typeof setGoalScorers === "function") {
-      setGoalScorers([]);
-    }
-
-    const keysToRemove = [
-      "sscup-teams",
-      "sscup-fixtures",
-      "sscup-draw-order",
-      "sscup-scores",
-      "sscup-goals",
-      "sscup-goal-scorers",
-      "sscup-match-goals",
-      "sscup-squads",
-      "sscup-knockout",
-      "sscup-knockout-data",
-      "sscup-quarterfinals",
-      "sscup-semifinals",
-      "sscup-champion",
-      "sscup-groups",
-      "sscup-group-count",
-      "sscup-group-fixtures",
-      "sscup-group-standings",
-      "sscup-group-qualified",
-      "sscup-quarter",
-      "sscup-semi",
-      "sscup-final",
-      "sscup-third-place",
-      "sscup-quarter-pot-one",
-      "sscup-quarter-pot-two",
-      "sscup-quarter-draw-started",
-      "sscup-match-events",
-      "sscup-active-match",
-      "sscup-live-match",
+  async function clearTournamentData() {
+    // Telefon takip sayfası Supabase'i okur. Bu nedenle önce bulutu,
+    // sonra PC'deki yerel veriyi temizliyoruz.
+    const cloudSteps = [
+      ["gol krallığı", () => supabase.from("goal_scorers").delete().neq("id", 0)],
+      ["fikstür", () => supabase.from("fixtures").delete().neq("id", 0)],
+      ["eleme durumu", () => supabase.from("app_state").delete().eq("id", "knockout")],
+      ["takımlar", () => supabase.from("teams").delete().neq("id", 0)],
     ];
 
-    keysToRemove.forEach((key) => {
-      localStorage.removeItem(key);
-    });
+    for (const [label, run] of cloudSteps) {
+      const { error } = await run();
+      if (error) {
+        console.error(`Supabase ${label} temizleme hatası:`, error);
+        throw new Error(`${label}: ${error.message || "bilinmeyen hata"}`);
+      }
+    }
 
-    // Supabase tarafındaki maç ve gol kayıtlarını temizle
-    Promise.all([
-      supabase.from("fixtures").delete().neq("id", 0),
-      supabase.from("goal_scorers").delete().neq("id", ""),
-      supabase.from("match_events").delete().neq("id", ""),
-      supabase.from("app_state").delete().eq("id", "knockout"),
-    ]).catch((error) => {
-      console.error("Supabase sıfırlama hatası:", error);
-    });
+    setTeams([]);
+    setFixtures([]);
+    if (typeof setDrawOrder === "function") setDrawOrder([]);
+    if (typeof setGoalScorers === "function") setGoalScorers([]);
+
+    const keysToRemove = [
+      "sscup-teams","sscup-fixtures","sscup-draw-order","sscup-scores",
+      "sscup-goals","sscup-goal-scorers","sscup-match-goals","sscup-squads",
+      "sscup-knockout","sscup-knockout-data","sscup-quarterfinals",
+      "sscup-semifinals","sscup-champion","sscup-groups","sscup-group-count",
+      "sscup-group-fixtures","sscup-group-standings","sscup-group-qualified",
+      "sscup-quarter","sscup-semi","sscup-final","sscup-third-place",
+      "sscup-quarter-pot-one","sscup-quarter-pot-two","sscup-quarter-draw-started",
+      "sscup-match-events","sscup-active-match","sscup-live-match"
+    ];
+    keysToRemove.forEach((key) => localStorage.removeItem(key));
   }
 
   function notifyApplication() {
@@ -109,16 +87,25 @@ export default function NewTournament({
     );
   }
 
-  function startNewTournament() {
+  async function startNewTournament() {
     const confirmed = window.confirm(
-      "Aktif turnuvanın takım, fikstür, skor, golcü ve eleme verileri silinecek. Devam etmek istiyor musunuz?"
+      "Aktif turnuvanın takım, fikstür, skor, golcü ve eleme verileri PC ve telefondan silinecek. Devam etmek istiyor musunuz?"
     );
 
     if (!confirmed) return;
 
-    clearTournamentData();
-    notifyApplication();
-    setShowSetup(true);
+    try {
+      await clearTournamentData();
+      notifyApplication();
+      setShowSetup(true);
+      alert("Turnuva PC ve canlı takip tarafında sıfırlandı.");
+    } catch (error) {
+      alert(
+        "Sıfırlama tamamlanamadı. Hata: " +
+        (error?.message || "Bilinmeyen hata") +
+        "\n\nPC verileri korunmuştur."
+      );
+    }
   }
 
   function createTournament(event) {

@@ -250,6 +250,7 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes }) {
 export default function PublicTournament({ teams = [], fixtures = [], standings = [], goalScorers = [], settings = {} }) {
   const [activeTab, setActiveTab] = useState("overview");
   const [remoteFixtures, setRemoteFixtures] = useState([]);
+  const [remoteTeams, setRemoteTeams] = useState([]);
   const [remoteKnockout, setRemoteKnockout] = useState([]);
   const [now, setNow] = useState(Date.now());
   const [lastSync, setLastSync] = useState(null);
@@ -260,8 +261,9 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current;
 
-    const [fixturesResult, knockoutResult] = await Promise.allSettled([
+    const [fixturesResult, teamsResult, knockoutResult] = await Promise.allSettled([
       supabase.from("fixtures").select("*").order("id"),
+      supabase.from("teams").select("name").order("id"),
       supabase.from("app_state").select("value,updated_at").eq("id", "knockout").maybeSingle(),
     ]);
 
@@ -276,6 +278,13 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       if (!error && Array.isArray(data)) {
         mappedFixtures = data.map(mapCloudFixture);
         setRemoteFixtures(mappedFixtures);
+      }
+    }
+
+    if (teamsResult.status === "fulfilled") {
+      const { data: teamRows, error: teamsError } = teamsResult.value;
+      if (!teamsError && Array.isArray(teamRows)) {
+        setRemoteTeams(teamRows.map((row) => row?.name).filter(Boolean));
       }
     }
 
@@ -336,6 +345,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     const channel = supabase
       .channel(`sscup-public-live-${Math.random().toString(36).slice(2)}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "fixtures" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "teams" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout" }, refresh)
       .subscribe();
 
@@ -360,6 +370,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     return () => window.removeEventListener("keydown", handler);
   }, [selectedMatch]);
 
+  const displayTeams = remoteTeams.length > 0 ? remoteTeams : teams;
   const leagueFixtures = remoteFixtures.length > 0 ? remoteFixtures : fixtures;
   const localKnockout = (fixtures || []).filter((match) => match?.isKnockout === true);
   const rawKnockoutMatches = remoteKnockout.length > 0 ? remoteKnockout : localKnockout;
@@ -443,9 +454,9 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   }, [displayFixtures, liveMatch?.date, upcoming, recent]);
 
   const liveStandings = useMemo(() => {
-    const calculated = calculateStandings(teams, displayFixtures);
+    const calculated = calculateStandings(displayTeams, displayFixtures);
     return calculated.length > 0 ? calculated : standings;
-  }, [teams, displayFixtures, standings]);
+  }, [displayTeams, displayFixtures, standings]);
 
   const liveScorers = useMemo(() => {
     const calculated = deriveScorers(displayFixtures);
@@ -528,7 +539,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         )}
 
         <section className="public-stat-grid public-stat-grid-top">
-          <article><span>👥</span><div><strong>{teams.length}</strong><b>TAKIM</b><small>Mücadele ediyor</small></div></article>
+          <article><span>👥</span><div><strong>{displayTeams.length}</strong><b>TAKIM</b><small>Mücadele ediyor</small></div></article>
           <article><span>⚽</span><div><strong>{playedCount}</strong><b>OYNANAN MAÇ</b><small>Toplam</small></div></article>
           <article><span>🕘</span><div><strong>{upcoming.length}</strong><b>BEKLEYEN MAÇ</b><small>Yaklaşan</small></div></article>
           <article><span>👑</span><div><strong>{topScorer?.goals || 0}</strong><b>LİDER GOL</b><small>{topScorer?.playerName || topScorer?.name || "Gol Kralı"}</small></div></article>
