@@ -258,6 +258,17 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
   const refreshSequence = useRef(0);
 
+  const refreshTeams = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("teams")
+      .select("id,name")
+      .order("id");
+
+    if (!error && Array.isArray(data)) {
+      setRemoteTeams(data.map((row) => row?.name).filter(Boolean));
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current;
 
@@ -332,8 +343,23 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   }, []);
 
   useEffect(() => {
+    refreshTeams();
+    const teamPoll = window.setInterval(refreshTeams, 1500);
+
+    const teamChannel = supabase
+      .channel(`sscup-public-teams-${Math.random().toString(36).slice(2)}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "teams" }, refreshTeams)
+      .subscribe();
+
+    return () => {
+      window.clearInterval(teamPoll);
+      supabase.removeChannel(teamChannel);
+    };
+  }, [refreshTeams]);
+
+  useEffect(() => {
     refresh();
-    const poll = window.setInterval(refresh, 1000);
+    const poll = window.setInterval(refresh, 3000);
 
     const onVisible = () => {
       if (document.visibilityState === "visible") refresh();
@@ -349,7 +375,6 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     const channel = supabase
       .channel(`sscup-public-live-${Math.random().toString(36).slice(2)}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "fixtures" }, refresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "teams" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout" }, refresh)
       .subscribe();
 
