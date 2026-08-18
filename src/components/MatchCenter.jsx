@@ -313,6 +313,45 @@ export default function MatchCenter({
     ? getTeamSquad(selectedTeamName)
     : [];
 
+  function playerKey(player, index) {
+    return String(player?.id || player?.playerId || index);
+  }
+
+  function getTeamSubstitutionState(side) {
+    const teamName = side === "home" ? liveMatch?.home : liveMatch?.away;
+    const squad = liveMatch ? getTeamSquad(teamName) : [];
+    const events = (Array.isArray(liveMatch?.events) ? liveMatch.events : [])
+      .filter((event) =>
+        event?.type === "substitution" &&
+        (event?.side === side || String(event?.team || event?.teamName || "") === String(teamName || ""))
+      );
+
+    const active = new Set(squad.slice(0, 7).map((player, index) => playerKey(player, index)));
+    const lockedOut = new Set();
+
+    events.forEach((event) => {
+      const outId = String(event?.playerOutId || event?.playerId || "");
+      const inId = String(event?.playerInId || event?.secondPlayerId || "");
+      if (outId) {
+        active.delete(outId);
+        lockedOut.add(outId);
+      }
+      if (inId) active.add(inId);
+    });
+
+    return {
+      squad,
+      active,
+      lockedOut,
+      starters: squad.filter((player, index) => active.has(playerKey(player, index))),
+      bench: squad.filter((player, index) => !active.has(playerKey(player, index))),
+    };
+  }
+
+  const selectedSubstitutionState = liveMatch
+    ? getTeamSubstitutionState(eventSide)
+    : { squad: [], active: new Set(), lockedOut: new Set(), starters: [], bench: [] };
+
   useEffect(() => {
     if (!liveMatch || liveMatch.timerRunning !== true) return;
     if (phaseLimitSeconds <= 0 || elapsedSeconds < phaseLimitSeconds) return;
@@ -571,6 +610,24 @@ export default function MatchCenter({
     ) {
       alert("İkinci oyuncu farklı ve geçerli olmalıdır.");
       return;
+    }
+
+    if (eventType === "substitution") {
+      const outId = String(selectedPlayerId);
+      const inId = String(secondPlayerId);
+
+      if (!selectedSubstitutionState.active.has(outId)) {
+        alert("Oyundan çıkacak oyuncu şu anda as kadroda değil.");
+        return;
+      }
+      if (selectedSubstitutionState.active.has(inId)) {
+        alert("Oyuna girecek oyuncu zaten as kadroda.");
+        return;
+      }
+      if (selectedSubstitutionState.lockedOut.has(inId)) {
+        alert("Bu oyuncu daha önce oyundan çıktı. Tekrar oyuna giremez.");
+        return;
+      }
     }
 
     const minute = Math.max(
@@ -997,7 +1054,6 @@ export default function MatchCenter({
           timer_running: false,
           timer_started_at: null,
           elapsed_seconds: finishedMatch.elapsedSeconds ?? 0,
-          match_phase: "completed",
           events: Array.isArray(finishedMatch.events) ? finishedMatch.events : [],
         })
         .eq("id", safeId);
@@ -1432,9 +1488,12 @@ export default function MatchCenter({
                     : "Oyuncuyu seç"}
                 </option>
 
-                {selectedSquad.map((player, index) => {
-                  const playerId =
-                    player.id || player.playerId || index;
+                {(eventType === "substitution"
+                  ? selectedSubstitutionState.starters
+                  : selectedSubstitutionState.starters
+                ).map((player, index) => {
+                  const originalIndex = selectedSquad.indexOf(player);
+                  const playerId = player.id || player.playerId || originalIndex;
 
                   return (
                     <option key={playerId} value={playerId}>
@@ -1461,9 +1520,17 @@ export default function MatchCenter({
                       : "Oyuna girecek oyuncu"}
                   </option>
 
-                  {selectedSquad.map((player, index) => {
-                    const playerId =
-                      player.id || player.playerId || index;
+                  {(eventType === "substitution"
+                    ? selectedSubstitutionState.bench.filter((player) => {
+                        const originalIndex = selectedSquad.indexOf(player);
+                        return !selectedSubstitutionState.lockedOut.has(
+                          playerKey(player, originalIndex)
+                        );
+                      })
+                    : selectedSubstitutionState.starters
+                  ).map((player, index) => {
+                    const originalIndex = selectedSquad.indexOf(player);
+                    const playerId = player.id || player.playerId || originalIndex;
 
                     return (
                       <option key={playerId} value={playerId}>
@@ -1475,6 +1542,20 @@ export default function MatchCenter({
                     );
                   })}
                 </select>
+              )}
+
+              {eventType === "substitution" && (
+                <div style={{ width: "100%", marginTop: "8px", fontSize: "12px" }}>
+                  <b>As Kadro ({selectedSubstitutionState.starters.length})</b>:{" "}
+                  {selectedSubstitutionState.starters.map(getPlayerName).join(", ") || "-"}
+                  <br />
+                  <b>Yedekler ({selectedSubstitutionState.bench.length})</b>:{" "}
+                  {selectedSubstitutionState.bench.map((player) => {
+                    const originalIndex = selectedSquad.indexOf(player);
+                    const locked = selectedSubstitutionState.lockedOut.has(playerKey(player, originalIndex));
+                    return `${getPlayerName(player)}${locked ? " (çıktı - tekrar giremez)" : ""}`;
+                  }).join(", ") || "-"}
+                </div>
               )}
 
               <button

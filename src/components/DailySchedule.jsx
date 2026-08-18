@@ -21,19 +21,25 @@ function fitTeamName(name = "") {
   return text.length > 18 ? `${text.slice(0, 17)}…` : text;
 }
 
+function getPosterHeight(matchCount) {
+  const safeCount = Math.max(1, Math.min(4, Number(matchCount) || 1));
+  return 780 + safeCount * 145;
+}
+
 function buildPosterSvg({ title, dateText, venue, matches }) {
   const width = 1080;
-  const height = 1350;
   const rows = matches.slice(0, 4);
-  const rowSvg = Array.from({ length: 4 }, (_, index) => {
-    const match = rows[index];
+  const rowCount = Math.max(1, rows.length);
+  const height = getPosterHeight(rowCount);
+  const footerY = 555 + rowCount * 145 + 25;
+  const rowSvg = rows.map((match, index) => {
     const y = 555 + index * 145;
     const time = match?.time || "--:--";
     const home = fitTeamName(match?.home || "TAKIM");
     const away = fitTeamName(match?.away || "TAKIM");
     const field = match?.field || match?.pitch || "SAHA 1";
     return `
-      <g opacity="${match ? 1 : 0.28}">
+      <g>
         <rect x="72" y="${y}" width="936" height="118" rx="22" fill="#11151b" stroke="#f4c400" stroke-width="2"/>
         <rect x="72" y="${y}" width="190" height="118" rx="22" fill="url(#gold)"/>
         <rect x="240" y="${y}" width="22" height="118" fill="url(#gold)"/>
@@ -53,8 +59,8 @@ function buildPosterSvg({ title, dateText, venue, matches }) {
       <radialGradient id="light"><stop stop-color="#ffffff" stop-opacity=".72"/><stop offset=".18" stop-color="#ffe889" stop-opacity=".28"/><stop offset="1" stop-color="#000000" stop-opacity="0"/></radialGradient>
       <pattern id="dots" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#ffffff" opacity=".055"/></pattern>
     </defs>
-    <rect width="1080" height="1350" fill="url(#bg)"/>
-    <rect width="1080" height="1350" fill="url(#dots)"/>
+    <rect width="1080" height="${height}" fill="url(#bg)"/>
+    <rect width="1080" height="${height}" fill="url(#dots)"/>
     <circle cx="110" cy="65" r="230" fill="url(#light)"/><circle cx="970" cy="65" r="230" fill="url(#light)"/>
     <path d="M0 405 L280 325 L245 420 L0 505 Z" fill="#f4c400" opacity=".9"/><path d="M1080 365 L850 315 L885 430 L1080 490 Z" fill="#f4c400" opacity=".92"/>
     <g transform="translate(540 145)">
@@ -67,12 +73,12 @@ function buildPosterSvg({ title, dateText, venue, matches }) {
     <rect x="258" y="450" width="564" height="58" rx="18" fill="url(#gold)"/>
     <text x="540" y="488" text-anchor="middle" fill="#090909" font-size="24" font-weight="1000">${escapeXml(dateText)}</text>
     ${rowSvg}
-    <rect x="72" y="1165" width="936" height="108" rx="24" fill="#12171e" stroke="#f4c400" stroke-width="2"/>
-    <text x="120" y="1210" fill="#ffd21f" font-size="22" font-weight="1000">📍 MAÇLARIN ADRESİ</text>
-    <text x="120" y="1248" fill="#ffffff" font-size="31" font-weight="900">${escapeXml(venue)}</text>
-    <text x="955" y="1210" text-anchor="end" fill="#ffd21f" font-size="25" font-weight="1000">S&amp;S CUP</text>
-    <text x="955" y="1248" text-anchor="end" fill="#ffffff" font-size="20" font-style="italic" font-weight="800">HEYECAN SAHADA!</text>
-    <text x="540" y="1320" text-anchor="middle" fill="#7f8997" font-size="16" font-weight="800">S&amp;S CUP • RESMİ MAÇ GÜNÜ PROGRAMI</text>
+    <rect x="72" y="${footerY}" width="936" height="108" rx="24" fill="#12171e" stroke="#f4c400" stroke-width="2"/>
+    <text x="120" y="${footerY + 45}" fill="#ffd21f" font-size="22" font-weight="1000">📍 MAÇLARIN ADRESİ</text>
+    <text x="120" y="${footerY + 83}" fill="#ffffff" font-size="31" font-weight="900">${escapeXml(venue)}</text>
+    <text x="955" y="${footerY + 45}" text-anchor="end" fill="#ffd21f" font-size="25" font-weight="1000">S&amp;S CUP</text>
+    <text x="955" y="${footerY + 83}" text-anchor="end" fill="#ffffff" font-size="20" font-style="italic" font-weight="800">HEYECAN SAHADA!</text>
+    <text x="540" y="${height - 25}" text-anchor="middle" fill="#7f8997" font-size="16" font-weight="800">S&amp;S CUP • RESMİ MAÇ GÜNÜ PROGRAMI</text>
   </svg>`;
 }
 
@@ -89,6 +95,7 @@ export default function DailySchedule({ fixtures = [], settings = {} }) {
   const tournamentName = settings.tournamentName || settings.title || "S&S CUP";
   const venue = settings.venue || "GOL PARK HALI SAHA TESİSLERİ • SAHA 1";
   const dateText = formatLongDate(selectedDate);
+  const posterHeight = getPosterHeight(dayMatches.length);
 
   const createPosterPng = () => new Promise((resolve, reject) => {
     const svg = buildPosterSvg({ title: tournamentName, dateText, venue, matches: dayMatches });
@@ -99,7 +106,7 @@ export default function DailySchedule({ fixtures = [], settings = {} }) {
       try {
         const canvas = document.createElement("canvas");
         canvas.width = 1080;
-        canvas.height = 1350;
+        canvas.height = posterHeight;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(image, 0, 0);
         URL.revokeObjectURL(url);
@@ -173,7 +180,7 @@ export default function DailySchedule({ fixtures = [], settings = {} }) {
   return (
     <div className="night-admin-page">
       <div className="night-admin-toolbar">
-        <div><span>GÖRSEL MERKEZİ</span><h2>Gecenin Maçları</h2><p>O gecenin 4 maçını tek profesyonel görsel olarak hazırlar.</p></div>
+        <div><span>GÖRSEL MERKEZİ</span><h2>Gecenin Maçları</h2><p>Seçilen tarihteki {dayMatches.length || 0} maçı görsele otomatik sığdırır.</p></div>
         <div className="night-admin-actions">
           <label>Tarih<select value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)}>{availableDates.length === 0 && <option value={selectedDate}>{selectedDate}</option>}{availableDates.map((date) => <option key={date} value={date}>{formatLongDate(date)}</option>)}</select></label>
           <button className="night-png-btn" onClick={downloadPoster} disabled={dayMatches.length === 0}>🖼️ PNG Görsel Oluştur</button>
@@ -181,7 +188,7 @@ export default function DailySchedule({ fixtures = [], settings = {} }) {
         </div>
       </div>
 
-      <div className="night-poster-preview">
+      <div className={`night-poster-preview match-count-${Math.max(1, dayMatches.length)}`} style={{ aspectRatio: `1080 / ${posterHeight}` }}>
         <div className="night-lights left"/><div className="night-lights right"/>
         <div className="night-logo">S&S</div>
         <div className="night-title-small">{tournamentName}</div>
@@ -189,10 +196,9 @@ export default function DailySchedule({ fixtures = [], settings = {} }) {
         <h1>GECENİN <b>MAÇLARI</b></h1>
         <div className="night-date">📅 {dateText}</div>
         <div className="night-poster-list">
-          {Array.from({ length: 4 }, (_, index) => {
-            const match = dayMatches[index];
-            return <div className={`night-poster-match ${!match ? "empty" : ""}`} key={match?.id || index}><div className="night-poster-time"><strong>{match?.time || "--:--"}</strong><small>{match?.field || "SAHA 1"}</small></div><div className="night-poster-teams"><strong>{match?.home || "TAKIM"}</strong><span>VS</span><strong>{match?.away || "TAKIM"}</strong></div></div>;
-          })}
+          {dayMatches.map((match, index) => (
+            <div className="night-poster-match" key={match?.id || index}><div className="night-poster-time"><strong>{match?.time || "--:--"}</strong><small>{match?.field || "SAHA 1"}</small></div><div className="night-poster-teams"><strong>{match?.home || "TAKIM"}</strong><span>VS</span><strong>{match?.away || "TAKIM"}</strong></div></div>
+          ))}
         </div>
         <div className="night-poster-footer"><div><span>📍</span><p><small>MAÇLARIN ADRESİ</small><strong>{venue}</strong></p></div><b>HEYECAN<br/><i>SAHADA!</i></b></div>
       </div>

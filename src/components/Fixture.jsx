@@ -326,11 +326,49 @@ export default function Fixture({
     );
   }
 
+  function getCalendarWeekKey(dateValue) {
+    if (!dateValue) return "";
+
+    const date = new Date(`${dateValue}T12:00:00`);
+    if (Number.isNaN(date.getTime())) return "";
+
+    const day = date.getDay();
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    const monday = new Date(date);
+    monday.setDate(date.getDate() + diffToMonday);
+
+    return [
+      monday.getFullYear(),
+      String(monday.getMonth() + 1).padStart(2, "0"),
+      String(monday.getDate()).padStart(2, "0"),
+    ].join("-");
+  }
+
+  function hasSameTeamInCalendarWeek(match, matchIndex, dateValue) {
+    const weekKey = getCalendarWeekKey(dateValue);
+    if (!weekKey) return false;
+
+    return fixtures.some((otherMatch, otherIndex) => {
+      if (otherIndex === matchIndex || !otherMatch?.date) return false;
+      if (getCalendarWeekKey(otherMatch.date) !== weekKey) return false;
+
+      return (
+        otherMatch.home === match.home ||
+        otherMatch.away === match.home ||
+        otherMatch.home === match.away ||
+        otherMatch.away === match.away
+      );
+    });
+  }
+
   async function updateMatchDetail(
     index,
     field,
     value
   ) {
+    const currentMatch = fixtures[index];
+
+
     const updatedFixtures =
       fixtures.map(
         (fixture, fixtureIndex) => {
@@ -357,6 +395,29 @@ export default function Fixture({
       );
 
     setFixtures(updatedFixtures);
+
+    // Manuel tarih/saat/saha değişikliği telefondaki canlı takipte de
+    // anında sabit kalsın diye Supabase'e kaydedilir.
+    const selectedMatch = updatedFixtures[index];
+    const safeId = Number(selectedMatch?.id);
+
+    if (Number.isFinite(safeId)) {
+      const cloudField = field === "field" ? "pitch" : field;
+      const cloudValue =
+        (field === "date" || field === "time") && value === ""
+          ? null
+          : value;
+
+      const { error } = await supabase
+        .from("fixtures")
+        .update({ [cloudField]: cloudValue })
+        .eq("id", safeId);
+
+      if (error) {
+        console.error("Maç programı kaydedilemedi:", error);
+        alert("Tarih/saat buluta kaydedilemedi: " + error.message);
+      }
+    }
   }
 
   async function updateScore(
@@ -1381,9 +1442,9 @@ export default function Fixture({
       <h2>📅 Lig Fikstürü</h2>
 
       <p>
-        Tarih, saat ve saha bilgilerini
-        gerektiğinde maç bazında
-        değiştirebilirsiniz.
+        Fikstür haftalara otomatik ayrılır ve aynı takım aynı fikstür haftasında
+        yalnızca 1 maç oynar. Gün ve saatleri siz belirlersiniz. Maç ertelenirse
+        tarihini değiştirebilirsiniz; fikstür haftası değişmez.
       </p>
 
       <p>
@@ -1418,40 +1479,40 @@ export default function Fixture({
           oluşturulmadı.
         </p>
       ) : (
-        groupedFixtures.map(
-          (group) => (
-            <section
-              key={group.week}
-              style={{
-                marginBottom: "30px",
-              }}
-            >
-              <h3
-                style={{
-                  borderBottom:
-                    "2px solid #777",
-                  paddingBottom: "10px",
-                }}
-              >
-                🏆 {group.week}. Hafta
-              </h3>
+        <section style={{ marginBottom: "30px" }}>
+          {groupedFixtures.map(({ week, matches }) => {
+            const upcomingMatches = matches.filter(
+              ({ match }) => match.played !== true
+            );
 
-              <ul
-                className="teamList"
-                style={{
-                  padding: 0,
-                  listStyle: "none",
-                }}
-              >
-                {group.matches
-                  .filter(({ match }) => match.played !== true)
-                  .map(({ match, index }) =>
+            if (upcomingMatches.length === 0) return null;
+
+            return (
+              <div key={week} style={{ marginBottom: "34px" }}>
+                <h3
+                  style={{
+                    borderBottom: "2px solid #777",
+                    paddingBottom: "10px",
+                  }}
+                >
+                  📅 {week}. Hafta • {upcomingMatches.length} Maç
+                </h3>
+
+                <ul
+                  className="teamList"
+                  style={{
+                    padding: 0,
+                    listStyle: "none",
+                  }}
+                >
+                  {upcomingMatches.map(({ match, index }) =>
                     renderMatch(match, index)
                   )}
-              </ul>
-            </section>
-          )
-        )
+                </ul>
+              </div>
+            );
+          })}
+        </section>
       )}
     </div>
   );

@@ -1,55 +1,12 @@
 import { useMemo, useState } from "react";
 import { supabase } from "../supabase";
-const MATCH_DAYS = [
-  {
-    day: "Pazartesi",
-    dayOffset: 0,
-  },
-  {
-    day: "Çarşamba",
-    dayOffset: 2,
-  },
-  {
-    day: "Cuma",
-    dayOffset: 4,
-  },
-];
-
-const MATCH_TIMES = [
-  "20:00",
-  "21:00",
-  "22:00",
-  "23:00",
-];
-
-function formatDate(date) {
-  const year = date.getFullYear();
-  const month = String(
-    date.getMonth() + 1
-  ).padStart(2, "0");
-  const day = String(date.getDate()).padStart(
-    2,
-    "0"
-  );
-
-  return `${year}-${month}-${day}`;
-}
-
-function addDays(dateText, numberOfDays) {
-  const date = new Date(`${dateText}T12:00:00`);
-
-  date.setDate(date.getDate() + numberOfDays);
-
-  return formatDate(date);
-}
-
 function createRoundRobinRounds(orderedTeams) {
+  // Tek takım sayısında sanal BAY eklenir. BAY gerçek maç olarak kaydedilmez.
   const teams = [...orderedTeams];
+  if (teams.length % 2 !== 0) {
+    teams.push(null);
+  }
 
-  /*
-    Takım sayısının çift olması gerekiyor.
-    Böylece her takım aynı hafta bir maç oynar.
-  */
   const fixedTeam = teams[0];
   let rotatingTeams = teams.slice(1);
 
@@ -92,14 +49,17 @@ function createRoundRobinRounds(orderedTeams) {
       const reverse =
         (roundIndex + matchIndex) % 2 === 1;
 
-      roundMatches.push({
-        home: reverse
-          ? secondTeam
-          : firstTeam,
-        away: reverse
-          ? firstTeam
-          : secondTeam,
-      });
+      // BAY eşleşmesi gerçek fikstüre eklenmez.
+      if (firstTeam && secondTeam) {
+        roundMatches.push({
+          home: reverse
+            ? secondTeam
+            : firstTeam,
+          away: reverse
+            ? firstTeam
+            : secondTeam,
+        });
+      }
     }
 
     rounds.push(roundMatches);
@@ -129,9 +89,11 @@ export default function DrawManager({
 }) {
   const [matchCount, setMatchCount] =
     useState(4);
+  const [matchesPerNight, setMatchesPerNight] =
+    useState(3);
+  const [daysPerWeek, setDaysPerWeek] =
+    useState(2);
 
-  const [startDate, setStartDate] =
-    useState("");
 
   const drawCompleted = useMemo(() => {
     return (
@@ -168,9 +130,9 @@ export default function DrawManager({
 
   async function createFixture() {
 
-    if (teams.length < 10) {
+    if (teams.length < 8) {
       alert(
-        "Lig fikstürü için en az 10 takım gereklidir."
+        "Lig fikstürü için en az 8 takım gereklidir."
       );
       return;
     }
@@ -182,19 +144,6 @@ export default function DrawManager({
       return;
     }
 
-    if (teams.length % 2 !== 0) {
-      alert(
-        "Her takımın her hafta bir maç oynayabilmesi için takım sayısı çift olmalıdır."
-      );
-      return;
-    }
-
-    if (!startDate) {
-      alert(
-        "İlk haftanın Pazartesi tarihini seçiniz."
-      );
-      return;
-    }
 
     if (
       matchCount !== 4 &&
@@ -234,100 +183,153 @@ export default function DrawManager({
     const allRounds =
       createRoundRobinRounds(orderedTeams);
 
-    const selectedRounds = allRounds.slice(
-      0,
-      matchCount
-    );
+    let selectedRounds;
+
+    if (orderedTeams.length % 2 === 0) {
+      selectedRounds = allRounds.slice(0, matchCount);
+    } else {
+      // Tek takım sayısında herkesin eşit maç yapabilmesi için
+      // 4 maçlık dengeli bir halka fikstürü kurulur.
+      // Ardından maçlar haftalara, aynı takım bir haftada
+      // yalnızca 1 maç oynayacak şekilde dağıtılır.
+      // (Tek sayıda takım + 5 maç matematiksel olarak mümkün değildir.)
+      if (matchCount % 2 !== 0) {
+        alert(
+          "Tek sayıda takım varken her takıma 5 maç verilemez. 4 maç seçiniz."
+        );
+        return;
+      }
+
+      const pairMap = new Map();
+      const teamCount = orderedTeams.length;
+      const halfDegree = matchCount / 2;
+
+      for (let i = 0; i < teamCount; i++) {
+        for (let step = 1; step <= halfDegree; step++) {
+          const j = (i + step) % teamCount;
+          const a = orderedTeams[i];
+          const b = orderedTeams[j];
+          const key = [a, b].sort().join("|||");
+          pairMap.set(key, { home: a, away: b });
+        }
+      }
+
+      const balancedMatches = Array.from(pairMap.values());
+      const weekCount = matchCount + 1; // Tek takım sayısında 4 maç = 5 hafta
+      const weeks = Array.from({ length: weekCount }, () => []);
+      const usedWeeksByTeam = new Map(
+        orderedTeams.map((team) => [team, new Set()])
+      );
+      const assignedWeek = new Array(balancedMatches.length).fill(-1);
+
+      function availableWeeks(match) {
+        const homeWeeks = usedWeeksByTeam.get(match.home);
+        const awayWeeks = usedWeeksByTeam.get(match.away);
+
+        return Array.from({ length: weekCount }, (_, index) => index)
+          .filter(
+            (weekIndex) =>
+              !homeWeeks.has(weekIndex) &&
+              !awayWeeks.has(weekIndex)
+          )
+          .sort((a, b) => weeks[a].length - weeks[b].length);
+      }
+
+      function assignMatches(assignedCount = 0) {
+        if (assignedCount === balancedMatches.length) {
+          return true;
+        }
+
+        let bestMatchIndex = -1;
+        let bestOptions = null;
+
+        for (let index = 0; index < balancedMatches.length; index++) {
+          if (assignedWeek[index] !== -1) continue;
+
+          const options = availableWeeks(balancedMatches[index]);
+
+          if (options.length === 0) {
+            return false;
+          }
+
+          if (bestOptions === null || options.length < bestOptions.length) {
+            bestMatchIndex = index;
+            bestOptions = options;
+
+            if (options.length === 1) break;
+          }
+        }
+
+        const match = balancedMatches[bestMatchIndex];
+
+        for (const weekIndex of bestOptions) {
+          assignedWeek[bestMatchIndex] = weekIndex;
+          weeks[weekIndex].push(match);
+          usedWeeksByTeam.get(match.home).add(weekIndex);
+          usedWeeksByTeam.get(match.away).add(weekIndex);
+
+          if (assignMatches(assignedCount + 1)) {
+            return true;
+          }
+
+          usedWeeksByTeam.get(match.home).delete(weekIndex);
+          usedWeeksByTeam.get(match.away).delete(weekIndex);
+          weeks[weekIndex].pop();
+          assignedWeek[bestMatchIndex] = -1;
+        }
+
+        return false;
+      }
+
+      if (!assignMatches()) {
+        alert(
+          "Tek sayılı takım fikstürü haftalara dengeli dağıtılamadı. Lütfen tekrar deneyiniz."
+        );
+        return;
+      }
+
+      selectedRounds = weeks.filter((week) => week.length > 0);
+    }
+
+    // Kullanıcının seçtiği gün ve gece kapasitesi haftalık hedefi belirler.
+    // Örn: 2 gün x 3 maç = 6 maç/hafta, 3 gün x 4 maç = 12 maç/hafta.
+    // Aynı takım aynı haftada ikinci kez oynayamayacağı için bir turun
+    // maçları bu kapasiteyi aşarsa güvenli şekilde parçalara bölünür.
+    const weeklyTarget = matchesPerNight * daysPerWeek;
+    const capacityAdjustedRounds = [];
+    selectedRounds.forEach((roundMatches) => {
+      for (let start = 0; start < roundMatches.length; start += weeklyTarget) {
+        capacityAdjustedRounds.push(roundMatches.slice(start, start + weeklyTarget));
+      }
+    });
+    selectedRounds = capacityAdjustedRounds;
 
     const matches = [];
 
     /*
-      Bir haftada:
-      3 akşam × 4 maç = 12 maç kapasitesi.
+      Fikstür motoru yalnızca eşleşmeleri üretir.
+      Tarih, saat ve saha planı kullanıcı tarafından
+      Fikstür ekranında maç maç girilir.
     */
-    const weeklyCapacity =
-      MATCH_DAYS.length *
-      MATCH_TIMES.length;
-
-    selectedRounds.forEach(
-      (roundMatches, roundIndex) => {
-        roundMatches.forEach(
-          (match, roundMatchIndex) => {
-            /*
-              24 takıma kadar bir turun tamamı
-              aynı takvim haftasına sığar.
-
-              Daha fazla takım varsa kalan
-              maçlar sonraki haftaya taşar.
-            */
-            const extraWeek = Math.floor(
-              roundMatchIndex /
-                weeklyCapacity
-            );
-
-            const slotInWeek =
-              roundMatchIndex %
-              weeklyCapacity;
-
-            const calendarWeek =
-              roundIndex + 1 + extraWeek;
-
-            const dayIndex = Math.floor(
-              slotInWeek /
-                MATCH_TIMES.length
-            );
-
-            const timeIndex =
-              slotInWeek %
-              MATCH_TIMES.length;
-
-            const selectedDay =
-              MATCH_DAYS[dayIndex];
-
-            const dateOffset =
-              (calendarWeek - 1) * 7 +
-              selectedDay.dayOffset;
-
-            matches.push({
-              id: `league-${
-                roundIndex + 1
-              }-${roundMatchIndex + 1}`,
-
-              matchNo: matches.length + 1,
-
-              home: match.home,
-              away: match.away,
-
-              homeScore: null,
-              awayScore: null,
-              played: false,
-
-              /*
-                Lig turu:
-                Her takımın kaçıncı maçı olduğu.
-              */
-              round: roundIndex + 1,
-
-              /*
-                Gerçek takvim haftası.
-              */
-              week: calendarWeek,
-
-              day: selectedDay.day,
-
-              date: addDays(
-                startDate,
-                dateOffset
-              ),
-
-              time: MATCH_TIMES[timeIndex],
-
-              field: "Saha 1",
-            });
-          }
-        );
-      }
-    );
+    selectedRounds.forEach((roundMatches, roundIndex) => {
+      roundMatches.forEach((match, roundMatchIndex) => {
+        matches.push({
+          id: `league-${roundIndex + 1}-${roundMatchIndex + 1}`,
+          matchNo: matches.length + 1,
+          home: match.home,
+          away: match.away,
+          homeScore: null,
+          awayScore: null,
+          played: false,
+          round: roundIndex + 1,
+          week: roundIndex + 1,
+          day: "",
+          date: "",
+          time: "",
+          field: "Saha 1",
+        });
+      });
+    });
 
     /*
       Her takımın eşit sayıda maç yaptığını
@@ -378,9 +380,7 @@ export default function DrawManager({
       return;
     }
 
-setFixtures(matches);
-
-    // 1. Önce Supabase veritabanındaki eski lig maçlarını siliyoruz
+    // Önce eski lig fikstürünü temizle.
     const { error: deleteError } = await supabase
       .from("fixtures")
       .delete()
@@ -390,12 +390,12 @@ setFixtures(matches);
       console.error("Eski fikstür silinirken hata oluştu:", deleteError);
     }
 
-    // 2. Yeni oluşturulan maçları Supabase'e ekliyoruz
+    // Yeni fikstür tarih/saat verilmeden buluta kaydedilir.
     const supabaseMatches = matches.map((match) => ({
       home: match.home,
       away: match.away,
-      date: match.date,
-      time: match.time,
+      date: null,
+      time: null,
       pitch: match.field || "Saha 1",
       week: match.week,
       played: false,
@@ -405,20 +405,37 @@ setFixtures(matches);
       stage: "league",
     }));
 
-    const { data, error } = await supabase
+    const { data: insertedRows, error } = await supabase
       .from("fixtures")
-      .insert(supabaseMatches);
+      .insert(supabaseMatches)
+      .select("id,home,away,date,time,pitch,week,played,home_score,away_score");
 
     if (error) {
       console.log("FIXTURE KAYIT HATASI:", error);
       alert(error.message);
+      return;
     }
 
+    const rowByPair = new Map(
+      (insertedRows || []).map((row) => [
+        [row.home, row.away].sort().join("|||"),
+        row,
+      ])
+    );
+
+    const finalMatches = matches.map((match) => {
+      const row = rowByPair.get([match.home, match.away].sort().join("|||"));
+      return row
+        ? { ...match, id: row.id }
+        : match;
+    });
+
+    setFixtures(finalMatches);
     localStorage.setItem(
       "sscup-fixtures",
-      JSON.stringify(matches)
+      JSON.stringify(finalMatches)
     );
-  
+
     clearOldMatchData();
 
     alert(
@@ -426,8 +443,8 @@ setFixtures(matches);
         `Takım sayısı: ${orderedTeams.length}\n` +
         `Her takım: ${matchCount} maç\n` +
         `Toplam maç: ${matches.length}\n\n` +
-        `Maç günleri: Pazartesi, Çarşamba, Cuma\n` +
-        `Saatler: 20:00, 21:00, 22:00, 23:00\n\n` +
+        `Haftalar otomatik dağıtıldı; aynı takım aynı hafta yalnızca 1 maç oynar.\n` +
+        `Tarih ve saatler boş bırakıldı; fikstür ekranından siz verin.\n\n` +
         "Fanus kura sırası korunmuştur."
     );
   }
@@ -499,28 +516,43 @@ setFixtures(matches);
           borderRadius: "10px",
         }}
       >
-        <h3>
-          📅 İlk Haftanın Pazartesi Tarihi
-        </h3>
-
-        <input
-          type="date"
-          value={startDate}
-          onChange={(event) =>
-            setStartDate(event.target.value)
-          }
-        />
-
+        <h3>📅 Haftalık Fikstür Planı</h3>
         <p>
-          Maçlar otomatik olarak Pazartesi,
-          Çarşamba ve Cuma günlerine
-          dağıtılacaktır.
+          Sistem haftanın eşleşmelerini otomatik hazırlar. Tarih ve saatleri
+          Fikstür ekranında siz girersiniz.
         </p>
-
-        <p>
-          Oluşturulduktan sonra her maçın
-          tarihi, saati ve sahası Fikstür
-          bölümünden değiştirilebilir.
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center", marginBottom: "12px" }}>
+          <b>Haftada kaç gün?</b>
+          {[2, 3].map((count) => (
+            <label key={count} style={{ cursor: "pointer" }}>
+              <input
+                type="radio"
+                name="daysPerWeek"
+                checked={daysPerWeek === count}
+                onChange={() => setDaysPerWeek(count)}
+              />
+              {" "}{count} gün
+            </label>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "center" }}>
+          <b>Bir gecede kaç maç?</b>
+          {[2, 3, 4].map((count) => (
+            <label key={count} style={{ cursor: "pointer" }}>
+              <input
+                type="radio"
+                name="matchesPerNight"
+                checked={matchesPerNight === count}
+                onChange={() => setMatchesPerNight(count)}
+              />
+              {" "}{count} maç
+            </label>
+          ))}
+        </div>
+        <p style={{ marginBottom: 0 }}>
+          Seçim: haftada <b>{daysPerWeek}</b> gün × gecede <b>{matchesPerNight}</b> maç → haftalık hedef <b>{matchesPerNight * daysPerWeek}</b> maç.
+          Takım sayısı daha az maça izin veriyorsa sistem aynı takımı aynı haftada
+          iki kez oynatmadan güvenli maksimumu kullanır.
         </p>
       </div>
 
@@ -568,7 +600,7 @@ setFixtures(matches);
         type="button"
         onClick={createFixture}
         disabled={
-          teams.length < 10 ||
+          teams.length < 8 ||
           !drawCompleted
         }
       >
