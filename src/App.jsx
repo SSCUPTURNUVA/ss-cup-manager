@@ -220,10 +220,12 @@ export default function App() {
   const [teams, setTeams] = useState([]);
 
   useEffect(() => {
+    let cancelled = false;
+
     async function loadTeams() {
       const { data, error } = await supabase
         .from("teams")
-        .select("name")
+        .select("id,name")
         .order("id");
 
       if (error) {
@@ -231,12 +233,44 @@ export default function App() {
         return;
       }
 
-      if (data) {
-        setTeams(data.map((team) => team.name));
+      if (!cancelled && Array.isArray(data)) {
+        setTeams(data.map((team) => team.name).filter(Boolean));
       }
     }
 
+    // İlk açılışta çek.
     loadTeams();
+
+    // Realtime herhangi bir cihazda takım ekleme/silme/düzenleme olduğunda
+    // açık olan diğer cihazın listesini anında yeniler.
+    const channel = supabase
+      .channel(`sscup-app-teams-${Math.random().toString(36).slice(2)}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "teams" },
+        () => loadTeams()
+      )
+      .subscribe();
+
+    // Realtime bağlantısı bir cihazda kaçarsa güvenli yedek.
+    const poll = window.setInterval(loadTeams, 1500);
+
+    // Telefon uygulamaya geri dönünce / PC penceresi odaklanınca da yenile.
+    const onFocus = () => loadTeams();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") loadTeams();
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(poll);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const [drawOrder, setDrawOrder] = useState(() =>
