@@ -460,6 +460,16 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const playedCount = displayFixtures.filter((match) => match?.played === true).length;
   const tournamentName = settings.tournamentName || settings.title || "S&S CUP";
 
+  // Final tamamlandığında takip ekranının tepesinde şampiyonu otomatik göster.
+  // Canlı maç / senkron mantığına dokunmaz; yalnızca tamamlanmış final verisini okur.
+  const finalMatch = knockoutMatches.find((match) => match.knockoutKey === "final-0");
+  const championName = finalMatch?.played === true
+    ? koWinner(finalMatch, finalMatch.home, finalMatch.away)
+    : "";
+  const finalWentToPenalties = finalMatch?.played === true
+    && safeNumber(finalMatch.homeScore) === safeNumber(finalMatch.awayScore)
+    && (safeNumber(finalMatch.homePenalties ?? finalMatch.homePen) !== safeNumber(finalMatch.awayPenalties ?? finalMatch.awayPen));
+
   return (
     <div className="public-live-page">
       <div className="public-stadium-light light-left" />
@@ -473,6 +483,22 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       </header>
 
       <main className="public-live-shell">
+        {championName && (
+          <section className="public-champion-banner">
+            <div className="public-champion-crown">🏆</div>
+            <div className="public-champion-copy">
+              <span>S&S CUP ŞAMPİYONU</span>
+              <h2>{championName}</h2>
+              <strong>{settings.season || "2026"} ŞAMPİYONU</strong>
+            </div>
+            <div className="public-champion-final">
+              <small>FİNAL</small>
+              <div><b>{finalMatch.home}</b><strong>{scoreText(finalMatch.homeScore)} - {scoreText(finalMatch.awayScore)}</strong><b>{finalMatch.away}</b></div>
+              {finalWentToPenalties && <em>PEN {safeNumber(finalMatch.homePenalties ?? finalMatch.homePen)} - {safeNumber(finalMatch.awayPenalties ?? finalMatch.awayPen)}</em>}
+            </div>
+          </section>
+        )}
+
         {liveMatch && (
           <section className="public-live-scoreboard public-clickable" onClick={() => setSelectedMatch(liveMatch)}>
             <div className="public-scoreboard-topline"><div className="public-live-pill"><i /> CANLI</div><div className="public-match-status">{minute || "CANLI"}</div><div className="public-stage-label">{stageText(liveMatch)}</div></div>

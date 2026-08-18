@@ -197,3 +197,17 @@
   .public-modal-penalty-list{margin:10px 10px 8px;padding:10px 8px}.public-modal-penalty-teams{gap:6px}.public-modal-penalty-team{padding:6px}.public-modal-penalty-team h4{font-size:10px}.public-modal-penalty-row span{font-size:9px}.public-modal-penalty-row span small{font-size:7px}.public-modal-penalty-row strong{font-size:16px}
   .public-modal-events-title{padding:0 12px}.public-modal-events{padding:0 12px 16px}.public-modal-empty{margin:8px 12px 16px}
 }
+
+/* Final tamamlandığında görünen şampiyon vitrini */
+.public-champion-banner{
+  position:relative;overflow:hidden;margin-bottom:12px;padding:18px 22px;
+  display:grid;grid-template-columns:82px 1fr minmax(310px,auto);align-items:center;gap:18px;
+  background:linear-gradient(110deg,#0d0f12 0%,#17140a 52%,#0d0f12 100%);
+  color:#fff;border:1px solid rgba(255,196,0,.62);border-top:4px solid #ffc400;border-radius:16px;
+  box-shadow:0 18px 45px rgba(0,0,0,.20),0 0 34px rgba(255,196,0,.10);
+}
+.public-champion-banner:before{content:"";position:absolute;inset:-80% 30% -80% -10%;background:radial-gradient(circle,rgba(255,196,0,.20),transparent 62%);pointer-events:none}
+.public-champion-crown{position:relative;width:74px;height:74px;border-radius:18px;display:grid;place-items:center;background:#ffc400;color:#111;font-size:38px;box-shadow:0 8px 26px rgba(255,196,0,.28)}
+.public-champion-copy{position:relative;display:flex;flex-direction:column;min-width:0}.public-champion-copy>span{color:#ffc400;font-size:10px;font-weight:1000;letter-spacing:.16em}.public-champion-copy h2{margin:2px 0;color:#fff;font-size:36px;line-height:1;font-weight:1000;letter-spacing:-1px;text-transform:uppercase}.public-champion-copy>strong{color:#f5d45b;font-size:12px;letter-spacing:.08em}
+.public-champion-final{position:relative;border-left:1px solid rgba(255,255,255,.14);padding-left:20px;text-align:center}.public-champion-final>small{display:block;color:#9da2aa;font-size:8px;font-weight:1000;letter-spacing:.16em;margin-bottom:5px}.public-champion-final>div{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:10px}.public-champion-final b{font-size:11px;color:#fff}.public-champion-final strong{color:#ffc400;font-size:22px;white-space:nowrap}.public-champion-final em{display:inline-block;margin-top:5px;padding:4px 8px;border-radius:999px;background:#ffc400;color:#111;font-size:9px;font-style:normal;font-weight:1000}
+@media(max-width:680px){.public-champion-banner{grid-template-columns:56px 1fr;padding:12px 11px;gap:10px}.public-champion-crown{width:52px;height:52px;border-radius:12px;font-size:27px}.public-champion-copy>span{font-size:7px}.public-champion-copy h2{font-size:24px}.public-champion-copy>strong{font-size:9px}.public-champion-final{grid-column:1/-1;border-left:0;border-top:1px solid rgba(255,255,255,.12);padding:9px 0 0}.public-champion-final>div{gap:6px}.public-champion-final b{font-size:9px}.public-champion-final strong{font-size:18px}}
