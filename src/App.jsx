@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 import PublicTournament from "./components/PublicTournament";
+import DailySchedule from "./components/DailySchedule";
 import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 import MatchCenter from "./components/MatchCenter";
@@ -25,7 +26,7 @@ const mobileMenuItems = [
   { id: "home", icon: "🏠", label: "Ana Sayfa" },
   { id: "matchcenter", icon: "📺", label: "Maç" },
   { id: "fixture", icon: "📅", label: "Fikstür" },
-  { id: "discipline", icon: "🟨", label: "Disiplin" },
+  { id: "dailyschedule", icon: "📋", label: "Program" },
   { id: "standings", icon: "📊", label: "Puan" },
 ];
 
@@ -37,6 +38,7 @@ const menuItems = [
   { id: "teamcontacts", icon: "📲", label: "Takım Bilgileri" },
   { id: "draw", icon: "🎲", label: "Lig Kurası" },
   { id: "fixture", icon: "📅", label: "Lig Fikstürü" },
+  { id: "dailyschedule", icon: "📋", label: "Günlük Program (WhatsApp)" },
   { id: "group-fixture", icon: "🗓️", label: "Grup Fikstürü" },
   { id: "group-standings", icon: "📊", label: "Grup Puan Durumu" },
   { id: "matchcenter", icon: "📺", label: "Maç Merkezi" },
@@ -182,8 +184,20 @@ function calculateStandings(teams, fixtures) {
 }
 
 export default function App() {
-  const [activePage, setActivePage] =
-    useState("home");
+  const isPublicRoute = useMemo(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const pageParam = params.get("page");
+      return pageParam === "takip" || pageParam === "public";
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const [activePage, setActivePage] = useState(() => {
+    if (isPublicRoute) return "public";
+    return "home";
+  });
 
   const [settings, setSettings] = useState(() =>
     readStorage("sscup-settings", {
@@ -197,8 +211,7 @@ export default function App() {
     })
   );
 
-  const [mobileMenuOpen, setMobileMenuOpen] =
-    useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [tournamentFormat, setTournamentFormat] = useState(() =>
     readStorage("sscup-format", "league")
@@ -214,17 +227,12 @@ export default function App() {
         .order("id");
 
       if (error) {
-        console.error(
-          "Takım çekme hatası:",
-          error
-        );
+        console.error("Takım çekme hatası:", error);
         return;
       }
 
       if (data) {
-        setTeams(
-          data.map((team) => team.name)
-        );
+        setTeams(data.map((team) => team.name));
       }
     }
 
@@ -239,37 +247,24 @@ export default function App() {
     readStorage("sscup-fixtures", [])
   );
 
-  const [goalScorers, setGoalScorers] =
-    useState(() =>
-      readStorage("sscup-goal-scorers", [])
-    );
+  const [goalScorers, setGoalScorers] = useState(() =>
+    readStorage("sscup-goals", [])
+  );
 
   useEffect(() => {
-    localStorage.setItem(
-      "sscup-format",
-      JSON.stringify(tournamentFormat)
-    );
+    localStorage.setItem("sscup-format", JSON.stringify(tournamentFormat));
   }, [tournamentFormat]);
 
   useEffect(() => {
-    localStorage.setItem(
-      "sscup-teams",
-      JSON.stringify(teams)
-    );
+    localStorage.setItem("sscup-teams", JSON.stringify(teams));
   }, [teams]);
 
   useEffect(() => {
-    localStorage.setItem(
-      "sscup-draw-order",
-      JSON.stringify(drawOrder)
-    );
+    localStorage.setItem("sscup-draw-order", JSON.stringify(drawOrder));
   }, [drawOrder]);
 
   useEffect(() => {
-    localStorage.setItem(
-      "sscup-fixtures",
-      JSON.stringify(fixtures)
-    );
+    localStorage.setItem("sscup-fixtures", JSON.stringify(fixtures));
   }, [fixtures]);
 
   useEffect(() => {
@@ -306,15 +301,11 @@ export default function App() {
           events: Array.isArray(item.events) ? item.events : [],
         }));
 
-        const localFixtures = readStorage(
-          "sscup-fixtures",
-          []
-        );
+        const localFixtures = readStorage("sscup-fixtures", []);
 
         const mergedLeagueFixtures = supabaseFixtures.map((match) => {
           const localMatch = localFixtures.find(
-            (item) =>
-              String(item.id) === String(match.id)
+            (item) => String(item.id) === String(match.id)
           );
 
           if (!localMatch) return match;
@@ -322,10 +313,7 @@ export default function App() {
           return {
             ...match,
             ...localMatch,
-            played:
-              localMatch.played === true
-                ? true
-                : match.played,
+            played: localMatch.played === true ? true : match.played,
           };
         });
 
@@ -338,11 +326,7 @@ export default function App() {
         ];
 
         setFixtures(mergedFixtures);
-
-        localStorage.setItem(
-          "sscup-fixtures",
-          JSON.stringify(mergedFixtures)
-        );
+        localStorage.setItem("sscup-fixtures", JSON.stringify(mergedFixtures));
       }
     }
 
@@ -351,26 +335,14 @@ export default function App() {
 
   useEffect(() => {
     const refreshGoalScorers = () => {
-      setGoalScorers(
-        readStorage("sscup-goal-scorers", [])
-      );
+      setGoalScorers(readStorage("sscup-goals", []));
     };
 
-    window.addEventListener(
-      "storage",
-      refreshGoalScorers
-    );
-
-    const interval = window.setInterval(
-      refreshGoalScorers,
-      1000
-    );
+    window.addEventListener("storage", refreshGoalScorers);
+    const interval = window.setInterval(refreshGoalScorers, 1000);
 
     return () => {
-      window.removeEventListener(
-        "storage",
-        refreshGoalScorers
-      );
+      window.removeEventListener("storage", refreshGoalScorers);
       window.clearInterval(interval);
     };
   }, []);
@@ -428,6 +400,19 @@ export default function App() {
     }, 50);
   }
 
+  // 🔒 YALNIZCA SPORCULAR / CANLI TAKİP MODU
+  if (isPublicRoute) {
+    return (
+      <PublicTournament
+        teams={teams}
+        fixtures={fixtures}
+        standings={standings}
+        goalScorers={goalScorers}
+        settings={settings}
+      />
+    );
+  }
+
   function renderPage() {
     switch (activePage) {
       case "settings":
@@ -452,7 +437,6 @@ export default function App() {
               setDrawOrder={setDrawOrder}
               setFixtures={setFixtures}
             />
-
             <SquadManager teams={teams} />
           </div>
         );
@@ -461,6 +445,10 @@ export default function App() {
         return (
           <TeamContacts
             teams={teams}
+            fixtures={fixtures}
+            standings={standings}
+            goalScorers={goalScorers}
+            settings={settings}
           />
         );
 
@@ -472,7 +460,6 @@ export default function App() {
               drawOrder={drawOrder}
               setDrawOrder={setDrawOrder}
             />
-
             <DrawManager
               teams={teams}
               drawOrder={drawOrder}
@@ -482,12 +469,10 @@ export default function App() {
         );
 
       case "fixture":
-        return (
-          <Fixture
-            fixtures={fixtures}
-            setFixtures={setFixtures}
-          />
-        );
+        return <Fixture fixtures={fixtures} setFixtures={setFixtures} />;
+
+      case "dailyschedule":
+        return <DailySchedule fixtures={fixtures} settings={settings} />;
 
       case "group-fixture":
         return <GroupFixture />;
@@ -506,12 +491,7 @@ export default function App() {
         );
 
       case "standings":
-        return (
-          <Standings
-            teams={teams}
-            fixtures={fixtures}
-          />
-        );
+        return <Standings teams={teams} fixtures={fixtures} />;
 
       case "scorers":
         return <GoalScorers />;
@@ -537,20 +517,11 @@ export default function App() {
         );
 
       case "discipline":
-        return (
-          <DisciplineBoard
-            teams={teams}
-            fixtures={fixtures}
-          />
-        );
+        return <DisciplineBoard teams={teams} fixtures={fixtures} />;
 
       case "statistics":
-        return (
-          <Statistics
-            fixtures={fixtures}
-            standings={standings}
-          />
-        );
+        return <Statistics fixtures={fixtures} standings={standings} />;
+
       case "public":
         return (
           <PublicTournament
@@ -582,20 +553,13 @@ export default function App() {
     }
   }
 
-  const activeMenuItem = menuItems.find(
-    (item) => item.id === activePage
-  );
+  const activeMenuItem = menuItems.find((item) => item.id === activePage);
 
   return (
     <div className="app-shell">
-      <aside
-        className={`sidebar ${
-          mobileMenuOpen ? "sidebar-open" : ""
-        }`}
-      >
+      <aside className={`sidebar ${mobileMenuOpen ? "sidebar-open" : ""}`}>
         <div className="brand brand-pro">
           <div className="brand-logo">🏆</div>
-
           <div className="brand-copy">
             <span className="brand-product">S&S CUP MANAGER PRO</span>
             <h1>{settings.tournamentName}</h1>
@@ -608,17 +572,10 @@ export default function App() {
             <button
               key={item.id}
               type="button"
-              className={`nav-item ${
-                activePage === item.id
-                  ? "active"
-                  : ""
-              }`}
+              className={`nav-item ${activePage === item.id ? "active" : ""}`}
               onClick={() => changePage(item.id)}
             >
-              <span className="nav-icon">
-                {item.icon}
-              </span>
-
+              <span className="nav-icon">{item.icon}</span>
               <span>{item.label}</span>
             </button>
           ))}
@@ -638,9 +595,7 @@ export default function App() {
           type="button"
           className="sidebar-overlay"
           aria-label="Menüyü kapat"
-          onClick={() =>
-            setMobileMenuOpen(false)
-          }
+          onClick={() => setMobileMenuOpen(false)}
         />
       )}
 
@@ -649,46 +604,37 @@ export default function App() {
           <button
             type="button"
             className="menu-toggle"
-            onClick={() =>
-              setMobileMenuOpen((current) => !current)
-            }
+            onClick={() => setMobileMenuOpen((current) => !current)}
             aria-label="Menüyü aç"
           >
             ☰
           </button>
 
           <div>
-            <span className="topbar-label">
-              S&S CUP MANAGER PRO
-            </span>
+            <span className="topbar-label">S&S CUP MANAGER PRO</span>
             <h2>
-              {activeMenuItem?.icon}{" "}
-              {activeMenuItem?.label}
+              {activeMenuItem?.icon} {activeMenuItem?.label}
             </h2>
           </div>
 
-          <div className="topbar-badge">
-            {teams.length} Takım
-          </div>
+          <div className="topbar-badge">{teams.length} Takım</div>
         </header>
 
-        <div className="content-area">
-          {renderPage()}
-        </div>
+        <div className="content-area">{renderPage()}</div>
 
-        <nav 
-          className="mobile-bottom-nav" 
+        <nav
+          className="mobile-bottom-nav"
           aria-label="Hızlı menü"
           style={{
-            position: 'fixed',
-            bottom: '0px',
-            left: '0px',
-            right: '0px',
-            top: 'auto',
-            transform: 'none',
+            position: "fixed",
+            bottom: "0px",
+            left: "0px",
+            right: "0px",
+            top: "auto",
+            transform: "none",
             zIndex: 999999,
-            backgroundColor: '#121212', // Varsa arka plan rengin kaybolmasın diye
-            borderTop: '1px solid rgba(255,255,255,0.1)'
+            backgroundColor: "#121212",
+            borderTop: "1px solid rgba(255,255,255,0.1)",
           }}
         >
           {mobileMenuItems.map((item) => (

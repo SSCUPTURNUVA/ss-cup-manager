@@ -8,6 +8,8 @@ export default function TeamManager({
   setFixtures,
 }) {
   const [teamName, setTeamName] = useState("");
+  const [editingIndex, setEditingIndex] = useState(null);
+  const [editingName, setEditingName] = useState("");
 
   const drawCompleted = useMemo(() => {
     return (
@@ -136,6 +138,116 @@ export default function TeamManager({
 
   }
 
+
+  function startEditTeam(index) {
+    setEditingIndex(index);
+    setEditingName(teams[index] || "");
+  }
+
+  function cancelEditTeam() {
+    setEditingIndex(null);
+    setEditingName("");
+  }
+
+  async function saveTeamName(index) {
+    const oldName = teams[index];
+    const newName = editingName.trim();
+
+    if (!oldName) return;
+
+    if (!newName) {
+      alert("Takım adı boş bırakılamaz.");
+      return;
+    }
+
+    const duplicateTeam = teams.some(
+      (team, teamIndex) =>
+        teamIndex !== index &&
+        team.toLocaleLowerCase("tr-TR") ===
+          newName.toLocaleLowerCase("tr-TR")
+    );
+
+    if (duplicateTeam) {
+      alert("Bu takım adı zaten kullanılıyor.");
+      return;
+    }
+
+    if (oldName === newName) {
+      cancelEditTeam();
+      return;
+    }
+
+    const updatedTeams = teams.map((team, teamIndex) =>
+      teamIndex === index ? newName : team
+    );
+
+    const updatedDrawOrder = drawOrder.map((team) =>
+      team === oldName ? newName : team
+    );
+
+    setTeams(updatedTeams);
+    setDrawOrder(updatedDrawOrder);
+
+    localStorage.setItem("sscup-teams", JSON.stringify(updatedTeams));
+    localStorage.setItem("sscup-draw-order", JSON.stringify(updatedDrawOrder));
+
+    setFixtures((currentFixtures) => {
+      const updatedFixtures = currentFixtures.map((match) => ({
+        ...match,
+        home: match.home === oldName ? newName : match.home,
+        away: match.away === oldName ? newName : match.away,
+      }));
+
+      localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));
+      return updatedFixtures;
+    });
+
+    try {
+      const savedSquads = localStorage.getItem("sscup-squads");
+      const squads = savedSquads ? JSON.parse(savedSquads) : {};
+      if (Object.prototype.hasOwnProperty.call(squads, oldName)) {
+        squads[newName] = squads[oldName];
+        delete squads[oldName];
+        localStorage.setItem("sscup-squads", JSON.stringify(squads));
+      }
+    } catch (error) {
+      console.error("Kadro takım adı güncelleme hatası:", error);
+    }
+
+    try {
+      const { error: teamError } = await supabase
+        .from("teams")
+        .update({ name: newName })
+        .eq("name", oldName);
+
+      if (teamError) {
+        console.error("Supabase takım adı güncelleme hatası:", teamError);
+      }
+
+      const { error: homeError } = await supabase
+        .from("fixtures")
+        .update({ home: newName })
+        .eq("home", oldName);
+
+      if (homeError) {
+        console.error("Supabase ev sahibi adı güncelleme hatası:", homeError);
+      }
+
+      const { error: awayError } = await supabase
+        .from("fixtures")
+        .update({ away: newName })
+        .eq("away", oldName);
+
+      if (awayError) {
+        console.error("Supabase deplasman adı güncelleme hatası:", awayError);
+      }
+    } catch (error) {
+      console.error("Takım adı eşitleme hatası:", error);
+    }
+
+    cancelEditTeam();
+  }
+
   function deleteTeam(index) {
     if (drawCompleted) {
       alert(
@@ -221,76 +333,124 @@ export default function TeamManager({
   }
 
   return (
-    <div className="card">
-      <h2>👥 Takımlar ({teams.length}/30)</h2>
+    <div className="card team-manager-card">
+      <div className="team-manager-header">
+        <div>
+          <span className="team-manager-kicker">TURNUVA YÖNETİMİ</span>
+          <h2>👥 Takımlar</h2>
+          <p>Takımları ekleyin, isimlerini düzenleyin veya kura öncesinde silin.</p>
+        </div>
+
+        <div className="team-manager-count">
+          <strong>{teams.length}</strong>
+          <span>/ 30 TAKIM</span>
+        </div>
+      </div>
 
       {drawCompleted && (
-        <div
-          style={{
-            padding: "14px",
-            marginBottom: "16px",
-            border: "2px solid #d6a800",
-            borderRadius: "10px",
-            backgroundColor: "rgba(214, 168, 0, 0.1)",
-          }}
-        >
-          <b>🔒 Takım listesi kilitlendi</b>
-
-          <p style={{ marginBottom: 0 }}>
-            Fanus kurası tamamlandığı için artık
-            takım eklenemez veya silinemez.
-          </p>
+        <div className="team-lock-notice">
+          <div className="team-lock-icon">🔒</div>
+          <div>
+            <strong>Fanus kurası tamamlandı</strong>
+            <p>Yeni takım ekleme ve silme kapalıdır. Takım adını gerektiğinde düzenleyebilirsiniz.</p>
+          </div>
         </div>
       )}
 
-      <div className="addRow">
-        <input
-          type="text"
-          placeholder={
-            drawCompleted
-              ? "Kura tamamlandı — takım listesi kilitli"
-              : "Takım adı"
-          }
-          value={teamName}
-          disabled={drawCompleted}
-          onChange={(event) =>
-            setTeamName(event.target.value)
-          }
-          onKeyDown={handleKeyDown}
-        />
+      <div className="team-add-panel">
+        <div className="team-add-label">YENİ TAKIM</div>
+        <div className="team-add-row">
+          <input
+            type="text"
+            placeholder={
+              drawCompleted
+                ? "Kura tamamlandı — yeni takım ekleme kapalı"
+                : "Takım adını yazın..."
+            }
+            value={teamName}
+            disabled={drawCompleted}
+            onChange={(event) => setTeamName(event.target.value)}
+            onKeyDown={handleKeyDown}
+          />
 
-        <button
-          type="button"
-          onClick={addTeam}
-          disabled={drawCompleted}
-        >
-          {drawCompleted
-            ? "🔒 Kilitli"
-            : "Takım Ekle"}
-        </button>
+          <button
+            type="button"
+            className="team-add-button"
+            onClick={addTeam}
+            disabled={drawCompleted}
+          >
+            {drawCompleted ? "🔒 Kilitli" : "＋ Takım Ekle"}
+          </button>
+        </div>
       </div>
 
       {teams.length === 0 ? (
-        <p>Henüz takım eklenmedi.</p>
+        <div className="team-empty-state">
+          <span>⚽</span>
+          <strong>Henüz takım eklenmedi</strong>
+          <small>İlk takımı yukarıdaki alandan ekleyebilirsiniz.</small>
+        </div>
       ) : (
-        <ul className="teamList">
-          {teams.map((team, index) => (
-            <li key={team}>
-              <span>
-                <b>{index + 1}.</b> {team}
-              </span>
+        <div className="team-cards">
+          {teams.map((team, index) => {
+            const isEditing = editingIndex === index;
 
-              <button
-                type="button"
-                className="deleteBtn"
-                disabled={drawCompleted}
-                onClick={() => deleteTeam(index)}
-              >
-                {drawCompleted ? "🔒" : "Sil"}
-              </button>
-            </li>
-          ))}
-        </ul>
+            return (
+              <div className={`team-card-row ${isEditing ? "editing" : ""}`} key={`${team}-${index}`}>
+                <div className="team-card-number">{String(index + 1).padStart(2, "0")}</div>
+
+                <div className="team-card-main">
+                  {isEditing ? (
+                    <input
+                      className="team-edit-input"
+                      value={editingName}
+                      autoFocus
+                      maxLength={60}
+                      onChange={(event) => setEditingName(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") saveTeamName(index);
+                        if (event.key === "Escape") cancelEditTeam();
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <span className="team-card-label">TAKIM</span>
+                      <strong>{team}</strong>
+                    </>
+                  )}
+                </div>
+
+                <div className="team-card-actions">
+                  {isEditing ? (
+                    <>
+                      <button type="button" className="team-save-button" onClick={() => saveTeamName(index)}>
+                        ✓ Kaydet
+                      </button>
+                      <button type="button" className="team-cancel-button" onClick={cancelEditTeam}>
+                        Vazgeç
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button type="button" className="team-edit-button" onClick={() => startEditTeam(index)}>
+                        ✏️ Düzenle
+                      </button>
+                      <button
+                        type="button"
+                        className="team-delete-button"
+                        disabled={drawCompleted}
+                        onClick={() => deleteTeam(index)}
+                        title={drawCompleted ? "Kura tamamlandığı için takım silinemez" : "Takımı sil"}
+                      >
+                        {drawCompleted ? "🔒 Sil" : "🗑️ Sil"}
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
