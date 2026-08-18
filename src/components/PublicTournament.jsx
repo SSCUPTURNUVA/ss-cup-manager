@@ -263,7 +263,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
     const [fixturesResult, teamsResult, knockoutResult] = await Promise.allSettled([
       supabase.from("fixtures").select("*").order("id"),
-      supabase.from("teams").select("name").order("id"),
+      supabase.from("teams").select("id,name").order("id"),
       supabase.from("app_state").select("value,updated_at").eq("id", "knockout").maybeSingle(),
     ]);
 
@@ -333,14 +333,18 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
   useEffect(() => {
     refresh();
-    const poll = window.setInterval(refresh, 2000);
+    const poll = window.setInterval(refresh, 1000);
 
     const onVisible = () => {
       if (document.visibilityState === "visible") refresh();
     };
     const onFocus = () => refresh();
+    const onOnline = () => refresh();
+    const onPageShow = () => refresh();
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onFocus);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("pageshow", onPageShow);
 
     const channel = supabase
       .channel(`sscup-public-live-${Math.random().toString(36).slice(2)}`)
@@ -354,6 +358,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       window.clearInterval(poll);
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("pageshow", onPageShow);
       supabase.removeChannel(channel);
     };
   }, [refresh]);
