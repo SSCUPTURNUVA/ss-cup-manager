@@ -493,7 +493,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       </header>
 
       <main className="public-live-shell">
-        {championName && (
+        {championName && activeTab === "overview" && (
           <section className="public-champion-card">
             <div className="public-champion-glow glow-left" />
             <div className="public-champion-glow glow-right" />
