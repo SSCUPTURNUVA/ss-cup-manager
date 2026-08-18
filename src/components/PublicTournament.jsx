@@ -53,6 +53,8 @@ function getEvents(match) {
 }
 
 function mapCloudFixture(item) {
+  const played = item.played === true;
+  const live = item.live === true && !played && item.match_phase !== "completed";
   return {
     id: item.id,
     home: item.home,
@@ -61,10 +63,10 @@ function mapCloudFixture(item) {
     time: item.time,
     field: item.pitch || item.field,
     week: item.week,
-    played: item.played,
+    played,
     homeScore: item.home_score,
     awayScore: item.away_score,
-    live: item.live,
+    live,
     timerRunning: item.timer_running,
     timerStartedAt: item.timer_started_at,
     elapsedSeconds: item.elapsed_seconds,
@@ -291,6 +293,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           ...m,
           id: m.id || `ko-${m.knockoutKey || i}`,
           isKnockout: true,
+          played: m.played === true,
+          live: m.live === true && m.played !== true && m.matchPhase !== "completed",
           homePenalties: m.homePenalties ?? m.homePen ?? "",
           awayPenalties: m.awayPenalties ?? m.awayPen ?? "",
           events: Array.isArray(m.events) ? m.events : [],
@@ -314,7 +318,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         (current.knockoutKey && m.knockoutKey === current.knockoutKey) ||
         String(m.id) === String(current.id)
       );
-      return updated || current;
+      return updated || null;
     });
   }, []);
 
@@ -358,7 +362,51 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
   const leagueFixtures = remoteFixtures.length > 0 ? remoteFixtures : fixtures;
   const localKnockout = (fixtures || []).filter((match) => match?.isKnockout === true);
-  const knockoutMatches = remoteKnockout.length > 0 ? remoteKnockout : localKnockout;
+  const rawKnockoutMatches = remoteKnockout.length > 0 ? remoteKnockout : localKnockout;
+
+  // Takipçi eleme kurası çekildiği anda bütün yolu görsün. Henüz sonucu
+  // belli olmayan eşleşmeler "ÇF 1 Galibi" / "YF 1 Mağlubu" şeklinde kalır.
+  const byKoKey = new Map(rawKnockoutMatches.map((m) => [m.knockoutKey, m]));
+  const koWinner = (match, home, away) => {
+    if (!match || match.played !== true) return "";
+    const hs = safeNumber(match.homeScore);
+    const as = safeNumber(match.awayScore);
+    if (hs > as) return home;
+    if (as > hs) return away;
+    const hp = safeNumber(match.homePenalties ?? match.homePen);
+    const ap = safeNumber(match.awayPenalties ?? match.awayPen);
+    if (hp > ap) return home;
+    if (ap > hp) return away;
+    return "";
+  };
+  const koLoser = (match, home, away) => {
+    const winner = koWinner(match, home, away);
+    if (!winner) return "";
+    return winner === home ? away : home;
+  };
+  const q = [0,1,2,3].map((i) => byKoKey.get(`quarter-${i}`)).filter(Boolean);
+  const qTeams = [0,1,2,3].map((i) => {
+    const m = byKoKey.get(`quarter-${i}`);
+    return { home: m?.home || `ÇF ${i + 1} Takım 1`, away: m?.away || `ÇF ${i + 1} Takım 2`, winner: koWinner(m, m?.home, m?.away) };
+  });
+  const semiPairs = [
+    { home: qTeams[0].winner || "ÇF 1 Galibi", away: qTeams[2].winner || "ÇF 3 Galibi" },
+    { home: qTeams[1].winner || "ÇF 2 Galibi", away: qTeams[3].winner || "ÇF 4 Galibi" },
+  ];
+  const semi0 = byKoKey.get("semi-0");
+  const semi1 = byKoKey.get("semi-1");
+  const s0w = koWinner(semi0, semiPairs[0].home, semiPairs[0].away);
+  const s1w = koWinner(semi1, semiPairs[1].home, semiPairs[1].away);
+  const s0l = koLoser(semi0, semiPairs[0].home, semiPairs[0].away);
+  const s1l = koLoser(semi1, semiPairs[1].home, semiPairs[1].away);
+
+  const knockoutMatches = rawKnockoutMatches.length === 0 ? [] : [
+    ...[0,1,2,3].map((i) => ({ ...(byKoKey.get(`quarter-${i}`) || {}), id: byKoKey.get(`quarter-${i}`)?.id || `ko-quarter-${i}`, knockoutKey: `quarter-${i}`, isKnockout: true, stageLabel: "ÇEYREK FİNAL", home: qTeams[i].home, away: qTeams[i].away })),
+    { ...(semi0 || {}), id: semi0?.id || "ko-semi-0", knockoutKey: "semi-0", isKnockout: true, stageLabel: "YARI FİNAL", home: semiPairs[0].home, away: semiPairs[0].away },
+    { ...(semi1 || {}), id: semi1?.id || "ko-semi-1", knockoutKey: "semi-1", isKnockout: true, stageLabel: "YARI FİNAL", home: semiPairs[1].home, away: semiPairs[1].away },
+    { ...(byKoKey.get("third-place-0") || {}), id: byKoKey.get("third-place-0")?.id || "ko-third-place-0", knockoutKey: "third-place-0", isKnockout: true, stageLabel: "3.'LÜK MAÇI", home: s0l || "YF 1 Mağlubu", away: s1l || "YF 2 Mağlubu" },
+    { ...(byKoKey.get("final-0") || {}), id: byKoKey.get("final-0")?.id || "ko-final-0", knockoutKey: "final-0", isKnockout: true, stageLabel: "FİNAL", home: s0w || "YF 1 Galibi", away: s1w || "YF 2 Galibi" },
+  ];
   const knockoutKeys = new Set(knockoutMatches.map((m) => m.knockoutKey).filter(Boolean));
   const displayFixtures = [
     ...leagueFixtures.filter((m) => !m?.isKnockout || !knockoutKeys.has(m.knockoutKey)),
@@ -529,10 +577,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
         {activeTab === "knockout" && (
           <section className="public-section public-knockout-section">
-            <div className="public-section-head"><div><span>ŞAMPİYONLUK YOLU</span><h2>🏆 Eleme Turları</h2></div><b>Çeyrek Final • Yarı Final • Final</b></div>
+            <div className="public-section-head"><div><span>ŞAMPİYONLUK YOLU</span><h2>🏆 Eleme Turları</h2></div><b>Çeyrek Final • Yarı Final • 3.'lük • Final</b></div>
             {knockoutMatches.length === 0 ? <div className="public-empty-box">Eleme eşleşmeleri henüz oluşmadı.</div> : (
               <div className="public-knockout-stages">
-                {["ÇEYREK FİNAL", "YARI FİNAL", "FİNAL", "3.'LÜK MAÇI"].map((stage) => {
+                {["ÇEYREK FİNAL", "YARI FİNAL", "3.'LÜK MAÇI", "FİNAL"].map((stage) => {
                   const matches = knockoutMatches.filter((m) => stageText(m) === stage);
                   if (!matches.length) return null;
                   return <div className="public-knockout-stage" key={stage}><h3>{stage}</h3><div className="public-knockout-grid">{matches.map((match, index) => (

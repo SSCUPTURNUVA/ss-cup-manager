@@ -783,6 +783,72 @@ export default function Knockout({
     getLoser(semiTeams[index].home, semiTeams[index].away, match)
   );
 
+  // Eleme kurası oluştuğu anda bütün şampiyonluk yolunu Maç Merkezi'ne taşı.
+  // Henüz takımı belli olmayan turlar yer tutucu isimlerle görünür; gerçek takım
+  // belli olduğunda aynı kayıt güncellenir, maç olayları/skorlar korunur.
+  useEffect(() => {
+    if (!drawStarted || typeof setFixtures !== "function") return;
+
+    const isRealTeam = (name) => Boolean(name) && !/(Galibi|Mağlubu|PENALTY_WAIT)/i.test(String(name));
+    const makeMatch = (key, stageLabel, home, away, source) => ({
+      id: `knockout:${key}`,
+      knockoutKey: key,
+      isKnockout: true,
+      stageLabel,
+      home,
+      away,
+      participantsReady: isRealTeam(home) && isRealTeam(away),
+      homeScore: source?.homeScore ?? "",
+      awayScore: source?.awayScore ?? "",
+      homePen: source?.homePen ?? "",
+      awayPen: source?.awayPen ?? "",
+      date: source?.date || "",
+      time: source?.time || "",
+      field: source?.field || "Saha 1",
+      pitch: source?.field || "Saha 1",
+      played: source?.played === true,
+      live: source?.live === true,
+      matchPhase: source?.matchPhase || "waiting",
+      timerRunning: source?.timerRunning === true,
+      timerStartedAt: source?.timerStartedAt ?? null,
+      elapsedSeconds: source?.elapsedSeconds ?? 0,
+      events: Array.isArray(source?.events) ? source.events : [],
+    });
+
+    const bracket = [
+      ...quarter.map((m, i) => makeMatch(`quarter-${i}`, `Çeyrek Final ${i + 1}`, m.home || `ÇF ${i + 1} Takım 1`, m.away || `ÇF ${i + 1} Takım 2`, m)),
+      makeMatch("semi-0", "Yarı Final 1", semiTeams[0].home || "ÇF 1 Galibi", semiTeams[0].away || "ÇF 3 Galibi", semi[0]),
+      makeMatch("semi-1", "Yarı Final 2", semiTeams[1].home || "ÇF 2 Galibi", semiTeams[1].away || "ÇF 4 Galibi", semi[1]),
+      makeMatch("third-place-0", "3.'lük Maçı", semiLosers[0] || "YF 1 Mağlubu", semiLosers[1] || "YF 2 Mağlubu", thirdPlace),
+      makeMatch("final-0", "Final", semiWinners[0] || "YF 1 Galibi", semiWinners[1] || "YF 2 Galibi", finalMatch),
+    ];
+
+    setFixtures((current) => {
+      const league = current.filter((m) => m?.isKnockout !== true);
+      const oldKo = new Map(current.filter((m) => m?.isKnockout === true).map((m) => [m.knockoutKey, m]));
+      const merged = bracket.map((fresh) => {
+        const old = oldKo.get(fresh.knockoutKey);
+        if (!old) return fresh;
+        return {
+          ...fresh,
+          ...old,
+          home: fresh.home,
+          away: fresh.away,
+          participantsReady: fresh.participantsReady,
+          stageLabel: fresh.stageLabel,
+          knockoutKey: fresh.knockoutKey,
+          isKnockout: true,
+          id: old.id || fresh.id,
+        };
+      });
+      const next = [...league, ...merged];
+      if (JSON.stringify(next) === JSON.stringify(current)) return current;
+      localStorage.setItem("sscup-fixtures", JSON.stringify(next));
+      window.dispatchEvent(new CustomEvent("sscup-fixtures-updated", { detail: next }));
+      return next;
+    });
+  }, [drawStarted, quarter, semi, finalMatch, thirdPlace, semiTeams[0].home, semiTeams[0].away, semiTeams[1].home, semiTeams[1].away, semiWinners[0], semiWinners[1], semiLosers[0], semiLosers[1], setFixtures]);
+
   const champion = getWinner(semiWinners[0], semiWinners[1], finalMatch);
   const thirdPlaceWinner = getWinner(semiLosers[0], semiLosers[1], thirdPlace);
 
