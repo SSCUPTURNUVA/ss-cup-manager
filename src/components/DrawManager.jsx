@@ -121,6 +121,13 @@ export default function DrawManager({
       JSON.stringify([])
     );
 
+    [
+      "sscup-knockout", "sscup-knockout-data", "sscup-quarterfinals",
+      "sscup-semifinals", "sscup-champion", "sscup-quarter", "sscup-semi",
+      "sscup-final", "sscup-third-place", "sscup-match-events",
+      "sscup-active-match", "sscup-live-match"
+    ].forEach((key) => localStorage.removeItem(key));
+
     window.dispatchEvent(
       new CustomEvent("sscup-goals-updated", {
         detail: [],
@@ -380,14 +387,21 @@ export default function DrawManager({
       return;
     }
 
-    // Önce eski lig fikstürünü temizle.
-    const { error: deleteError } = await supabase
-      .from("fixtures")
-      .delete()
-      .eq("is_knockout", false);
+    // Yeni lig fikstürü yeni turnuvanın başlangıcıdır. Canlı takipte önceki
+    // turnuvadan maç sonucu, gol krallığı, eleme veya şampiyon kalmasın.
+    const cloudResetSteps = [
+      ["eski fikstür", () => supabase.from("fixtures").delete().neq("id", 0)],
+      ["eski gol krallığı", () => supabase.from("goal_scorers").delete().neq("id", 0)],
+      ["eski eleme", () => supabase.from("app_state").delete().eq("id", "knockout")],
+    ];
 
-    if (deleteError) {
-      console.error("Eski fikstür silinirken hata oluştu:", deleteError);
+    for (const [label, run] of cloudResetSteps) {
+      const { error: resetError } = await run();
+      if (resetError) {
+        console.error(`${label} temizlenirken hata oluştu:`, resetError);
+        alert(`Yeni fikstür kaydedilemedi. ${label} temizlenemedi: ${resetError.message}`);
+        return;
+      }
     }
 
     // Yeni fikstür tarih/saat verilmeden buluta kaydedilir.

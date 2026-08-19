@@ -51,16 +51,6 @@ const menuItems = [
   { id: "public", icon: "🌐", label: "Canlı Durum" },
 ];
 
-function safeWriteStorage(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-    return true;
-  } catch (error) {
-    console.warn(`Yerel kayıt yazılamadı (${key}):`, error);
-    return false;
-  }
-}
-
 function readStorage(key, fallback) {
   try {
     const saved = localStorage.getItem(key);
@@ -296,19 +286,19 @@ export default function App() {
   );
 
   useEffect(() => {
-    safeWriteStorage("sscup-format", tournamentFormat);
+    localStorage.setItem("sscup-format", JSON.stringify(tournamentFormat));
   }, [tournamentFormat]);
 
   useEffect(() => {
-    safeWriteStorage("sscup-teams", teams);
+    localStorage.setItem("sscup-teams", JSON.stringify(teams));
   }, [teams]);
 
   useEffect(() => {
-    safeWriteStorage("sscup-draw-order", drawOrder);
+    localStorage.setItem("sscup-draw-order", JSON.stringify(drawOrder));
   }, [drawOrder]);
 
   useEffect(() => {
-    safeWriteStorage("sscup-fixtures", fixtures);
+    localStorage.setItem("sscup-fixtures", JSON.stringify(fixtures));
   }, [fixtures]);
 
   useEffect(() => {
@@ -345,32 +335,11 @@ export default function App() {
           events: Array.isArray(item.events) ? item.events : [],
         }));
 
-        const localFixtures = readStorage("sscup-fixtures", []);
-
-        const mergedLeagueFixtures = supabaseFixtures.map((match) => {
-          const localMatch = localFixtures.find(
-            (item) => String(item.id) === String(match.id)
-          );
-
-          if (!localMatch) return match;
-
-          return {
-            ...match,
-            ...localMatch,
-            played: localMatch.played === true ? true : match.played,
-          };
-        });
-
-        const localKnockoutFixtures = localFixtures.filter(
-          (match) => match?.isKnockout === true
-        );
-        const mergedFixtures = [
-          ...mergedLeagueFixtures.filter((match) => match?.isKnockout !== true),
-          ...localKnockoutFixtures,
-        ];
-
-        setFixtures(mergedFixtures);
-        safeWriteStorage("sscup-fixtures", mergedFixtures);
+        // Supabase lig fikstürü tek doğru kaynaktır. Eski localStorage skor/
+        // oynandı bilgisi yeni turnuvaya taşınmasın. Eleme tarafı kendi
+        // app_state kaydından yönetildiği için burada yerel eleme de eklenmez.
+        setFixtures(supabaseFixtures);
+        localStorage.setItem("sscup-fixtures", JSON.stringify(supabaseFixtures));
       }
     }
 

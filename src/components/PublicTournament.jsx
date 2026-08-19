@@ -485,14 +485,24 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   }, [displayFixtures, liveMatch?.date, upcoming, recent]);
 
   const liveStandings = useMemo(() => {
+    // Takip sayfasında eski tarayıcı/localStorage verisine geri düşme.
+    // Bulut fikstürü geldiyse puan durumu yalnızca güncel turnuvadan hesaplanır.
+    if (Array.isArray(remoteFixtures)) {
+      return calculateStandings(displayTeams, displayFixtures);
+    }
     const calculated = calculateStandings(displayTeams, displayFixtures);
     return calculated.length > 0 ? calculated : standings;
-  }, [displayTeams, displayFixtures, standings]);
+  }, [displayTeams, displayFixtures, standings, remoteFixtures]);
 
   const liveScorers = useMemo(() => {
+    // Yeni turnuvada henüz gol yoksa [] dönmeli; eski local gol krallığına
+    // fallback yapmak eski golcüleri canlı takipte yeniden gösteriyordu.
+    if (Array.isArray(remoteFixtures)) {
+      return deriveScorers(displayFixtures);
+    }
     const calculated = deriveScorers(displayFixtures);
     return calculated.length > 0 ? calculated : goalScorers;
-  }, [displayFixtures, goalScorers]);
+  }, [displayFixtures, goalScorers, remoteFixtures]);
 
   const leader = liveStandings[0];
   const topScorer = liveScorers[0];
