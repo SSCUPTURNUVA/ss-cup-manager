@@ -54,6 +54,7 @@ export default function DrawCeremony({
 
   function addDrawnTeam() {
     if (!selectedTeam) {
+      alert("Fanustan çıkan takımı seçiniz.");
       return;
     }
 

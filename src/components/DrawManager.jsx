@@ -438,15 +438,6 @@ export default function DrawManager({
 
     clearOldMatchData();
 
-    alert(
-      `Lig fikstürü oluşturuldu.\n\n` +
-        `Takım sayısı: ${orderedTeams.length}\n` +
-        `Her takım: ${matchCount} maç\n` +
-        `Toplam maç: ${matches.length}\n\n` +
-        `Haftalar otomatik dağıtıldı; aynı takım aynı hafta yalnızca 1 maç oynar.\n` +
-        `Tarih ve saatler boş bırakıldı; fikstür ekranından siz verin.\n\n` +
-        "Fanus kura sırası korunmuştur."
-    );
   }
 
   return (
