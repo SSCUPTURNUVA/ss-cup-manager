@@ -252,6 +252,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const [remoteFixtures, setRemoteFixtures] = useState(null);
   const [remoteTeams, setRemoteTeams] = useState(null);
   const [remoteKnockout, setRemoteKnockout] = useState([]);
+  const [activeFixtureIds, setActiveFixtureIds] = useState(null);
+  const activeFixtureIdsRef = useRef(null);
   const [now, setNow] = useState(Date.now());
   const [lastSync, setLastSync] = useState(null);
   const [selectedMatch, setSelectedMatch] = useState(null);
@@ -272,11 +274,11 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current;
 
-    const [fixturesResult, teamsResult, knockoutResult, tournamentResult] = await Promise.allSettled([
+    const [fixturesResult, teamsResult, knockoutResult, activeFixtureResult] = await Promise.allSettled([
       supabase.from("fixtures").select("*").order("id"),
       supabase.from("teams").select("id,name").order("id"),
       supabase.from("app_state").select("value,updated_at").eq("id", "knockout").maybeSingle(),
-      supabase.from("app_state").select("value,updated_at").eq("id", "current_tournament").maybeSingle(),
+      supabase.from("app_state").select("value,updated_at").eq("id", "active_fixture_ids").maybeSingle(),
     ]);
 
     // Yavaş kalan eski bir istek, yeni verinin üstüne yazamasın.
@@ -284,27 +286,28 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
     let mappedFixtures = null;
     let stagedKnockout = null;
+    let currentActiveIds = activeFixtureIdsRef.current;
 
-    let tournamentMarker = null;
-    if (tournamentResult.status === "fulfilled") {
-      const { data: markerRow, error: markerError } = tournamentResult.value;
-      if (!markerError && markerRow?.value && typeof markerRow.value === "object") {
-        tournamentMarker = markerRow.value;
+    if (activeFixtureResult.status === "fulfilled") {
+      const { data: activeRow, error: activeError } = activeFixtureResult.value;
+      if (!activeError) {
+        const ids = Array.isArray(activeRow?.value?.ids) ? activeRow.value.ids : null;
+        currentActiveIds = ids;
+        activeFixtureIdsRef.current = ids;
+        setActiveFixtureIds(ids);
       }
     }
-    const currentFixtureIds = new Set(
-      Array.isArray(tournamentMarker?.fixtureIds) ? tournamentMarker.fixtureIds.map(String) : []
-    );
-    const resetAtMs = Date.parse(tournamentMarker?.resetAt || "") || 0;
 
     if (fixturesResult.status === "fulfilled") {
       const { data, error } = fixturesResult.value;
       if (!error && Array.isArray(data)) {
-        // Güncel turnuva işareti varsa eski Supabase satırlarını ekranda tamamen yok say.
-        const currentRows = currentFixtureIds.size > 0
-          ? data.filter((row) => currentFixtureIds.has(String(row.id)))
+        const activeSet = Array.isArray(currentActiveIds)
+          ? new Set(currentActiveIds.map((id) => String(id)))
+          : null;
+        const filteredRows = activeSet
+          ? data.filter((row) => activeSet.has(String(row.id)))
           : data;
-        mappedFixtures = currentRows.map(mapCloudFixture);
+        mappedFixtures = filteredRows.map(mapCloudFixture);
         setRemoteFixtures(mappedFixtures);
       }
     }
@@ -319,12 +322,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     if (knockoutResult.status === "fulfilled") {
       const { data: knockoutRow, error: knockoutError } = knockoutResult.value;
       if (!knockoutError) {
+        const value = knockoutRow?.value && typeof knockoutRow.value === "object" ? knockoutRow.value : {};
         const cloudUpdatedAt = knockoutRow?.updated_at || "";
-        const knockoutUpdatedMs = Date.parse(cloudUpdatedAt) || 0;
-        // Yeni fikstürden önce kalmış eleme/final/şampiyon verisini gösterme.
-        const value = resetAtMs > 0 && knockoutUpdatedMs < resetAtMs
-          ? {}
-          : (knockoutRow?.value && typeof knockoutRow.value === "object" ? knockoutRow.value : {});
         stagedKnockout = [
           ...(Array.isArray(value.quarter) ? value.quarter.map((m, i) => ({ ...m, knockoutKey: `quarter-${i}`, stageLabel: "ÇEYREK FİNAL" })) : []),
           ...(Array.isArray(value.semi) ? value.semi.map((m, i) => ({ ...m, knockoutKey: `semi-${i}`, stageLabel: "YARI FİNAL" })) : []),
@@ -397,6 +396,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       .channel(`sscup-public-live-${Math.random().toString(36).slice(2)}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "fixtures" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.active_fixture_ids" }, refresh)
       .subscribe();
 
     return () => {

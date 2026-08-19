@@ -430,22 +430,49 @@ export default function DrawManager({
       return;
     }
 
-    // Silme yetkisi/RLS eski satırları gerçekten silemese bile canlı takip yalnızca
-    // bu turnuvanın fikstür kimliklerini kullansın. Böylece önceki turnuvanın
-    // skorları, golleri ve oynanmış maçları yeni turnuvaya karışmaz.
-    const currentFixtureIds = (insertedRows || []).map((row) => row.id).filter((id) => id != null);
+    // Supabase RLS bazı kurulumlarda DELETE isteğini hata vermeden 0 satırla
+    // sonuçlandırabiliyor. Bu nedenle canlı takip hangi fikstürün aktif olduğunu
+    // ayrıca app_state içinde tutar ve yalnızca bu ID'leri gösterir.
+    const activeFixtureIds = (insertedRows || []).map((row) => row.id).filter((id) => id != null);
     const resetAt = new Date().toISOString();
-    const { error: markerError } = await supabase
+
+    const { error: activeFixtureError } = await supabase
       .from("app_state")
       .upsert({
-        id: "current_tournament",
-        value: { fixtureIds: currentFixtureIds, resetAt },
+        id: "active_fixture_ids",
+        value: { ids: activeFixtureIds, resetAt },
         updated_at: resetAt,
       });
 
-    if (markerError) {
-      console.error("Güncel turnuva işareti kaydedilemedi:", markerError);
-      alert(`Fikstür oluşturuldu ancak canlı takip turnuva işareti kaydedilemedi: ${markerError.message}`);
+    if (activeFixtureError) {
+      console.error("Aktif fikstür işaretleme hatası:", activeFixtureError);
+      alert(`Fikstür oluştu ancak canlı takip işaretlenemedi: ${activeFixtureError.message}`);
+      return;
+    }
+
+    // Eski eleme/final/şampiyon kaydı DELETE yetkisine bağlı kalmadan boşaltılır.
+    const emptyKnockoutValue = {
+      quarter: [],
+      semi: [],
+      finalMatch: null,
+      thirdPlace: null,
+      drawPotOne: [],
+      drawPotTwo: [],
+      drawStarted: false,
+      resetAt,
+    };
+
+    const { error: knockoutResetError } = await supabase
+      .from("app_state")
+      .upsert({
+        id: "knockout",
+        value: emptyKnockoutValue,
+        updated_at: resetAt,
+      });
+
+    if (knockoutResetError) {
+      console.error("Eleme sıfırlama hatası:", knockoutResetError);
+      alert(`Fikstür oluştu ancak eski eleme verisi temizlenemedi: ${knockoutResetError.message}`);
       return;
     }
 
