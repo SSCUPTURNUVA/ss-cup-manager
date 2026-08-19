@@ -430,6 +430,25 @@ export default function DrawManager({
       return;
     }
 
+    // Silme yetkisi/RLS eski satırları gerçekten silemese bile canlı takip yalnızca
+    // bu turnuvanın fikstür kimliklerini kullansın. Böylece önceki turnuvanın
+    // skorları, golleri ve oynanmış maçları yeni turnuvaya karışmaz.
+    const currentFixtureIds = (insertedRows || []).map((row) => row.id).filter((id) => id != null);
+    const resetAt = new Date().toISOString();
+    const { error: markerError } = await supabase
+      .from("app_state")
+      .upsert({
+        id: "current_tournament",
+        value: { fixtureIds: currentFixtureIds, resetAt },
+        updated_at: resetAt,
+      });
+
+    if (markerError) {
+      console.error("Güncel turnuva işareti kaydedilemedi:", markerError);
+      alert(`Fikstür oluşturuldu ancak canlı takip turnuva işareti kaydedilemedi: ${markerError.message}`);
+      return;
+    }
+
     const rowByPair = new Map(
       (insertedRows || []).map((row) => [
         [row.home, row.away].sort().join("|||"),

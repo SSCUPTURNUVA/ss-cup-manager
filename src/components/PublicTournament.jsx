@@ -272,10 +272,11 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current;
 
-    const [fixturesResult, teamsResult, knockoutResult] = await Promise.allSettled([
+    const [fixturesResult, teamsResult, knockoutResult, tournamentResult] = await Promise.allSettled([
       supabase.from("fixtures").select("*").order("id"),
       supabase.from("teams").select("id,name").order("id"),
       supabase.from("app_state").select("value,updated_at").eq("id", "knockout").maybeSingle(),
+      supabase.from("app_state").select("value,updated_at").eq("id", "current_tournament").maybeSingle(),
     ]);
 
     // Yavaş kalan eski bir istek, yeni verinin üstüne yazamasın.
@@ -284,10 +285,26 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     let mappedFixtures = null;
     let stagedKnockout = null;
 
+    let tournamentMarker = null;
+    if (tournamentResult.status === "fulfilled") {
+      const { data: markerRow, error: markerError } = tournamentResult.value;
+      if (!markerError && markerRow?.value && typeof markerRow.value === "object") {
+        tournamentMarker = markerRow.value;
+      }
+    }
+    const currentFixtureIds = new Set(
+      Array.isArray(tournamentMarker?.fixtureIds) ? tournamentMarker.fixtureIds.map(String) : []
+    );
+    const resetAtMs = Date.parse(tournamentMarker?.resetAt || "") || 0;
+
     if (fixturesResult.status === "fulfilled") {
       const { data, error } = fixturesResult.value;
       if (!error && Array.isArray(data)) {
-        mappedFixtures = data.map(mapCloudFixture);
+        // Güncel turnuva işareti varsa eski Supabase satırlarını ekranda tamamen yok say.
+        const currentRows = currentFixtureIds.size > 0
+          ? data.filter((row) => currentFixtureIds.has(String(row.id)))
+          : data;
+        mappedFixtures = currentRows.map(mapCloudFixture);
         setRemoteFixtures(mappedFixtures);
       }
     }
@@ -302,8 +319,12 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     if (knockoutResult.status === "fulfilled") {
       const { data: knockoutRow, error: knockoutError } = knockoutResult.value;
       if (!knockoutError) {
-        const value = knockoutRow?.value && typeof knockoutRow.value === "object" ? knockoutRow.value : {};
         const cloudUpdatedAt = knockoutRow?.updated_at || "";
+        const knockoutUpdatedMs = Date.parse(cloudUpdatedAt) || 0;
+        // Yeni fikstürden önce kalmış eleme/final/şampiyon verisini gösterme.
+        const value = resetAtMs > 0 && knockoutUpdatedMs < resetAtMs
+          ? {}
+          : (knockoutRow?.value && typeof knockoutRow.value === "object" ? knockoutRow.value : {});
         stagedKnockout = [
           ...(Array.isArray(value.quarter) ? value.quarter.map((m, i) => ({ ...m, knockoutKey: `quarter-${i}`, stageLabel: "ÇEYREK FİNAL" })) : []),
           ...(Array.isArray(value.semi) ? value.semi.map((m, i) => ({ ...m, knockoutKey: `semi-${i}`, stageLabel: "YARI FİNAL" })) : []),
