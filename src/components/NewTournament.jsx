@@ -35,7 +35,21 @@ export default function NewTournament({
     const cloudSteps = [
       ["gol krallığı", () => supabase.from("goal_scorers").delete().neq("id", 0)],
       ["fikstür", () => supabase.from("fixtures").delete().neq("id", 0)],
-      ["eleme durumu", () => supabase.from("app_state").delete().eq("id", "knockout")],
+      // app_state satırlarını silmek yerine boş değerle güncelliyoruz.
+      // Böylece RLS/delete davranışı eski eleme-final-şampiyon verisini canlıda bırakamaz.
+      ["eleme durumu", () => supabase.from("app_state").upsert({
+        id: "knockout",
+        value: {},
+        updated_at: new Date().toISOString(),
+      })],
+      // Takip sayfası yalnızca bu ID listesindeki lig maçlarını gösterir.
+      // Sıfırlamada [] yazarak Supabase'de kalmış eski/sonuçlanmış maçların
+      // canlı ekrana geri düşmesini kesin olarak engelliyoruz.
+      ["aktif fikstür", () => supabase.from("app_state").upsert({
+        id: "active_fixture_ids",
+        value: { ids: [] },
+        updated_at: new Date().toISOString(),
+      })],
       ["takımlar", () => supabase.from("teams").delete().neq("id", 0)],
     ];
 
