@@ -335,10 +335,6 @@ export default function TeamManager({
       alert(
         "Turnuvadaki bütün takımlar ve turnuva verileri temizlendi."
       );
-    } else {
-      alert(
-        `${teamToDelete} silindi. Takım listesi değiştiği için eski kura ve fikstür temizlendi.`
-      );
     }
   }
 
