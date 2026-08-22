@@ -103,6 +103,10 @@ export default function Knockout({
     safeReadStorage("sscup-quarter-draw-started", false)
   );
 
+  const [quarterMode, setQuarterMode] = useState(() =>
+    safeReadStorage("sscup-quarter-mode", "draw")
+  );
+
   const [isDrawing, setIsDrawing] = useState(false);
   const [lastDrawnMatch, setLastDrawnMatch] = useState(null);
   const [cloudReady, setCloudReady] = useState(false);
@@ -135,6 +139,7 @@ export default function Knockout({
         if (Array.isArray(value.drawPotOne)) setDrawPotOne(value.drawPotOne);
         if (Array.isArray(value.drawPotTwo)) setDrawPotTwo(value.drawPotTwo);
         if (typeof value.drawStarted === "boolean") setDrawStarted(value.drawStarted);
+        if (value.quarterMode === "draw" || value.quarterMode === "ranking") setQuarterMode(value.quarterMode);
       }
 
       setCloudReady(true);
@@ -158,6 +163,7 @@ export default function Knockout({
           if (Array.isArray(value.drawPotOne)) setDrawPotOne(value.drawPotOne);
           if (Array.isArray(value.drawPotTwo)) setDrawPotTwo(value.drawPotTwo);
           if (typeof value.drawStarted === "boolean") setDrawStarted(value.drawStarted);
+          if (value.quarterMode === "draw" || value.quarterMode === "ranking") setQuarterMode(value.quarterMode);
         }
       )
       .subscribe();
@@ -180,6 +186,7 @@ export default function Knockout({
         drawPotOne,
         drawPotTwo,
         drawStarted,
+        quarterMode,
       };
 
       const { error } = await supabase
@@ -192,7 +199,7 @@ export default function Knockout({
     }, 250);
 
     return () => window.clearTimeout(timeout);
-  }, [cloudReady, quarter, semi, finalMatch, thirdPlace, drawPotOne, drawPotTwo, drawStarted]);
+  }, [cloudReady, quarter, semi, finalMatch, thirdPlace, drawPotOne, drawPotTwo, drawStarted, quarterMode]);
 
   useEffect(() => {
     localStorage.setItem("sscup-quarter", JSON.stringify(quarter));
@@ -221,6 +228,10 @@ export default function Knockout({
   useEffect(() => {
     localStorage.setItem("sscup-quarter-draw-started", JSON.stringify(drawStarted));
   }, [drawStarted]);
+
+  useEffect(() => {
+    localStorage.setItem("sscup-quarter-mode", JSON.stringify(quarterMode));
+  }, [quarterMode]);
 
   useEffect(() => {
     const knockoutMatches = fixtures.filter(
@@ -481,6 +492,7 @@ export default function Knockout({
       drawPotOne: nextPotOne,
       drawPotTwo: nextPotTwo,
       drawStarted: true,
+      quarterMode: "draw",
     };
 
     try {
@@ -501,6 +513,7 @@ export default function Knockout({
       setFinalMatch(nextFinal);
       setThirdPlace(nextThirdPlace);
       setDrawStarted(true);
+      setQuarterMode("draw");
       setLastDrawnMatch(null);
 
       alert("Çeyrek final torbaları hazırlandı. Şimdi eşleşmeleri tek tuşla çekebilirsiniz.");
@@ -512,6 +525,71 @@ export default function Knockout({
         cloudWriteLockRef.current = false;
         setIsDrawing(false);
       }, 700);
+    }
+  }
+
+  async function prepareRankedQuarter() {
+    if (isDrawing) return;
+
+    const latestFixtures = safeReadStorage("sscup-fixtures", []);
+    setLeagueFixtures(latestFixtures);
+
+    const table = {};
+    latestFixtures.forEach((match) => {
+      const homeTeam = match.home;
+      const awayTeam = match.away;
+      if (homeTeam && !table[homeTeam]) table[homeTeam] = { team: homeTeam, goalsFor: 0, goalsAgainst: 0, points: 0 };
+      if (awayTeam && !table[awayTeam]) table[awayTeam] = { team: awayTeam, goalsFor: 0, goalsAgainst: 0, points: 0 };
+      if (match.played !== true || !homeTeam || !awayTeam) return;
+      const homeScore = Number(match.homeScore);
+      const awayScore = Number(match.awayScore);
+      if (!Number.isInteger(homeScore) || !Number.isInteger(awayScore)) return;
+      table[homeTeam].goalsFor += homeScore;
+      table[homeTeam].goalsAgainst += awayScore;
+      table[awayTeam].goalsFor += awayScore;
+      table[awayTeam].goalsAgainst += homeScore;
+      if (homeScore > awayScore) table[homeTeam].points += 3;
+      else if (awayScore > homeScore) table[awayTeam].points += 3;
+      else { table[homeTeam].points += 1; table[awayTeam].points += 1; }
+    });
+
+    const ranked = Object.values(table).map((team) => ({ ...team, goalDifference: team.goalsFor - team.goalsAgainst }))
+      .sort((a, b) => b.points - a.points || b.goalDifference - a.goalDifference || b.goalsFor - a.goalsFor || a.team.localeCompare(b.team, "tr"))
+      .slice(0, 8);
+
+    if (ranked.length < 8) {
+      alert("Sıralamaya göre çeyrek final için puan durumunda en az 8 takım bulunmalıdır.");
+      return;
+    }
+
+    if (drawStarted || completedQuarterMatches > 0) {
+      const confirmed = window.confirm("Mevcut çeyrek final eşleşmeleri, skorlar ve sonraki turlar silinip 1-8 / 2-7 / 3-6 / 4-5 olarak hazırlanacak. Devam edilsin mi?");
+      if (!confirmed) return;
+    }
+
+    setIsDrawing(true);
+    cloudWriteLockRef.current = true;
+    const pairs = [[0,7],[1,6],[2,5],[3,4]];
+    const nextQuarter = createEmptyQuarter().map((match, index) => ({ ...match, home: ranked[pairs[index][0]].team, away: ranked[pairs[index][1]].team }));
+    const nextSemi = createEmptySemi();
+    const nextFinal = createEmptyFinal();
+    const nextThirdPlace = createEmptyFinal();
+    const value = { quarter: nextQuarter, semi: nextSemi, finalMatch: nextFinal, thirdPlace: nextThirdPlace, drawPotOne: [], drawPotTwo: [], drawStarted: true, quarterMode: "ranking" };
+
+    try {
+      const { error } = await supabase.from("app_state").upsert({ id: "knockout", value, updated_at: new Date().toISOString() });
+      if (error) throw error;
+      const remainingFixtures = fixtures.filter((match) => match?.isKnockout !== true);
+      if (typeof setFixtures === "function") setFixtures(remainingFixtures);
+      localStorage.setItem("sscup-fixtures", JSON.stringify(remainingFixtures));
+      setQuarter(nextQuarter); setSemi(nextSemi); setFinalMatch(nextFinal); setThirdPlace(nextThirdPlace);
+      setDrawPotOne([]); setDrawPotTwo([]); setDrawStarted(true); setQuarterMode("ranking"); setLastDrawnMatch(null);
+      alert("Çeyrek final sıralamaya göre hazırlandı: 1-8 / 2-7 / 3-6 / 4-5.");
+    } catch (error) {
+      console.error("Sıralamalı çeyrek final kaydedilemedi:", error);
+      alert("Eşleşmeler kaydedilemedi. İnternet bağlantısını kontrol edip tekrar deneyin.");
+    } finally {
+      window.setTimeout(() => { cloudWriteLockRef.current = false; setIsDrawing(false); }, 700);
     }
   }
 
@@ -581,6 +659,7 @@ export default function Knockout({
         drawPotOne: nextPotOne,
         drawPotTwo: nextPotTwo,
         drawStarted: true,
+        quarterMode: "draw",
       };
 
       const { error } = await supabase
@@ -865,6 +944,7 @@ export default function Knockout({
     setDrawPotOne([]);
     setDrawPotTwo([]);
     setDrawStarted(false);
+    setQuarterMode("draw");
     setLastDrawnMatch(null);
     setIsDrawing(false);
 
@@ -880,6 +960,7 @@ export default function Knockout({
       "sscup-quarter-pot-one",
       "sscup-quarter-pot-two",
       "sscup-quarter-draw-started",
+      "sscup-quarter-mode",
     ].forEach((key) => localStorage.removeItem(key));
 
     const emptyValue = {
@@ -890,6 +971,7 @@ export default function Knockout({
       drawPotOne: [],
       drawPotTwo: [],
       drawStarted: false,
+      quarterMode: "draw",
     };
 
     const { error } = await supabase
@@ -930,6 +1012,53 @@ export default function Knockout({
         🔄 Lig Sıralamasını Yenile
       </button>
 
+      <div
+        style={{
+          padding: "22px",
+          borderRadius: "18px",
+          background: "linear-gradient(135deg, #071a3d, #102f68)",
+          color: "white",
+          boxShadow: "0 14px 35px rgba(4, 18, 45, 0.25)",
+          marginBottom: "18px",
+        }}
+      >
+        <div style={{ textAlign: "center" }}>
+          <h3 style={{ margin: 0 }}>🏆 S&S CUP ÇEYREK FİNAL SİSTEMİ</h3>
+          <p style={{ margin: "10px 0 14px", opacity: 0.82 }}>
+            Turnuva günü hangi sistem istenirse tek seçimle uygula. Lig, canlı takip ve sonraki turların çalışma mantığı değişmez.
+          </p>
+          <div style={{ display: "flex", justifyContent: "center", gap: "10px", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={prepareQuarterDraw}
+              disabled={isDrawing || topEight.length < 8}
+              title={topEight.length < 8 ? "Çeyrek final için ilk 8 takım oluşmalı" : "Mevcut torbalı kura sistemi"}
+            >
+              🎱 Torbalı Kura
+            </button>
+            <button
+              type="button"
+              onClick={prepareRankedQuarter}
+              disabled={isDrawing || topEight.length < 8}
+              title={topEight.length < 8 ? "Çeyrek final için ilk 8 takım oluşmalı" : "1-8 / 2-7 / 3-6 / 4-5"}
+            >
+              🏆 Sıralamaya Göre 1-8
+            </button>
+          </div>
+          {topEight.length < 8 ? (
+            <p style={{ margin: "12px 0 0", color: "#ffd978", fontWeight: 800 }}>
+              Seçenekler hazır. Aktif olması için ilk 8 takımın lig sıralamasında oluşması gerekiyor. Şu an {topEight.length} takım var.
+            </p>
+          ) : drawStarted ? (
+            <p style={{ margin: "12px 0 0", color: "#ffe07b", fontWeight: 800 }}>
+              Aktif sistem: {quarterMode === "ranking" ? "1-8 / 2-7 / 3-6 / 4-5" : "Torbalı Kura"}
+            </p>
+          ) : (
+            <p style={{ margin: "12px 0 0", opacity: 0.72 }}>İlk 8 hazır. Yukarıdan eşleşme sistemini seçin.</p>
+          )}
+        </div>
+      </div>
+
       {topEight.length < 8 ? (
         <p>
           Çeyrek final için puan durumunda en az 8 takım bulunmalıdır. Şu anda{" "}
@@ -937,8 +1066,12 @@ export default function Knockout({
         </p>
       ) : (
         <>
+          {quarterMode !== "ranking" && (
           <div
             style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+              gap: "16px",
               padding: "22px",
               borderRadius: "18px",
               background: "linear-gradient(135deg, #071a3d, #102f68)",
@@ -946,101 +1079,72 @@ export default function Knockout({
               boxShadow: "0 14px 35px rgba(4, 18, 45, 0.25)",
             }}
           >
-            <div style={{ textAlign: "center", marginBottom: "20px" }}>
-              <h3 style={{ margin: 0 }}>🏆 S&S CUP ÇEYREK FİNAL KURASI</h3>
-              <p style={{ marginBottom: 0, opacity: 0.82 }}>
-                1–4. sıralar ile 5–8. sıralar eşleşir.
-              </p>
+            <div
+              style={{
+                padding: "16px",
+                border: "2px solid #d4af37",
+                borderRadius: "14px",
+                background: "rgba(255,255,255,0.08)",
+              }}
+            >
+              <h4 style={{ marginTop: 0 }}>🟡 1. Torba</h4>
+              {(drawStarted
+                ? drawPotOne
+                : firstPot.map((team) => team.team)
+              ).map((team, index) => (
+                <div
+                  key={team}
+                  style={{
+                    padding: "10px 12px",
+                    marginBottom: "8px",
+                    borderRadius: "9px",
+                    background: "rgba(255,255,255,0.12)",
+                  }}
+                >
+                  <b>{index + 1}. {team}</b>
+                </div>
+              ))}
             </div>
 
             <div
               style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-                gap: "16px",
+                padding: "16px",
+                border: "2px solid rgba(255,255,255,0.72)",
+                borderRadius: "14px",
+                background: "rgba(255,255,255,0.08)",
               }}
             >
-              <div
-                style={{
-                  padding: "16px",
-                  border: "2px solid #d4af37",
-                  borderRadius: "14px",
-                  background: "rgba(255,255,255,0.08)",
-                }}
-              >
-                <h4 style={{ marginTop: 0 }}>🟡 1. Torba</h4>
-                {(drawStarted
-                  ? drawPotOne
-                  : firstPot.map((team) => team.team)
-                ).map((team, index) => (
-                  <div
-                    key={team}
-                    style={{
-                      padding: "10px 12px",
-                      marginBottom: "8px",
-                      borderRadius: "9px",
-                      background: "rgba(255,255,255,0.12)",
-                    }}
-                  >
-                    <b>{index + 1}. {team}</b>
-                  </div>
-                ))}
-              </div>
-
-              <div
-                style={{
-                  padding: "16px",
-                  border: "2px solid rgba(255,255,255,0.72)",
-                  borderRadius: "14px",
-                  background: "rgba(255,255,255,0.08)",
-                }}
-              >
-                <h4 style={{ marginTop: 0 }}>⚪ 2. Torba</h4>
-                {(drawStarted
-                  ? drawPotTwo
-                  : secondPot.map((team) => team.team)
-                ).map((team, index) => (
-                  <div
-                    key={team}
-                    style={{
-                      padding: "10px 12px",
-                      marginBottom: "8px",
-                      borderRadius: "9px",
-                      background: "rgba(255,255,255,0.12)",
-                    }}
-                  >
-                    <b>{index + 5}. {team}</b>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div style={{ textAlign: "center", marginTop: "20px" }}>
-              {!drawStarted && completedQuarterMatches === 0 ? (
-                <button type="button" onClick={prepareQuarterDraw} disabled={isDrawing}>
-                  {isDrawing ? "⏳ Torbalar hazırlanıyor..." : "🎱 Torbaları Hazırla"}
-                </button>
-              ) : !drawCompleted ? (
-                <button type="button" onClick={drawNextQuarterMatch} disabled={isDrawing}>
-                  {isDrawing ? "⏳ Kura kaydediliyor..." : "🎲 Tüm Eşleşmeleri Tek Seferde Çek"}
-                </button>
-              ) : (
-                <p>
-                  <b>✅ Çeyrek final kurası tamamlandı.</b>
-                </p>
-              )}
-
-              {(drawStarted || completedQuarterMatches > 0) && (
-                <button
-                  type="button"
-                  onClick={prepareQuarterDraw}
-                  disabled={isDrawing}
-                  style={{ marginLeft: "10px" }}
+              <h4 style={{ marginTop: 0 }}>⚪ 2. Torba</h4>
+              {(drawStarted
+                ? drawPotTwo
+                : secondPot.map((team) => team.team)
+              ).map((team, index) => (
+                <div
+                  key={team}
+                  style={{
+                    padding: "10px 12px",
+                    marginBottom: "8px",
+                    borderRadius: "9px",
+                    background: "rgba(255,255,255,0.12)",
+                  }}
                 >
-                  🔁 Kurayı Yeniden Hazırla
-                </button>
-              )}
+                  <b>{index + 5}. {team}</b>
+                </div>
+              ))}
             </div>
+          </div>
+          )}
+
+          <div style={{ textAlign: "center", marginTop: "20px" }}>
+            {quarterMode === "draw" && drawStarted && !drawCompleted ? (
+              <button type="button" onClick={drawNextQuarterMatch} disabled={isDrawing}>
+                {isDrawing ? "⏳ Kura kaydediliyor..." : "🎲 Tüm Eşleşmeleri Tek Seferde Çek"}
+              </button>
+            ) : drawCompleted ? (
+              <p><b>✅ Çeyrek final eşleşmeleri hazır.</b></p>
+            ) : quarterMode === "ranking" && drawStarted ? (
+              <p><b>✅ 1-8 / 2-7 / 3-6 / 4-5 eşleşmeleri hazır.</b></p>
+            ) : null}
           </div>
         </>
       )}
