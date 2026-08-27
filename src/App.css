@@ -3750,3 +3750,87 @@ textarea {
   .match-team-event-summary { width: 100%; }
   .match-team-event-line { font-size: 11px; padding: 4px 6px; }
 }
+
+/* ===== S&S CUP - YENI TURNUVA MASAUSTU SABIT GENISLIK FIX ===== */
+@media (min-width: 1100px) {
+  .new-tournament-card {
+    width: min(100%, 1120px);
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 30px 32px;
+    overflow: hidden;
+  }
+
+  .new-tournament-heading {
+    max-width: 900px;
+  }
+
+  .new-tournament-form {
+    width: 100%;
+    min-width: 0;
+    grid-template-columns: minmax(280px, 0.8fr) minmax(0, 1.2fr);
+    gap: 22px;
+  }
+
+  .new-tournament-form > * {
+    min-width: 0;
+  }
+
+  .setup-brand-preview {
+    min-width: 0;
+    min-height: 340px;
+    padding: 28px;
+  }
+
+  .setup-brand-preview strong {
+    font-size: clamp(27px, 2vw, 36px);
+  }
+
+  .new-tournament-form .form-grid {
+    width: 100%;
+    min-width: 0;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    padding: 22px;
+  }
+
+  .new-tournament-form label,
+  .new-tournament-form input,
+  .new-tournament-form select,
+  .new-tournament-form textarea {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .new-tournament-form label {
+    font-size: 13px;
+  }
+
+  .new-tournament-form input {
+    min-height: 50px;
+    font-size: 14px;
+  }
+
+  .new-tournament-warning {
+    font-size: 13px;
+  }
+
+  .new-tournament-actions {
+    flex-wrap: wrap;
+  }
+
+  .new-tournament-actions button {
+    min-width: 140px;
+    min-height: 50px;
+    font-size: 13px;
+  }
+}
+
+
+/* S&S CUP kurumsal logo işareti */
+.ss-logo-mark,.dashboard-home-logo{background:#070707;border:2px solid #f4c95d;color:#f4c95d;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:1000;line-height:.88;box-shadow:0 8px 24px rgba(244,201,93,.16)}
+.ss-logo-mark{width:52px;height:52px;border-radius:15px;flex:0 0 52px}
+.ss-logo-mark span{font-size:17px;letter-spacing:-1px}.ss-logo-mark small{font-size:10px;letter-spacing:2px;margin-top:4px;color:#fff}
+.dashboard-home-logo{width:78px;height:78px;border-radius:24px;flex:0 0 78px}
+.dashboard-home-logo span{font-size:25px;letter-spacing:-1px}.dashboard-home-logo small{font-size:12px;letter-spacing:4px;margin-top:6px;color:#fff}
+@media(max-width:700px){.dashboard-home-logo{width:64px;height:64px;flex-basis:64px;border-radius:19px}.dashboard-home-logo span{font-size:21px}}

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "../supabase";
 
 function normalizePhone(phone) {
   const clean = String(phone || "").replace(/\D/g, "");
@@ -20,6 +21,8 @@ export default function TeamContacts({
   settings = {},
 }) {
   const [contacts, setContacts] = useState({});
+  const cloudReadyRef = useRef(false);
+  const applyingCloudRef = useRef(false);
   const [selectedTeam, setSelectedTeam] = useState("");
   const [recipientType, setRecipientType] = useState("manager1");
   const [customName, setCustomName] = useState("");
@@ -28,12 +31,72 @@ export default function TeamContacts({
   const [customMessage, setCustomMessage] = useState("");
 
   useEffect(() => {
+    let localContacts = {};
     try {
       const saved = localStorage.getItem("sscup-team-contacts");
-      if (saved) setContacts(JSON.parse(saved));
+      if (saved) {
+        localContacts = JSON.parse(saved);
+        setContacts(localContacts);
+      }
     } catch {
+      localContacts = {};
       setContacts({});
     }
+
+    let cancelled = false;
+    async function loadCloudContacts() {
+      const { data, error } = await supabase
+        .from("app_state")
+        .select("value,updated_at")
+        .eq("id", "team_contacts")
+        .maybeSingle();
+
+      if (cancelled) return;
+      if (error) {
+        console.error("Takım sorumluları bulut yükleme hatası:", error);
+        cloudReadyRef.current = true;
+        return;
+      }
+
+      const cloudValue = data?.value;
+      const hasCloud = cloudValue && typeof cloudValue === "object" && !Array.isArray(cloudValue);
+      const hasLocal = Object.keys(localContacts || {}).length > 0;
+
+      if (hasCloud) {
+        applyingCloudRef.current = true;
+        setContacts(cloudValue);
+        localStorage.setItem("sscup-team-contacts", JSON.stringify(cloudValue));
+        window.setTimeout(() => { applyingCloudRef.current = false; cloudReadyRef.current = true; }, 0);
+      } else {
+        cloudReadyRef.current = true;
+        if (hasLocal) {
+          await supabase.from("app_state").upsert({
+            id: "team_contacts",
+            value: localContacts,
+            updated_at: new Date().toISOString(),
+          });
+        }
+      }
+    }
+
+    loadCloudContacts();
+
+    const channel = supabase
+      .channel(`sscup-team-contacts-${Math.random().toString(36).slice(2)}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.team_contacts" }, (payload) => {
+        const value = payload?.new?.value;
+        if (!value || typeof value !== "object" || Array.isArray(value)) return;
+        applyingCloudRef.current = true;
+        setContacts(value);
+        localStorage.setItem("sscup-team-contacts", JSON.stringify(value));
+        window.setTimeout(() => { applyingCloudRef.current = false; cloudReadyRef.current = true; }, 0);
+      })
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   useEffect(() => {
@@ -76,8 +139,18 @@ export default function TeamContacts({
     }));
   }
 
-  function save() {
+  async function save() {
     localStorage.setItem("sscup-team-contacts", JSON.stringify(contacts));
+    const { error } = await supabase.from("app_state").upsert({
+      id: "team_contacts",
+      value: contacts,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) {
+      console.error("Takım sorumluları bulut kaydetme hatası:", error);
+      alert("Bilgiler bu cihaza kaydedildi fakat buluta gönderilemedi.");
+      return;
+    }
     alert("Takım bilgileri kaydedildi.");
   }
 

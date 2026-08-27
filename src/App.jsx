@@ -572,7 +572,7 @@ export default function App() {
     <div className="app-shell">
       <aside className={`sidebar ${mobileMenuOpen ? "sidebar-open" : ""}`}>
         <div className="brand brand-pro">
-          <div className="brand-logo">🏆</div>
+          <div className="brand-logo ss-logo-mark" aria-label="S&S CUP logosu"><span>S&S</span><small>CUP</small></div>
           <div className="brand-copy">
             <span className="brand-product">S&S CUP MANAGER PRO</span>
             <h1>{settings.tournamentName}</h1>

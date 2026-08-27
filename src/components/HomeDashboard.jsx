@@ -201,6 +201,7 @@ export default function HomeDashboard({
   return (
     <div className="page-stack dashboard-v2">
       <section className="dashboard-identity">
+        <div className="dashboard-home-logo" aria-hidden="true"><span>S&S</span><small>CUP</small></div>
         <div className="dashboard-identity-copy">
           <span className="dashboard-kicker">S&amp;S CUP MANAGER PRO</span>
           <h2>🏆 {settings.tournamentName}</h2>
