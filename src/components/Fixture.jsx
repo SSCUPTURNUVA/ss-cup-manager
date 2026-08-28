@@ -215,17 +215,21 @@ export default function Fixture({
 
     return Object.keys(groups)
       .map(Number)
-      .sort((a, b) => a - b)
       .map((week) => ({
         week,
-        // Eşleşmenin gerçek index/ID'sini değiştirmeden yalnız ekrandaki sırayı
-        // tarih -> saat olacak şekilde düzenle. Böylece düzenleme/maç merkezi
-        // işlemleri aynı fikstür kaydına gitmeye devam eder.
+        // Gerçek fixture index/ID değişmez; yalnızca ekrandaki görünüm kronolojiktir.
         matches: [...groups[week]].sort((a, b) => {
           const scheduleDiff = compareFixturesBySchedule(a.match, b.match);
           return scheduleDiff !== 0 ? scheduleDiff : a.index - b.index;
         }),
-      }));
+      }))
+      // Hafta numarası yanlış/karışık gelse bile ekranda önce en erken tarih-saat görünür.
+      .sort((a, b) => {
+        const firstA = a.matches[0]?.match;
+        const firstB = b.matches[0]?.match;
+        const scheduleDiff = compareFixturesBySchedule(firstA, firstB);
+        return scheduleDiff !== 0 ? scheduleDiff : a.week - b.week;
+      });
   }, [fixtures]);
 
   function getMatchWeekPlanKey(match, index) {
