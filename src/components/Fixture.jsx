@@ -154,7 +154,7 @@ export default function Fixture({
       // Eleme maçları Supabase fixtures tablosunda değil app_state içinde tutulur.
       // Sayfa yenilenince yerel eleme maçlarını lig maçlarının sonuna yeniden ekle.
       const localKnockout = localSaved.filter((match) => match?.isKnockout === true);
-      const merged = [...mergedLeague, ...localKnockout];
+      const merged = sortFixturesBySchedule([...mergedLeague, ...localKnockout]);
 
       setFixtures(merged);
       localStorage.setItem(
@@ -398,11 +398,72 @@ export default function Fixture({
       return;
     }
 
-    const updatedFixtures = fixtures.map((match, index) => {
-      if (match?.isKnockout === true) return match;
-      const nextWeek = assignments.get(getMatchWeekPlanKey(match, index));
-      return nextWeek ? { ...match, week: nextWeek } : match;
+    // Haftaları oluşturduktan sonra maçları GERÇEK PROGRAM sırasına da bağla.
+    // Her hafta 8 maç = iki maç günü x 4 saat (20:00, 21:00, 22:00, 23:00).
+    // Mevcut tarih havuzunu kronolojik kullanır; eşleşmeler ve maç ID'leri değişmez.
+    const scheduleTimes = ["20:00", "21:00", "22:00", "23:00"];
+    const availableDates = [...new Set(
+      leagueItems
+        .map(({ match }) => match?.date)
+        .filter(Boolean)
+        .sort((a, b) => compareFixturesBySchedule({ date: a, time: "00:00" }, { date: b, time: "00:00" }))
+    )];
+
+    const neededDays = Math.ceil(leagueItems.length / 4);
+    if (availableDates.length < neededDays) {
+      alert(
+        `8 maç/hafta düzeni için en az ${neededDays} ayrı maç tarihi gerekiyor. ` +
+        `Şu an ${availableDates.length} tarih var. Tarihler eksik olduğu için fikstüre dokunulmadı.`
+      );
+      return;
+    }
+
+    const weekBuckets = new Map();
+    leagueItems.forEach((item) => {
+      const assignedWeek = assignments.get(item.key);
+      if (!weekBuckets.has(assignedWeek)) weekBuckets.set(assignedWeek, []);
+      weekBuckets.get(assignedWeek).push(item);
     });
+
+    const slotByKey = new Map();
+    let dateCursor = 0;
+    [...weekBuckets.keys()].sort((a, b) => a - b).forEach((weekNo) => {
+      const weekItems = weekBuckets.get(weekNo);
+      weekItems.forEach((item, position) => {
+        const dayOffset = Math.floor(position / 4);
+        const timeOffset = position % 4;
+        slotByKey.set(item.key, {
+          week: weekNo,
+          date: availableDates[dateCursor + dayOffset],
+          time: scheduleTimes[timeOffset],
+        });
+      });
+      dateCursor += Math.ceil(weekItems.length / 4);
+    });
+
+    const updatedFixtures = sortFixturesBySchedule(
+      fixtures.map((match, index) => {
+        if (match?.isKnockout === true) return match;
+        const slot = slotByKey.get(getMatchWeekPlanKey(match, index));
+        return slot ? { ...match, ...slot } : match;
+      })
+    );
+
+    // Hafta + tarih + saat birlikte Supabase'e kaydedilir.
+    try {
+      for (const match of updatedFixtures) {
+        if (match?.isKnockout === true || !Number.isFinite(Number(match?.id))) continue;
+        const { error } = await supabase
+          .from("fixtures")
+          .update({ week: match.week, date: match.date || null, time: match.time || null })
+          .eq("id", Number(match.id));
+        if (error) throw error;
+      }
+    } catch (error) {
+      console.error("Tarih/saat programı kaydetme hatası:", error);
+      alert("Tarih/saat programı buluta kaydedilemedi. Sayfayı yenileyip tekrar deneyin.");
+      return;
+    }
 
     setFixtures(updatedFixtures);
     localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));
