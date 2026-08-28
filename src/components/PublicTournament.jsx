@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabase";
 import "./PublicTournament.css";
-import { normalizeFixtureDate, sortFixturesBySchedule } from "../utils/fixtureOrder";
+import { normalizeFixtureDate, fixtureTimeMinutes, sortFixturesBySchedule } from "../utils/fixtureOrder";
 
 const GOAL_EVENT_TYPES = new Set(["goal", "penalty_goal", "penalty_shootout_goal", "scorer_record"]);
 
@@ -493,9 +493,15 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       return `${b.date || ""} ${b.time || ""}`.localeCompare(`${a.date || ""} ${a.time || ""}`);
     });
   const liveMatch = liveMatches[0] || null;
-  const upcoming = sortFixturesBySchedule(
-    displayFixtures.filter((match) => match?.played !== true && match?.live !== true)
-  );
+  const upcoming = displayFixtures
+    .filter((match) => match?.played !== true && match?.live !== true)
+    .slice()
+    .sort((a, b) => {
+      const dateA = normalizeFixtureDate(a?.date);
+      const dateB = normalizeFixtureDate(b?.date);
+      if (dateA !== dateB) return dateA < dateB ? -1 : 1;
+      return fixtureTimeMinutes(a?.time) - fixtureTimeMinutes(b?.time);
+    });
   const recent = displayFixtures.filter((match) => match?.played === true).slice().reverse().slice(0, 8);
 
   const todayDate = new Date(now);

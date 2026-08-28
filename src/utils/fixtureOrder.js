@@ -26,42 +26,31 @@ export function normalizeFixtureDate(value) {
 
 export function fixtureTimeMinutes(value) {
   if (value === null || value === undefined || value === "") return 1439;
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    const n = Math.trunc(value);
-    if (n >= 0 && n <= 23) return n * 60;
-    if (n >= 0 && n <= 2359) {
-      const hour = Math.trunc(n / 100);
-      const minute = n % 100;
-      if (hour <= 23 && minute <= 59) return hour * 60 + minute;
-    }
-  }
-
   const text = String(value).trim();
 
-  let m = text.match(/(?:T|\s|^)(\d{1,2})[:.](\d{1,2})(?::\d{1,2})?/);
-  if (m) {
-    const hour = Number(m[1]);
-    const minute = Number(m[2]);
+  // Her türlü saat ayırıcısını kabul et: 20:00, 20.00, 20：00, 20 00.
+  const pair = text.match(/(\d{1,2})\D+(\d{2})(?:\D|$)/);
+  if (pair) {
+    const hour = Number(pair[1]);
+    const minute = Number(pair[2]);
     if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
       return hour * 60 + minute;
     }
   }
 
-  if (/^\d{1,2}$/.test(text)) {
-    const hour = Number(text);
+  const digits = text.replace(/\D/g, "");
+  if (/^\d{1,2}$/.test(digits)) {
+    const hour = Number(digits);
     if (hour >= 0 && hour <= 23) return hour * 60;
   }
-
-  if (/^\d{3,4}$/.test(text)) {
-    const padded = text.padStart(4, "0");
+  if (/^\d{3,4}$/.test(digits)) {
+    const padded = digits.padStart(4, "0");
     const hour = Number(padded.slice(0, 2));
     const minute = Number(padded.slice(2, 4));
     if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
       return hour * 60 + minute;
     }
   }
-
   return 1439;
 }
 
