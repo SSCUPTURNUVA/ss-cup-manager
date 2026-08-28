@@ -1,15 +1,36 @@
 <!doctype html>
-<html lang="en">
+<html lang="tr">
   <head>
     <meta name="theme-color" content="#071a3d" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <link rel="manifest" href="./manifest.webmanifest" />
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>S&S CUP Manager Pro</title>
+    <script>
+      (function () {
+        try {
+          var params = new URLSearchParams(window.location.search);
+          var page = params.get("page");
+          var access = params.get("access");
+          var token = "eXSxKuVhbf2AErK1Q5lGbeve4ioCOSGRT--iQ6MjObk";
+          var authorized = localStorage.getItem("sscup-mobile-admin-authorized") === "1";
+          var adminRequest = (page === "yonetim" || page === "admin") && (access === token || authorized);
+          var manifestHref = adminRequest ? "./manifest-admin.webmanifest" : "./manifest.webmanifest";
+          var link = document.createElement("link");
+          link.rel = "manifest";
+          link.href = manifestHref;
+          document.head.appendChild(link);
+        } catch (e) {
+          var fallback = document.createElement("link");
+          fallback.rel = "manifest";
+          fallback.href = "./manifest.webmanifest";
+          document.head.appendChild(fallback);
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
