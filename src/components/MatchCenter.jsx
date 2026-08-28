@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../supabase";
+import { sortFixturesBySchedule } from "../utils/fixtureOrder";
 
 function safeNumber(value, fallback = 0) {
   const parsed = Number(value);
@@ -270,8 +271,8 @@ export default function MatchCenter({
     (match) => match.played === true
   );
 
-  const nextMatch = [...fixtures]
-    .filter(
+  const nextMatch = sortFixturesBySchedule(
+    fixtures.filter(
       (match) =>
         match?.played !== true &&
         match?.live !== true &&
@@ -279,11 +280,7 @@ export default function MatchCenter({
         match?.home &&
         match?.away
     )
-    .sort((a, b) => {
-      const first = `${a.date || "9999-12-31"} ${a.time || "99:99"}`;
-      const second = `${b.date || "9999-12-31"} ${b.time || "99:99"}`;
-      return first.localeCompare(second);
-    })[0] || null;
+  )[0] || null;
 
   const elapsedSeconds = liveMatch
     ? getVisibleElapsedSeconds(liveMatch)

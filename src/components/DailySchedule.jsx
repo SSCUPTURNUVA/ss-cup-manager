@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import "./DailySchedule.css";
+import { sortFixturesBySchedule } from "../utils/fixtureOrder";
 
 function formatLongDate(date) {
   if (!date) return "TARİH BELİRLENECEK";
@@ -86,11 +87,9 @@ export default function DailySchedule({ fixtures = [], settings = {} }) {
   const availableDates = useMemo(() => [...new Set(fixtures.map((m) => m.date).filter(Boolean))].sort(), [fixtures]);
   const [selectedDate, setSelectedDate] = useState(availableDates[0] || new Date().toISOString().split("T")[0]);
 
-  const dayMatches = useMemo(() => fixtures
-    .filter((m) => m.date === selectedDate)
-    .slice()
-    .sort((a, b) => String(a.time || "").localeCompare(String(b.time || "")))
-    .slice(0, 4), [fixtures, selectedDate]);
+  const dayMatches = useMemo(() => sortFixturesBySchedule(
+    fixtures.filter((m) => m.date === selectedDate)
+  ).slice(0, 4), [fixtures, selectedDate]);
 
   const tournamentName = settings.tournamentName || settings.title || "S&S CUP";
   const venue = settings.venue || "GOL PARK HALI SAHA TESİSLERİ • SAHA 1";

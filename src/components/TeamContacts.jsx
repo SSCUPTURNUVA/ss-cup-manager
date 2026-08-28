@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabase";
+import { sortFixturesBySchedule } from "../utils/fixtureOrder";
 
 function normalizePhone(phone) {
   const clean = String(phone || "").replace(/\D/g, "");
@@ -108,17 +109,13 @@ export default function TeamContacts({
   const team = contacts[selectedTeam] || {};
 
   const nextTeamMatch = useMemo(() => {
-    return fixtures
-      .filter(
+    return sortFixturesBySchedule(
+      fixtures.filter(
         (m) =>
           m?.played !== true &&
           (m?.home === selectedTeam || m?.away === selectedTeam)
       )
-      .sort((a, b) =>
-        `${a?.date || "9999-12-31"} ${a?.time || "23:59"}`.localeCompare(
-          `${b?.date || "9999-12-31"} ${b?.time || "23:59"}`
-        )
-      )[0];
+    )[0];
   }, [fixtures, selectedTeam]);
 
   const sortedScorers = useMemo(
@@ -208,9 +205,9 @@ export default function TeamContacts({
 
     if (messageType === "teamfixture") {
       text += `📅 *${selectedTeam} - MAÇ PROGRAMI*\n`;
-      const matches = fixtures
-        .filter((m) => m?.home === selectedTeam || m?.away === selectedTeam)
-        .sort((a, b) => `${a?.date || ""} ${a?.time || ""}`.localeCompare(`${b?.date || ""} ${b?.time || ""}`));
+      const matches = sortFixturesBySchedule(
+        fixtures.filter((m) => m?.home === selectedTeam || m?.away === selectedTeam)
+      );
       if (!matches.length) text += `Takım için fikstür bulunmuyor.\n`;
       matches.forEach((m) => {
         const score = m.played === true ? ` | ${m.homeScore ?? 0}-${m.awayScore ?? 0}` : "";

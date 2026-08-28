@@ -1,3 +1,4 @@
+import { sortFixturesBySchedule } from "../utils/fixtureOrder";
 function formatScheduleMatch(match, index) {
   const date = match.date || "Tarih belli değil";
   const time = match.time || "Saat belli değil";
@@ -32,8 +33,8 @@ export default function AnnouncementCenter({
   goalScorers,
   settings,
 }) {
-  const playedMatches = fixtures.filter((match) => match.played === true);
-  const upcomingMatches = fixtures.filter((match) => match.played !== true);
+  const playedMatches = sortFixturesBySchedule(fixtures.filter((match) => match.played === true));
+  const upcomingMatches = sortFixturesBySchedule(fixtures.filter((match) => match.played !== true));
 
   const fixtureText = `🏆 ${settings.tournamentName}\n\n📅 MAÇ PROGRAMI\n\n${
     upcomingMatches.length

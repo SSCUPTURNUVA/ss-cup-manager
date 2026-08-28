@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import BackupManager from "./BackupManager";
 import NewTournament from "./NewTournament";
+import { sortFixturesBySchedule } from "../utils/fixtureOrder";
 
 function getTeamName(team) {
   return typeof team === "string"
@@ -52,11 +53,7 @@ export default function HomeDashboard({
       )
     : [];
 
-  const sortedFixtures = [...validFixtures].sort((a, b) => {
-    const first = `${a.date || "9999-12-31"} ${a.time || "99:99"}`;
-    const second = `${b.date || "9999-12-31"} ${b.time || "99:99"}`;
-    return first.localeCompare(second);
-  });
+  const sortedFixtures = sortFixturesBySchedule(validFixtures);
 
   const scheduledToday = sortedFixtures.filter(
     (match) => match.date === todayIso

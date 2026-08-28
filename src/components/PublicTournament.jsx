@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabase";
 import "./PublicTournament.css";
+import { normalizeFixtureDate, sortFixturesBySchedule } from "../utils/fixtureOrder";
 
 const GOAL_EVENT_TYPES = new Set(["goal", "penalty_goal", "penalty_shootout_goal", "scorer_record"]);
 
@@ -492,27 +493,19 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       return `${b.date || ""} ${b.time || ""}`.localeCompare(`${a.date || ""} ${a.time || ""}`);
     });
   const liveMatch = liveMatches[0] || null;
-  const upcoming = displayFixtures
-    .filter((match) => match?.played !== true && match?.live !== true)
-    .slice()
-    .sort((a, b) => `${a.date || "9999"} ${a.time || "99:99"}`.localeCompare(`${b.date || "9999"} ${b.time || "99:99"}`));
+  const upcoming = sortFixturesBySchedule(
+    displayFixtures.filter((match) => match?.played !== true && match?.live !== true)
+  );
   const recent = displayFixtures.filter((match) => match?.played === true).slice().reverse().slice(0, 8);
 
-  const nightMatches = useMemo(() => {
-    // Gecenin Maçları yalnız BUGÜN tarihine atanmış karşılaşmaları gösterir.
-    // O tarihte kaç maç varsa (1/2/3/4...) tamamı saat sırasıyla gelir.
-    const current = new Date(now);
-    const todayKey = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}-${String(current.getDate()).padStart(2, "0")}`;
+  const todayDate = new Date(now);
+  const todayKey = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, "0")}-${String(todayDate.getDate()).padStart(2, "0")}`;
 
-    return displayFixtures
-      .filter((m) => m?.date && String(m.date).slice(0, 10) === todayKey)
-      .slice()
-      .sort((a, b) => {
-        const timeCompare = String(a.time || "99:99").localeCompare(String(b.time || "99:99"));
-        if (timeCompare !== 0) return timeCompare;
-        return String(a.id ?? "").localeCompare(String(b.id ?? ""), "tr", { numeric: true });
-      });
-  }, [displayFixtures, now]);
+  const nightMatches = useMemo(() => {
+    return sortFixturesBySchedule(
+      displayFixtures.filter((match) => normalizeFixtureDate(match?.date) === todayKey)
+    );
+  }, [displayFixtures, todayKey]);
 
   const liveStandings = useMemo(() => {
     // Takip sayfasında eski tarayıcı/localStorage verisine geri düşme.
