@@ -476,10 +476,13 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     { ...(byKoKey.get("final-0") || {}), id: byKoKey.get("final-0")?.id || "ko-final-0", knockoutKey: "final-0", isKnockout: true, stageLabel: "FİNAL", home: s0w || "YF 1 Galibi", away: s1w || "YF 2 Galibi" },
   ];
   const knockoutKeys = new Set(knockoutMatches.map((m) => m.knockoutKey).filter(Boolean));
-  const displayFixtures = [
+  // TEK KAYNAK SIRASI:
+  // Önce tarih, aynı tarihte saat. Bundan sonraki bütün Canlı Takip
+  // bölümleri bu kronolojik listeyi kullanır.
+  const displayFixtures = sortFixturesBySchedule([
     ...leagueFixtures.filter((m) => !m?.isKnockout || !knockoutKeys.has(m.knockoutKey)),
     ...knockoutMatches,
-  ];
+  ]);
   const liveMatches = displayFixtures
     .filter((match) => match?.live === true && match?.played !== true)
     .slice()
@@ -493,23 +496,17 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       return `${b.date || ""} ${b.time || ""}`.localeCompare(`${a.date || ""} ${a.time || ""}`);
     });
   const liveMatch = liveMatches[0] || null;
-  const upcoming = displayFixtures
-    .filter((match) => match?.played !== true && match?.live !== true)
-    .slice()
-    .sort((a, b) => {
-      const dateA = normalizeFixtureDate(a?.date);
-      const dateB = normalizeFixtureDate(b?.date);
-      if (dateA !== dateB) return dateA < dateB ? -1 : 1;
-      return fixtureTimeMinutes(a?.time) - fixtureTimeMinutes(b?.time);
-    });
+  const upcoming = displayFixtures.filter(
+    (match) => match?.played !== true && match?.live !== true
+  );
   const recent = displayFixtures.filter((match) => match?.played === true).slice().reverse().slice(0, 8);
 
   const todayDate = new Date(now);
   const todayKey = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, "0")}-${String(todayDate.getDate()).padStart(2, "0")}`;
 
   const nightMatches = useMemo(() => {
-    return sortFixturesBySchedule(
-      displayFixtures.filter((match) => normalizeFixtureDate(match?.date) === todayKey)
+    return displayFixtures.filter(
+      (match) => normalizeFixtureDate(match?.date) === todayKey
     );
   }, [displayFixtures, todayKey]);
 
