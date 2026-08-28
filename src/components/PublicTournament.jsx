@@ -308,13 +308,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     if (fixturesResult.status === "fulfilled") {
       const { data, error } = fixturesResult.value;
       if (!error && Array.isArray(data)) {
-        const activeSet = Array.isArray(currentActiveIds)
-          ? new Set(currentActiveIds.map((id) => String(id)))
-          : null;
-        const filteredRows = activeSet
-          ? data.filter((row) => activeSet.has(String(row.id)))
-          : data;
-        mappedFixtures = filteredRows.map(mapCloudFixture);
+        // Canlı takip fikstürünü active_fixture_ids ile daraltma.
+        // Bu liste yalnız Maç Merkezi seçimini temsil eder; fikstürün geri kalanını
+        // gizlerse "Gecenin Maçları" aynı tarihteki diğer maçları göremez.
+        mappedFixtures = data.map(mapCloudFixture);
         setRemoteFixtures(mappedFixtures);
       }
     }
@@ -502,36 +499,20 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const recent = displayFixtures.filter((match) => match?.played === true).slice().reverse().slice(0, 8);
 
   const nightMatches = useMemo(() => {
-    const pool = displayFixtures.filter((m) => m?.date);
-    if (pool.length === 0) return [];
+    // Gecenin Maçları yalnız BUGÜN tarihine atanmış karşılaşmaları gösterir.
+    // O tarihte kaç maç varsa (1/2/3/4...) tamamı saat sırasıyla gelir.
+    const current = new Date(now);
+    const todayKey = `${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, "0")}-${String(current.getDate()).padStart(2, "0")}`;
 
-    // "Gecenin Maçları" tek bir CANLI/test kaydının tarihine kilitlenmesin.
-    // Önce oynanmamış maçların en yakın program tarihini seç; o tarihte oynanmış,
-    // canlı veya bekleyen bütün maçları birlikte göster. Böylece aynı gecedeki
-    // 4 maçtan biri canlı olsa bile diğer 3 karşılaşma kaybolmaz.
-    const pendingDates = pool
-      .filter((m) => m?.played !== true)
-      .map((m) => String(m.date).slice(0, 10))
-      .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b));
-
-    const allDates = pool
-      .map((m) => String(m.date).slice(0, 10))
-      .filter(Boolean)
-      .sort((a, b) => a.localeCompare(b));
-
-    const activeDate = pendingDates[0] || allDates[allDates.length - 1];
-
-    return pool
-      .filter((m) => String(m.date).slice(0, 10) === activeDate)
+    return displayFixtures
+      .filter((m) => m?.date && String(m.date).slice(0, 10) === todayKey)
       .slice()
       .sort((a, b) => {
         const timeCompare = String(a.time || "99:99").localeCompare(String(b.time || "99:99"));
         if (timeCompare !== 0) return timeCompare;
         return String(a.id ?? "").localeCompare(String(b.id ?? ""), "tr", { numeric: true });
-      })
-      .slice(0, 4);
-  }, [displayFixtures]);
+      });
+  }, [displayFixtures, now]);
 
   const liveStandings = useMemo(() => {
     // Takip sayfasında eski tarayıcı/localStorage verisine geri düşme.
