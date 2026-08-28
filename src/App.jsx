@@ -225,7 +225,10 @@ export default function App() {
         return true;
       }
 
-      return wantsAdmin && localStorage.getItem(MOBILE_ADMIN_STORAGE_KEY) === "1";
+      // Cihaz bir kez özel yönetim bağlantısıyla yetkilendirildiyse yetkiyi
+      // URL'den bağımsız hatırla. PWA manifesti ?page=takip ile açılsa bile
+      // bu cihaz yönetim paneline dönebilsin.
+      return localStorage.getItem(MOBILE_ADMIN_STORAGE_KEY) === "1";
     } catch {
       return false;
     }
@@ -237,11 +240,13 @@ export default function App() {
       const pageParam = params.get("page");
       const explicitlyPublic = pageParam === "takip" || pageParam === "public";
 
-      // Paylaşılan takip linki her koşulda salt-okunur kalır.
-      if (explicitlyPublic) return true;
-
       // EXE veya daha önce özel bağlantıyla yetkilendirilmiş telefon tam yönetim açar.
+      // Bu kontrol public parametresinden önce yapılır; çünkü PWA manifesti ana ekran
+      // açılışında otomatik olarak ?page=takip yazabilir. Yetkili cihaz yine yönetimde kalır.
       if (isDesktopManager || isMobileAdmin) return false;
+
+      // Yetkisiz cihazlarda paylaşılan takip linki salt-okunur kalır.
+      if (explicitlyPublic) return true;
 
       // Diğer tüm web/PWA girişleri güvenli biçimde canlı takibe düşer.
       return true;
