@@ -212,12 +212,35 @@ export default function Fixture({
       });
     });
 
+    function getScheduleSortKey(match) {
+      const dateValue = String(match?.date || "").trim();
+      const timeValue = String(match?.time || "").trim();
+
+      // Tarihi girilmemiş maçlar sıralamanın en altında kalsın.
+      if (!dateValue) return Number.POSITIVE_INFINITY;
+
+      // Supabase / input[type=date] tarihi YYYY-MM-DD formatında tuttuğu için
+      // metinsel tarih + saat anahtarı kronolojik olarak güvenle sıralanabilir.
+      const normalizedTime = /^\d{1,2}:\d{2}/.test(timeValue)
+        ? timeValue.slice(0, 5).padStart(5, "0")
+        : "23:59";
+      const stamp = Date.parse(`${dateValue.slice(0, 10)}T${normalizedTime}:00`);
+      return Number.isFinite(stamp) ? stamp : Number.POSITIVE_INFINITY;
+    }
+
     return Object.keys(groups)
       .map(Number)
       .sort((a, b) => a - b)
       .map((week) => ({
         week,
-        matches: groups[week],
+        // Eşleşmenin gerçek index/ID'sini değiştirmeden yalnız ekrandaki sırayı
+        // tarih -> saat olacak şekilde düzenle. Böylece düzenleme/maç merkezi
+        // işlemleri aynı fikstür kaydına gitmeye devam eder.
+        matches: [...groups[week]].sort((a, b) => {
+          const timeDiff = getScheduleSortKey(a.match) - getScheduleSortKey(b.match);
+          if (timeDiff !== 0) return timeDiff;
+          return a.index - b.index;
+        }),
       }));
   }, [fixtures]);
 

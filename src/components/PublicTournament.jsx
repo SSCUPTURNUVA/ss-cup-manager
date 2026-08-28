@@ -504,13 +504,34 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const nightMatches = useMemo(() => {
     const pool = displayFixtures.filter((m) => m?.date);
     if (pool.length === 0) return [];
-    const activeDate = liveMatch?.date || upcoming[0]?.date || recent[0]?.date || pool[0].date;
+
+    // "Gecenin Maçları" tek bir CANLI/test kaydının tarihine kilitlenmesin.
+    // Önce oynanmamış maçların en yakın program tarihini seç; o tarihte oynanmış,
+    // canlı veya bekleyen bütün maçları birlikte göster. Böylece aynı gecedeki
+    // 4 maçtan biri canlı olsa bile diğer 3 karşılaşma kaybolmaz.
+    const pendingDates = pool
+      .filter((m) => m?.played !== true)
+      .map((m) => String(m.date).slice(0, 10))
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+
+    const allDates = pool
+      .map((m) => String(m.date).slice(0, 10))
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+
+    const activeDate = pendingDates[0] || allDates[allDates.length - 1];
+
     return pool
-      .filter((m) => m.date === activeDate)
+      .filter((m) => String(m.date).slice(0, 10) === activeDate)
       .slice()
-      .sort((a, b) => String(a.time || "").localeCompare(String(b.time || "")))
+      .sort((a, b) => {
+        const timeCompare = String(a.time || "99:99").localeCompare(String(b.time || "99:99"));
+        if (timeCompare !== 0) return timeCompare;
+        return String(a.id ?? "").localeCompare(String(b.id ?? ""), "tr", { numeric: true });
+      })
       .slice(0, 4);
-  }, [displayFixtures, liveMatch?.date, upcoming, recent]);
+  }, [displayFixtures]);
 
   const liveStandings = useMemo(() => {
     // Takip sayfasında eski tarayıcı/localStorage verisine geri düşme.
