@@ -232,6 +232,16 @@ export default function Fixture({
       });
   }, [fixtures]);
 
+  const sortedUpcomingFixtures = useMemo(() => {
+    return fixtures
+      .map((match, index) => ({ match, index }))
+      .filter(({ match }) => match.played !== true)
+      .sort((a, b) => {
+        const scheduleDiff = compareFixturesBySchedule(a.match, b.match);
+        return scheduleDiff !== 0 ? scheduleDiff : a.index - b.index;
+      });
+  }, [fixtures]);
+
   function getMatchWeekPlanKey(match, index) {
     return String(match?.id ?? match?.knockoutKey ?? `${match?.home || ""}-${match?.away || ""}-${index}`);
   }
@@ -1368,6 +1378,7 @@ export default function Fixture({
         <strong>
           Maç {match.matchNo || index + 1}:{" "}
           {match.home} - {match.away}
+          {match.week ? ` • ${match.week}. Hafta` : ""}
         </strong>
 
         <div
@@ -1696,38 +1707,26 @@ export default function Fixture({
         </p>
       ) : (
         <section style={{ marginBottom: "30px" }}>
-          {groupedFixtures.map(({ week, matches }) => {
-            const upcomingMatches = matches.filter(
-              ({ match }) => match.played !== true
-            );
+          <h3
+            style={{
+              borderBottom: "2px solid #777",
+              paddingBottom: "10px",
+            }}
+          >
+            📅 Oynanacak Maçlar • {sortedUpcomingFixtures.length} Maç
+          </h3>
 
-            if (upcomingMatches.length === 0) return null;
-
-            return (
-              <div key={week} style={{ marginBottom: "34px" }}>
-                <h3
-                  style={{
-                    borderBottom: "2px solid #777",
-                    paddingBottom: "10px",
-                  }}
-                >
-                  📅 {week}. Hafta • {upcomingMatches.length} Maç
-                </h3>
-
-                <ul
-                  className="teamList"
-                  style={{
-                    padding: 0,
-                    listStyle: "none",
-                  }}
-                >
-                  {upcomingMatches.map(({ match, index }) =>
-                    renderMatch(match, index)
-                  )}
-                </ul>
-              </div>
-            );
-          })}
+          <ul
+            className="teamList"
+            style={{
+              padding: 0,
+              listStyle: "none",
+            }}
+          >
+            {sortedUpcomingFixtures.map(({ match, index }) =>
+              renderMatch(match, index)
+            )}
+          </ul>
         </section>
       )}
     </div>

@@ -185,8 +185,7 @@ function calculateStandings(teams, fixtures) {
     });
 }
 
-const MOBILE_ADMIN_ACCESS_TOKEN = "eXSxKuVhbf2AErK1Q5lGbeve4ioCOSGRT--iQ6MjObk";
-const MOBILE_ADMIN_STORAGE_KEY = "sscup-mobile-admin-authorized";
+const MOBILE_ADMIN_ACCESS_TOKEN = "SSCUP-YONETIM-2026-7pQ4mN9xK2vR8sT5";
 
 export default function App() {
   // MASAÜSTÜ EXE her zaman yönetim modudur.
@@ -210,25 +209,10 @@ export default function App() {
       const accessParam = params.get("access");
       const wantsAdmin = pageParam === "yonetim" || pageParam === "admin";
 
-      if (wantsAdmin && accessParam === MOBILE_ADMIN_ACCESS_TOKEN) {
-        localStorage.setItem(MOBILE_ADMIN_STORAGE_KEY, "1");
-
-        // Anahtarı adres çubuğunda bırakma; cihaz yetkilendirildikten sonra temizle.
-        params.delete("access");
-        params.set("page", "yonetim");
-        const query = params.toString();
-        window.history.replaceState(
-          {},
-          "",
-          `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash || ""}`
-        );
-        return true;
-      }
-
-      // Cihaz bir kez özel yönetim bağlantısıyla yetkilendirildiyse yetkiyi
-      // URL'den bağımsız hatırla. PWA manifesti ?page=takip ile açılsa bile
-      // bu cihaz yönetim paneline dönebilsin.
-      return localStorage.getItem(MOBILE_ADMIN_STORAGE_KEY) === "1";
+      // Mobil/web yonetim YALNIZCA mevcut URL'de dogru yeni anahtar varsa acilir.
+      // localStorage ile kalici yetki YOK: paylasilan Canli Takip cihazlari asla
+      // sonradan yonetime donemez.
+      return wantsAdmin && accessParam === MOBILE_ADMIN_ACCESS_TOKEN;
     } catch {
       return false;
     }
@@ -236,19 +220,10 @@ export default function App() {
 
   const isPublicRoute = useMemo(() => {
     try {
-      const params = new URLSearchParams(window.location.search);
-      const pageParam = params.get("page");
-      const explicitlyPublic = pageParam === "takip" || pageParam === "public";
-
-      // EXE veya daha önce özel bağlantıyla yetkilendirilmiş telefon tam yönetim açar.
-      // Bu kontrol public parametresinden önce yapılır; çünkü PWA manifesti ana ekran
-      // açılışında otomatik olarak ?page=takip yazabilir. Yetkili cihaz yine yönetimde kalır.
+      // Masaustu EXE her zaman yonetimdir. Yeni ozel anahtarli mobil link de yonetimdir.
       if (isDesktopManager || isMobileAdmin) return false;
 
-      // Yetkisiz cihazlarda paylaşılan takip linki salt-okunur kalır.
-      if (explicitlyPublic) return true;
-
-      // Diğer tüm web/PWA girişleri güvenli biçimde canlı takibe düşer.
+      // Bunlarin disindaki BUTUN web/PWA girisleri salt-okunur Canli Takiptir.
       return true;
     } catch {
       return !(isDesktopManager || isMobileAdmin);

@@ -9,7 +9,21 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>S&S CUP Manager Pro</title>
-    <link rel="manifest" href="./manifest.webmanifest" />
+    <script>
+      (function () {
+        var link = document.createElement("link");
+        link.rel = "manifest";
+        try {
+          var params = new URLSearchParams(window.location.search);
+          var isAdmin = (params.get("page") === "yonetim" || params.get("page") === "admin")
+            && params.get("access") === "SSCUP-YONETIM-2026-7pQ4mN9xK2vR8sT5";
+          link.href = isAdmin ? "./manifest-admin.webmanifest" : "./manifest.webmanifest";
+        } catch (e) {
+          link.href = "./manifest.webmanifest";
+        }
+        document.head.appendChild(link);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
