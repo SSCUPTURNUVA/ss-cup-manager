@@ -48,10 +48,13 @@ export default function SquadManager({ teams = [] }) {
       }
 
       const cloudValue = data?.value;
-      const hasCloudValue = cloudValue && typeof cloudValue === "object" && !Array.isArray(cloudValue);
+      const cloudIsObject = cloudValue && typeof cloudValue === "object" && !Array.isArray(cloudValue);
+      const cloudHasPlayers = cloudIsObject && Object.values(cloudValue).some(
+        (list) => Array.isArray(list) && list.length > 0
+      );
       const localHasPlayers = Object.values(squads).some((list) => Array.isArray(list) && list.length > 0);
 
-      if (hasCloudValue) {
+      if (cloudHasPlayers) {
         applyingCloudRef.current = true;
         setSquads(cloudValue);
         localStorage.setItem("sscup-squads", JSON.stringify(cloudValue));
@@ -61,13 +64,23 @@ export default function SquadManager({ teams = [] }) {
         }, 0);
       } else {
         cloudReadyRef.current = true;
-        // İlk geçişte telefonda mevcut kadro varsa buluta güvenli şekilde tohumla.
+
+        // Bulutta {} / boş kadro varsa PC'deki dolu kadroyu ASLA ezme.
+        // Yerel oyuncuları buluta taşı; böylece telefon da aynı kadroyu görür.
         if (localHasPlayers) {
-          await supabase.from("app_state").upsert({
+          const { error: seedError } = await supabase.from("app_state").upsert({
             id: CLOUD_KEY,
             value: squads,
             updated_at: new Date().toISOString(),
           });
+          if (seedError) console.error("Yerel kadroyu buluta taşıma hatası:", seedError);
+        } else if (cloudIsObject) {
+          applyingCloudRef.current = true;
+          setSquads(cloudValue);
+          localStorage.setItem("sscup-squads", JSON.stringify(cloudValue));
+          window.setTimeout(() => {
+            applyingCloudRef.current = false;
+          }, 0);
         }
       }
     }

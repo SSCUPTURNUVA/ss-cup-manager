@@ -186,15 +186,33 @@ function calculateStandings(teams, fixtures) {
 }
 
 export default function App() {
-  const isPublicRoute = useMemo(() => {
+  // 🔒 YÖNETİM PANELİ SADECE MASAÜSTÜ ELECTRON EXE'DE AÇILIR.
+  // Vercel/web, Android/iPhone tarayıcı ve Ana Ekrana Ekle (PWA) her zaman
+  // salt-okunur canlı takip ekranında kalır. Böylece PWA start_url sorgu
+  // parametresini kaybetse bile yönetim menülerine erişemez.
+  const isDesktopManager = useMemo(() => {
     try {
-      const params = new URLSearchParams(window.location.search);
-      const pageParam = params.get("page");
-      return pageParam === "takip" || pageParam === "public";
+      const ua = navigator?.userAgent || "";
+      const isElectron = /Electron/i.test(ua);
+      const isFileProtocol = window?.location?.protocol === "file:";
+      return isElectron || isFileProtocol;
     } catch {
       return false;
     }
   }, []);
+
+  const isPublicRoute = useMemo(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const pageParam = params.get("page");
+      const explicitlyPublic = pageParam === "takip" || pageParam === "public";
+
+      // Web/PWA tarafında URL ne olursa olsun yönetim panelini açma.
+      return explicitlyPublic || !isDesktopManager;
+    } catch {
+      return !isDesktopManager;
+    }
+  }, [isDesktopManager]);
 
   const [activePage, setActivePage] = useState(() => {
     if (isPublicRoute) return "public";
@@ -219,7 +237,7 @@ export default function App() {
     readStorage("sscup-format", "league")
   );
 
-  const [teams, setTeams] = useState([]);
+  const [teams, setTeams] = useState(() => readStorage("sscup-teams", []));
 
   useEffect(() => {
     let cancelled = false;
@@ -236,7 +254,37 @@ export default function App() {
       }
 
       if (!cancelled && Array.isArray(data)) {
-        setTeams(data.map((team) => team.name).filter(Boolean));
+        const cloudTeams = data.map((team) => team.name).filter(Boolean);
+
+        if (cloudTeams.length > 0) {
+          setTeams(cloudTeams);
+          localStorage.setItem("sscup-teams", JSON.stringify(cloudTeams));
+          return;
+        }
+
+        // KORUMALI İLK EŞİTLEME:
+        // Bulut boşsa PC'deki dolu takım listesini boş veriyle EZME.
+        // Yerel kayıt varsa onu Supabase'e taşı ve telefonun da görmesini sağla.
+        const localTeams = readStorage("sscup-teams", []);
+        const localNames = Array.isArray(localTeams)
+          ? localTeams
+              .map((team) => typeof team === "string" ? team : team?.name || team?.teamName || "")
+              .filter(Boolean)
+          : [];
+
+        if (localNames.length > 0) {
+          const { error: seedError } = await supabase
+            .from("teams")
+            .insert(localNames.map((name) => ({ name })));
+
+          if (seedError) {
+            console.error("Yerel takımları buluta taşıma hatası:", seedError);
+          } else {
+            setTeams(localNames);
+          }
+        } else {
+          setTeams([]);
+        }
       }
     }
 
@@ -305,7 +353,7 @@ export default function App() {
 
   useEffect(() => {
     async function loadFixturesFromSupabase() {
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from("fixtures")
         .select("*")
         .order("id");
@@ -316,6 +364,95 @@ export default function App() {
       }
 
       if (data) {
+        // Bulut boşsa yerel dolu fikstürü silmek yerine önce buluta taşı.
+        if (Array.isArray(data) && data.length === 0) {
+          const localFixtures = readStorage("sscup-fixtures", []);
+
+          if (Array.isArray(localFixtures) && localFixtures.length > 0) {
+            const rows = localFixtures
+              .filter((match) => match?.home && match?.away && match?.isKnockout !== true)
+              .map((match) => ({
+                home: match.home,
+                away: match.away,
+                date: match.date || null,
+                time: match.time || null,
+                pitch: match.field || match.pitch || null,
+                week: match.week ?? null,
+                played: match.played === true,
+                home_score: Number(match.homeScore ?? match.home_score ?? 0),
+                away_score: Number(match.awayScore ?? match.away_score ?? 0),
+                live: match.live === true && ["first_half", "halftime", "second_half", "penalty"].includes(match.matchPhase),
+                timer_running: match.timerRunning === true,
+                timer_started_at: match.timerStartedAt || null,
+                elapsed_seconds: Number(match.elapsedSeconds ?? 0),
+                match_phase: match.matchPhase || "waiting",
+                events: Array.isArray(match.events) ? match.events : [],
+              }));
+
+            if (rows.length > 0) {
+              const { data: seededRows, error: seedError } = await supabase
+                .from("fixtures")
+                .insert(rows)
+                .select("*");
+
+              if (seedError) {
+                console.error("Yerel fikstürü buluta taşıma hatası:", seedError);
+                // Bulut yazılamasa bile PC'deki sağlam yerel fikstürü koru.
+                setFixtures(localFixtures);
+                return;
+              }
+
+              data = Array.isArray(seededRows) ? seededRows : [];
+            }
+          }
+        }
+
+        // Eski sürümden bulutta CANLI kalmış hazırlık/test maçlarını temizle.
+        // waiting/null zaten canlı değildir. Ayrıca tarihi henüz gelmemiş bir maçın
+        // first_half vb. durumda kalması da eski test kaydıdır; gerçek maç olamaz.
+        const now = new Date();
+        const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+        const staleWaitingRows = (Array.isArray(data) ? data : []).filter(
+          (item) => {
+            const isFutureFixture = Boolean(item?.date && String(item.date).slice(0, 10) > todayKey);
+            return (
+              item?.live === true &&
+              item?.played !== true &&
+              (!item?.match_phase || item.match_phase === "waiting" || isFutureFixture)
+            );
+          }
+        );
+
+        if (staleWaitingRows.length > 0) {
+          await Promise.all(
+            staleWaitingRows.map((item) =>
+              supabase
+                .from("fixtures")
+                .update({
+                  live: false,
+                  timer_running: false,
+                  timer_started_at: null,
+                  elapsed_seconds: 0,
+                  match_phase: "waiting",
+                })
+                .eq("id", item.id)
+            )
+          );
+
+          data = data.map((item) =>
+            staleWaitingRows.some((stale) => stale.id === item.id)
+              ? {
+                  ...item,
+                  live: false,
+                  timer_running: false,
+                  timer_started_at: null,
+                  elapsed_seconds: 0,
+                  match_phase: "waiting",
+                }
+              : item
+          );
+        }
+
         const supabaseFixtures = data.map((item) => ({
           id: item.id,
           home: item.home,
@@ -331,6 +468,7 @@ export default function App() {
           timerRunning: item.timer_running,
           timerStartedAt: item.timer_started_at,
           elapsedSeconds: item.elapsed_seconds,
+          matchPhase: item.match_phase || "waiting",
           isKnockout: item.is_knockout === true,
           knockoutKey: item.knockout_key || "",
           stageLabel: item.stage || "",

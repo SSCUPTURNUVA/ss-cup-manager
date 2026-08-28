@@ -858,7 +858,7 @@ export default function Fixture({
     return String(match?.id ?? `${match?.home || ""}|${match?.away || ""}|${match?.week || ""}|${index}`);
   }
 
-  function toggleLiveMatch(index) {
+  async function toggleLiveMatch(index) {
     const selectedMatch = fixtures[index];
 
     if (selectedMatch.played === true) {
@@ -907,6 +907,26 @@ export default function Fixture({
 
     setFixtures(updatedFixtures);
     localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));
+
+    // Maç Merkezi hazırlığı bulutta CANLI sayılmasın. Eski live=true kaydını da
+    // seçildiği anda temizle ki telefon fikstüründe maç görünmeye devam etsin.
+    const safeId = Number(selectedMatch?.id);
+    if (Number.isFinite(safeId)) {
+      const { error } = await supabase
+        .from("fixtures")
+        .update({
+          live: false,
+          timer_running: false,
+          timer_started_at: null,
+          elapsed_seconds: 0,
+          match_phase: "waiting",
+        })
+        .eq("id", safeId);
+
+      if (error) {
+        console.error("Maç Merkezi hazırlık durumu buluta yazılamadı:", error);
+      }
+    }
   }
 
   function toggleTimer(index) {

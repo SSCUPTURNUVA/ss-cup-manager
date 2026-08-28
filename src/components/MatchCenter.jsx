@@ -553,6 +553,7 @@ export default function MatchCenter({
               timer_running: activeMatch.timerRunning ?? false,
               timer_started_at: activeMatch.timerStartedAt ?? null,
               elapsed_seconds: activeMatch.elapsedSeconds ?? 0,
+              match_phase: activeMatch.matchPhase ?? "waiting",
               events: Array.isArray(activeMatch.events) ? activeMatch.events : [],
             })
             .eq("id", safeId);
@@ -918,12 +919,18 @@ export default function MatchCenter({
   async function handleStartNextMatch() {
     if (!nextMatch) return;
 
+    const nextIndex = fixtures.findIndex((match) => match === nextMatch || match?.id === nextMatch?.id);
+    if (nextIndex >= 0) {
+      localStorage.setItem("sscup-match-center-active", getMatchCenterKey(nextMatch, nextIndex));
+    }
+
     const updatedFixtures = fixtures.map((match) => ({
       ...match,
-      live: match === nextMatch,
+      // Hazırlık aşaması CANLI değildir. CANLI yalnız 1. Devre Başlat ile açılır.
+      live: false,
       timerRunning: false,
       timerStartedAt: null,
-      elapsedSeconds: 0,
+      elapsedSeconds: match === nextMatch ? 0 : match.elapsedSeconds ?? 0,
       matchPhase: match === nextMatch ? "waiting" : match.matchPhase,
 
       ...(match === nextMatch && {
@@ -937,7 +944,29 @@ export default function MatchCenter({
       }),
     }));
 
-    await persistFixtures(updatedFixtures);
+    if (typeof setFixtures === "function") setFixtures(updatedFixtures);
+    localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));
+
+    const safeId = Number(nextMatch?.id);
+    if (Number.isFinite(safeId)) {
+      const { error } = await supabase
+        .from("fixtures")
+        .update({
+          live: false,
+          timer_running: false,
+          timer_started_at: null,
+          elapsed_seconds: 0,
+          match_phase: "waiting",
+          played: false,
+          home_score: 0,
+          away_score: 0,
+          events: [],
+        })
+        .eq("id", safeId);
+      if (error) console.error("Maç Merkezi hazırlığı buluta yazılamadı:", error);
+    }
+
+    window.dispatchEvent(new CustomEvent("sscup-fixtures-updated", { detail: updatedFixtures }));
   }
 
   async function handleUndoLastEvent() {

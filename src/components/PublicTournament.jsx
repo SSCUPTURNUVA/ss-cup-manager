@@ -54,7 +54,14 @@ function getEvents(match) {
 
 function mapCloudFixture(item) {
   const played = item.played === true;
-  const live = item.live === true && !played && item.match_phase !== "completed" && item.match_phase !== "waiting";
+  // Maç merkezine alınmış olmak tek başına CANLI değildir.
+  // Yalnız devre/penaltı gerçekten başladıysa canlı sayılır; waiting/null fikstürde kalır.
+  // Ayrıca fikstür tarihi henüz gelmemiş bir maç eski bir test kaydı yüzünden CANLI kalamaz.
+  const activePhases = new Set(["first_half", "halftime", "second_half", "penalty"]);
+  const now = new Date();
+  const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const isFutureFixture = Boolean(item.date && String(item.date).slice(0, 10) > todayKey);
+  const live = item.live === true && !played && !isFutureFixture && activePhases.has(item.match_phase);
   return {
     id: item.id,
     home: item.home,
