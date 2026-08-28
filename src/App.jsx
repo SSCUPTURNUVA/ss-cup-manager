@@ -22,6 +22,7 @@ import Statistics from "./components/Statistics";
 import TeamContacts from "./components/TeamContacts";
 import DisciplineBoard from "./components/DisciplineBoard";
 import BackupManager from "./components/BackupManager";
+import { sortFixturesBySchedule } from "./utils/fixtureOrder";
 
 const mobileMenuItems = [
   { id: "home", icon: "🏠", label: "Ana Sayfa" },
@@ -344,7 +345,7 @@ export default function App() {
   );
 
   const [fixtures, setFixtures] = useState(() =>
-    readStorage("sscup-fixtures", [])
+    sortFixturesBySchedule(readStorage("sscup-fixtures", []))
   );
 
   const [goalScorers, setGoalScorers] = useState(() =>
@@ -414,7 +415,9 @@ export default function App() {
               if (seedError) {
                 console.error("Yerel fikstürü buluta taşıma hatası:", seedError);
                 // Bulut yazılamasa bile PC'deki sağlam yerel fikstürü koru.
-                setFixtures(localFixtures);
+                const sortedLocalFixtures = sortFixturesBySchedule(localFixtures);
+                setFixtures(sortedLocalFixtures);
+                localStorage.setItem("sscup-fixtures", JSON.stringify(sortedLocalFixtures));
                 return;
               }
 
@@ -494,8 +497,9 @@ export default function App() {
         // Supabase lig fikstürü tek doğru kaynaktır. Eski localStorage skor/
         // oynandı bilgisi yeni turnuvaya taşınmasın. Eleme tarafı kendi
         // app_state kaydından yönetildiği için burada yerel eleme de eklenmez.
-        setFixtures(supabaseFixtures);
-        localStorage.setItem("sscup-fixtures", JSON.stringify(supabaseFixtures));
+        const sortedSupabaseFixtures = sortFixturesBySchedule(supabaseFixtures);
+        setFixtures(sortedSupabaseFixtures);
+        localStorage.setItem("sscup-fixtures", JSON.stringify(sortedSupabaseFixtures));
       }
     }
 

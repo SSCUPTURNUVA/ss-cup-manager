@@ -5,7 +5,7 @@ import {
   useState,
 } from "react";
 import { supabase } from "../supabase";
-import { compareFixturesBySchedule } from "../utils/fixtureOrder";
+import { compareFixturesBySchedule, sortFixturesBySchedule } from "../utils/fixtureOrder";
 
 const TURKISH_DAYS = [
   "Pazar",
@@ -233,13 +233,16 @@ export default function Fixture({
   }, [fixtures]);
 
   const sortedUpcomingFixtures = useMemo(() => {
-    return fixtures
-      .map((match, index) => ({ match, index }))
-      .filter(({ match }) => match.played !== true)
-      .sort((a, b) => {
-        const scheduleDiff = compareFixturesBySchedule(a.match, b.match);
-        return scheduleDiff !== 0 ? scheduleDiff : a.index - b.index;
-      });
+    const indexed = new Map(
+      fixtures.map((match, index) => [String(match?.id ?? `idx-${index}`), index])
+    );
+
+    return sortFixturesBySchedule(
+      fixtures.filter((match) => match.played !== true)
+    ).map((match) => ({
+      match,
+      index: indexed.get(String(match?.id)) ?? fixtures.indexOf(match),
+    }));
   }, [fixtures]);
 
   function getMatchWeekPlanKey(match, index) {

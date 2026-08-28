@@ -1,65 +1,95 @@
 export function normalizeFixtureDate(value) {
-  const text = String(value || "").trim();
-  if (!text) return "";
+  const text = String(value ?? "").trim();
+  if (!text) return "9999-12-31";
 
-  const iso = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (iso) {
-    return `${iso[1]}-${String(iso[2]).padStart(2, "0")}-${String(iso[3]).padStart(2, "0")}`;
+  let m = text.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) {
+    return `${m[1]}-${String(m[2]).padStart(2, "0")}-${String(m[3]).padStart(2, "0")}`;
   }
 
-  const tr = text.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})/);
-  if (tr) {
-    return `${tr[3]}-${String(tr[2]).padStart(2, "0")}-${String(tr[1]).padStart(2, "0")}`;
+  m = text.match(/(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})/);
+  if (m) {
+    return `${m[3]}-${String(m[2]).padStart(2, "0")}-${String(m[1]).padStart(2, "0")}`;
   }
 
-  return text.slice(0, 10);
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) {
+    return [
+      parsed.getFullYear(),
+      String(parsed.getMonth() + 1).padStart(2, "0"),
+      String(parsed.getDate()).padStart(2, "0"),
+    ].join("-");
+  }
+
+  return "9999-12-31";
 }
 
-export function normalizeFixtureTime(value) {
-  const text = String(value ?? "").trim();
-  if (!text) return "23:59";
+export function fixtureTimeMinutes(value) {
+  if (value === null || value === undefined || value === "") return 1439;
 
-  // 20:00 / 20.00 / 20:00:00
-  const separated = text.match(/(?:^|\s)(\d{1,2})[:.](\d{2})(?::\d{2})?/);
-  if (separated) {
-    const hour = Math.min(23, Math.max(0, Number(separated[1])));
-    const minute = Math.min(59, Math.max(0, Number(separated[2])));
-    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-  }
-
-  // 20 / 21 / 22 / 23 => tam saat
-  if (/^\d{1,2}$/.test(text)) {
-    const hour = Number(text);
-    if (hour >= 0 && hour <= 23) {
-      return `${String(hour).padStart(2, "0")}:00`;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const n = Math.trunc(value);
+    if (n >= 0 && n <= 23) return n * 60;
+    if (n >= 0 && n <= 2359) {
+      const hour = Math.trunc(n / 100);
+      const minute = n % 100;
+      if (hour <= 23 && minute <= 59) return hour * 60 + minute;
     }
   }
 
-  // 900 / 2000 / 2100 / 2300 gibi HHMM değerleri
+  const text = String(value).trim();
+
+  let m = text.match(/(?:T|\s|^)(\d{1,2})[:.](\d{1,2})(?::\d{1,2})?/);
+  if (m) {
+    const hour = Number(m[1]);
+    const minute = Number(m[2]);
+    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+      return hour * 60 + minute;
+    }
+  }
+
+  if (/^\d{1,2}$/.test(text)) {
+    const hour = Number(text);
+    if (hour >= 0 && hour <= 23) return hour * 60;
+  }
+
   if (/^\d{3,4}$/.test(text)) {
     const padded = text.padStart(4, "0");
     const hour = Number(padded.slice(0, 2));
     const minute = Number(padded.slice(2, 4));
     if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
-      return `${padded.slice(0, 2)}:${padded.slice(2, 4)}`;
+      return hour * 60 + minute;
     }
   }
 
-  return "23:59";
+  return 1439;
+}
+
+export function normalizeFixtureTime(value) {
+  const total = fixtureTimeMinutes(value);
+  const hour = Math.floor(total / 60);
+  const minute = total % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 export function fixtureScheduleKey(match) {
-  const date = normalizeFixtureDate(match?.date) || "9999-12-31";
-  const time = normalizeFixtureTime(match?.time);
-  return `${date} ${time}`;
+  return `${normalizeFixtureDate(match?.date)} ${String(fixtureTimeMinutes(match?.time)).padStart(4, "0")}`;
 }
 
 export function compareFixturesBySchedule(a, b) {
-  const scheduleDiff = fixtureScheduleKey(a).localeCompare(fixtureScheduleKey(b));
-  if (scheduleDiff !== 0) return scheduleDiff;
+  const dateA = normalizeFixtureDate(a?.date);
+  const dateB = normalizeFixtureDate(b?.date);
 
-  const weekDiff = (Number(a?.week) || 0) - (Number(b?.week) || 0);
-  if (weekDiff !== 0) return weekDiff;
+  if (dateA !== dateB) return dateA < dateB ? -1 : 1;
+
+  const timeDiff = fixtureTimeMinutes(a?.time) - fixtureTimeMinutes(b?.time);
+  if (timeDiff !== 0) return timeDiff;
+
+  const idA = Number(a?.id);
+  const idB = Number(b?.id);
+  if (Number.isFinite(idA) && Number.isFinite(idB) && idA !== idB) {
+    return idA - idB;
+  }
 
   return String(a?.id ?? a?.knockoutKey ?? "").localeCompare(
     String(b?.id ?? b?.knockoutKey ?? ""),
