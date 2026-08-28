@@ -185,11 +185,13 @@ function calculateStandings(teams, fixtures) {
     });
 }
 
+const MOBILE_ADMIN_ACCESS_TOKEN = "eXSxKuVhbf2AErK1Q5lGbeve4ioCOSGRT--iQ6MjObk";
+const MOBILE_ADMIN_STORAGE_KEY = "sscup-mobile-admin-authorized";
+
 export default function App() {
-  // 🔒 YÖNETİM PANELİ SADECE MASAÜSTÜ ELECTRON EXE'DE AÇILIR.
-  // Vercel/web, Android/iPhone tarayıcı ve Ana Ekrana Ekle (PWA) her zaman
-  // salt-okunur canlı takip ekranında kalır. Böylece PWA start_url sorgu
-  // parametresini kaybetse bile yönetim menülerine erişemez.
+  // MASAÜSTÜ EXE her zaman yönetim modudur.
+  // Web/PWA varsayılan olarak salt-okunur canlı takiptir; yalnızca organizatörün
+  // özel yönetim bağlantısı bu cihazı yönetici olarak yetkilendirir.
   const isDesktopManager = useMemo(() => {
     try {
       const ua = navigator?.userAgent || "";
@@ -201,18 +203,52 @@ export default function App() {
     }
   }, []);
 
+  const isMobileAdmin = useMemo(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const pageParam = params.get("page");
+      const accessParam = params.get("access");
+      const wantsAdmin = pageParam === "yonetim" || pageParam === "admin";
+
+      if (wantsAdmin && accessParam === MOBILE_ADMIN_ACCESS_TOKEN) {
+        localStorage.setItem(MOBILE_ADMIN_STORAGE_KEY, "1");
+
+        // Anahtarı adres çubuğunda bırakma; cihaz yetkilendirildikten sonra temizle.
+        params.delete("access");
+        params.set("page", "yonetim");
+        const query = params.toString();
+        window.history.replaceState(
+          {},
+          "",
+          `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash || ""}`
+        );
+        return true;
+      }
+
+      return wantsAdmin && localStorage.getItem(MOBILE_ADMIN_STORAGE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }, []);
+
   const isPublicRoute = useMemo(() => {
     try {
       const params = new URLSearchParams(window.location.search);
       const pageParam = params.get("page");
       const explicitlyPublic = pageParam === "takip" || pageParam === "public";
 
-      // Web/PWA tarafında URL ne olursa olsun yönetim panelini açma.
-      return explicitlyPublic || !isDesktopManager;
+      // Paylaşılan takip linki her koşulda salt-okunur kalır.
+      if (explicitlyPublic) return true;
+
+      // EXE veya daha önce özel bağlantıyla yetkilendirilmiş telefon tam yönetim açar.
+      if (isDesktopManager || isMobileAdmin) return false;
+
+      // Diğer tüm web/PWA girişleri güvenli biçimde canlı takibe düşer.
+      return true;
     } catch {
-      return !isDesktopManager;
+      return !(isDesktopManager || isMobileAdmin);
     }
-  }, [isDesktopManager]);
+  }, [isDesktopManager, isMobileAdmin]);
 
   const [activePage, setActivePage] = useState(() => {
     if (isPublicRoute) return "public";
