@@ -21,6 +21,7 @@ import AnnouncementCenter from "./components/AnnouncementCenter";
 import Statistics from "./components/Statistics";
 import TeamContacts from "./components/TeamContacts";
 import DisciplineBoard from "./components/DisciplineBoard";
+import BackupManager from "./components/BackupManager";
 
 const mobileMenuItems = [
   { id: "home", icon: "🏠", label: "Ana Sayfa" },
@@ -48,6 +49,7 @@ const menuItems = [
   { id: "announcements", icon: "📢", label: "Duyuru Merkezi" },
   { id: "discipline", icon: "🟨", label: "Disiplin Kurulu" },
   { id: "statistics", icon: "📈", label: "İstatistikler" },
+  { id: "backup", icon: "💾", label: "Turnuvayı Yedekle" },
   { id: "public", icon: "🌐", label: "Canlı Durum" },
 ];
 
@@ -534,6 +536,9 @@ export default function App() {
 
       case "statistics":
         return <Statistics fixtures={fixtures} standings={standings} />;
+
+      case "backup":
+        return <BackupManager />;
 
       case "public":
         return (

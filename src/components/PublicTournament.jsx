@@ -54,7 +54,7 @@ function getEvents(match) {
 
 function mapCloudFixture(item) {
   const played = item.played === true;
-  const live = item.live === true && !played && item.match_phase !== "completed";
+  const live = item.live === true && !played && item.match_phase !== "completed" && item.match_phase !== "waiting";
   return {
     id: item.id,
     home: item.home,
@@ -159,7 +159,7 @@ function getMinute(match, now, halfDurationMinutes) {
   }
   const base = Math.ceil(elapsed / 60);
   const phase = match.matchPhase || "";
-  return `${Math.max(1, base + (phase === "second_half" ? safeNumber(halfDurationMinutes, 25) : 0))}'`;
+  return `${Math.max(1, base + (phase === "second_half" ? safeNumber(halfDurationMinutes, 30) : 0))}'`;
 }
 
 function scoreText(value) {
@@ -334,7 +334,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           id: m.id || `ko-${m.knockoutKey || i}`,
           isKnockout: true,
           played: m.played === true,
-          live: m.live === true && m.played !== true && m.matchPhase !== "completed",
+          live: m.live === true && m.played !== true && m.matchPhase !== "completed" && m.matchPhase !== "waiting",
           homePenalties: m.homePenalties ?? m.homePen ?? "",
           awayPenalties: m.awayPenalties ?? m.awayPen ?? "",
           events: Array.isArray(m.events) ? m.events : [],
@@ -529,7 +529,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const topScorer = liveScorers[0];
   const liveEvents = liveMatch ? getEvents(liveMatch).slice().reverse() : [];
   const lastGoal = liveEvents.find((event) => GOAL_EVENT_TYPES.has(event.type));
-  const minute = getMinute(liveMatch, now, settings.halfDurationMinutes || 25);
+  const minute = getMinute(liveMatch, now, settings.halfDurationMinutes || 30);
   const playedCount = displayFixtures.filter((match) => match?.played === true).length;
   const tournamentName = settings.tournamentName || settings.title || "S&S CUP";
 
@@ -560,7 +560,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       <header className="public-live-header">
         <div className="public-brand-block">
           <div className="public-brand-mark">🏆</div>
-          <div><span className="public-kicker">RESMİ CANLI TURNUVA MERKEZİ</span><h1>{tournamentName}</h1><p>{settings.slogan || "Kazanan Sahada Belli Olur"}</p></div>
+          <div><span className="public-kicker">RESMİ CANLI TURNUVA MERKEZİ</span><h1>{tournamentName}</h1><p>{settings.slogan || "Kazanan Sahada Belli Olur"}</p>{settings.mainSponsor && <small style={{ display: "block", marginTop: "5px", fontWeight: 900 }}>🤝 ANA SPONSOR • {settings.mainSponsor}</small>}</div>
         </div>
         <div className="public-header-meta"><span>{settings.season || "2026"}</span><span>📍 {settings.venue || "Gol Park"}</span><span className="public-sync-dot">● CANLI VERİ</span></div>
       </header>
@@ -643,7 +643,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
               <section className="public-side-card">
                 <div className="public-side-title">PUAN DURUMU</div>
                 <div className="public-side-table-wrap"><table className="public-side-table"><thead><tr><th>#</th><th>TAKIM</th><th>O</th><th>G</th><th>B</th><th>M</th><th>P</th><th>AV</th></tr></thead><tbody>
-                  {liveStandings.slice(0,10).map((team, index) => <tr key={team.team}><td><span className={`public-mini-rank rank-${index + 1}`}>{index + 1}</span></td><td><strong>{team.team}</strong></td><td>{team.played}</td><td>{team.won}</td><td>{team.drawn}</td><td>{team.lost}</td><td><b>{team.points}</b></td><td>{team.goalDifference > 0 ? `+${team.goalDifference}` : team.goalDifference}</td></tr>)}
+                  {liveStandings.map((team, index) => <tr key={team.team}><td><span className={`public-mini-rank rank-${index + 1}`}>{index + 1}</span></td><td><strong>{team.team}</strong></td><td>{team.played}</td><td>{team.won}</td><td>{team.drawn}</td><td>{team.lost}</td><td><b>{team.points}</b></td><td>{team.goalDifference > 0 ? `+${team.goalDifference}` : team.goalDifference}</td></tr>)}
                 </tbody></table></div>
               </section>
 
@@ -715,7 +715,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         <footer className="public-live-footer"><div><b>{tournamentName}</b><span>{settings.slogan || "Kazanan Sahada Belli Olur"}</span></div><small>{lastSync ? `Son veri: ${lastSync.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Canlı veri bağlantısı kuruluyor…"}</small></footer>
       </main>
 
-      <MatchDetailModal match={selectedMatch} onClose={() => setSelectedMatch(null)} now={now} halfDurationMinutes={settings.halfDurationMinutes || 25} />
+      <MatchDetailModal match={selectedMatch} onClose={() => setSelectedMatch(null)} now={now} halfDurationMinutes={settings.halfDurationMinutes || 30} />
     </div>
   );
 }

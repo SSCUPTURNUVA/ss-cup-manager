@@ -10,7 +10,7 @@ const DEFAULT_SETTINGS = {
   mainSponsor: "",
   subSponsors: [],
   primaryColor: "#d4af37",
-  halfDurationMinutes: 25,
+  halfDurationMinutes: 30,
   halftimeDurationMinutes: 5,
 };
 
@@ -18,9 +18,13 @@ function readSettings() {
   try {
     const saved = localStorage.getItem("sscup-settings");
 
-    return saved
-      ? { ...DEFAULT_SETTINGS, ...JSON.parse(saved) }
-      : DEFAULT_SETTINGS;
+    if (!saved) return DEFAULT_SETTINGS;
+    const parsed = JSON.parse(saved);
+    if (Number(parsed?.halfDurationMinutes) === 25) {
+      parsed.halfDurationMinutes = 30;
+      localStorage.setItem("sscup-settings", JSON.stringify(parsed));
+    }
+    return { ...DEFAULT_SETTINGS, ...parsed };
   } catch {
     return DEFAULT_SETTINGS;
   }

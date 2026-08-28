@@ -11,15 +11,20 @@ function getTeamName(team) {
   return team?.name || team?.teamName || "Takım";
 }
 
+
+function getMatchCenterKey(match, index = 0) {
+  return String(match?.id ?? `${match?.home || ""}|${match?.away || ""}|${match?.week || ""}|${index}`);
+}
+
 function readMatchRules() {
   try {
     const saved = JSON.parse(localStorage.getItem("sscup-settings") || "{}");
     return {
-      halfDurationMinutes: Math.max(1, safeNumber(saved.halfDurationMinutes, 25)),
+      halfDurationMinutes: Math.max(1, safeNumber(saved.halfDurationMinutes, 30)),
       halftimeDurationMinutes: Math.max(0, safeNumber(saved.halftimeDurationMinutes, 5)),
     };
   } catch {
-    return { halfDurationMinutes: 25, halftimeDurationMinutes: 5 };
+    return { halfDurationMinutes: 30, halftimeDurationMinutes: 5 };
   }
 }
 
@@ -155,6 +160,18 @@ export default function MatchCenter({
   // Penaltı Atışları Yönetimi
   const [penaltySide, setPenaltySide] = useState("home");
   const [penaltyPlayerId, setPenaltyPlayerId] = useState("");
+  const [matchLineups, setMatchLineups] = useState(() => {
+    try {
+      const saved = localStorage.getItem("sscup-match-lineups");
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem("sscup-match-lineups", JSON.stringify(matchLineups));
+  }, [matchLineups]);
 
   useEffect(() => {
     function refreshRules() {
@@ -240,12 +257,14 @@ export default function MatchCenter({
     );
   }
 
+  const activeMatchCenterKey = localStorage.getItem("sscup-match-center-active") || "";
   const liveMatchIndex = fixtures.findIndex(
-    (match) => match.live === true
+    (match, index) =>
+      match.live === true ||
+      (activeMatchCenterKey && getMatchCenterKey(match, index) === activeMatchCenterKey)
   );
 
-  const liveMatch =
-    liveMatchIndex >= 0 ? fixtures[liveMatchIndex] : null;
+  const liveMatch = liveMatchIndex >= 0 ? fixtures[liveMatchIndex] : null;
 
   const playedMatches = fixtures.filter(
     (match) => match.played === true
@@ -309,48 +328,108 @@ export default function MatchCenter({
       : liveMatch.away
     : "";
 
-  const selectedSquad = liveMatch
-    ? getTeamSquad(selectedTeamName)
-    : [];
-
   function playerKey(player, index) {
     return String(player?.id || player?.playerId || index);
   }
 
+  function getMatchLineupKey(match) {
+    if (!match) return "";
+    return String(
+      match.id ??
+      match.knockoutKey ??
+      `${match.home || "takim-a"}-${match.away || "takim-b"}-${match.week || "lig"}`
+    );
+  }
+
+  function getSideLineup(side, match = liveMatch) {
+    const matchKey = getMatchLineupKey(match);
+    const saved = matchKey ? matchLineups?.[matchKey]?.[side] : null;
+    return {
+      starters: Array.isArray(saved?.starters) ? saved.starters.map(String) : [],
+      bench: Array.isArray(saved?.bench) ? saved.bench.map(String) : [],
+    };
+  }
+
+  function setPlayerLineupStatus(side, player, index, status) {
+    if (!liveMatch || matchPhase !== "waiting") return;
+
+    const matchKey = getMatchLineupKey(liveMatch);
+    const playerId = playerKey(player, index);
+    const current = getSideLineup(side);
+    let starters = current.starters.filter((id) => id !== playerId);
+    let bench = current.bench.filter((id) => id !== playerId);
+
+    if (status === "starter") {
+      if (starters.length >= 7) {
+        alert("Bir takımda en fazla 7 AS oyuncu seçilebilir.");
+        return;
+      }
+      starters = [...starters, playerId];
+    } else if (status === "bench") {
+      if (bench.length >= 5) {
+        alert("Bir takımda en fazla 5 YEDEK oyuncu seçilebilir.");
+        return;
+      }
+      bench = [...bench, playerId];
+    }
+
+    setMatchLineups((currentLineups) => ({
+      ...currentLineups,
+      [matchKey]: {
+        ...(currentLineups[matchKey] || {}),
+        [side]: { starters, bench },
+      },
+    }));
+  }
+
   function getTeamSubstitutionState(side) {
     const teamName = side === "home" ? liveMatch?.home : liveMatch?.away;
-    const squad = liveMatch ? getTeamSquad(teamName) : [];
+    const allSquad = liveMatch ? getTeamSquad(teamName) : [];
+    const lineup = getSideLineup(side);
+    const matchDayIds = new Set([...lineup.starters, ...lineup.bench]);
+    const squad = allSquad.filter((player, index) => matchDayIds.has(playerKey(player, index)));
     const events = (Array.isArray(liveMatch?.events) ? liveMatch.events : [])
       .filter((event) =>
-        event?.type === "substitution" &&
         (event?.side === side || String(event?.team || event?.teamName || "") === String(teamName || ""))
       );
 
-    const active = new Set(squad.slice(0, 7).map((player, index) => playerKey(player, index)));
+    const active = new Set(lineup.starters);
     const lockedOut = new Set();
 
     events.forEach((event) => {
-      const outId = String(event?.playerOutId || event?.playerId || "");
-      const inId = String(event?.playerInId || event?.secondPlayerId || "");
-      if (outId) {
-        active.delete(outId);
-        lockedOut.add(outId);
+      if (event?.type === "substitution") {
+        const outId = String(event?.playerOutId || event?.playerId || "");
+        const inId = String(event?.playerInId || event?.secondPlayerId || "");
+        if (outId) {
+          active.delete(outId);
+          lockedOut.add(outId);
+        }
+        if (inId && matchDayIds.has(inId) && !lockedOut.has(inId)) active.add(inId);
       }
-      if (inId) active.add(inId);
+
+      if (event?.type === "red_card") {
+        const redId = String(event?.playerId || "");
+        if (redId) {
+          active.delete(redId);
+          lockedOut.add(redId);
+        }
+      }
     });
 
     return {
       squad,
       active,
       lockedOut,
-      starters: squad.filter((player, index) => active.has(playerKey(player, index))),
-      bench: squad.filter((player, index) => !active.has(playerKey(player, index))),
+      starters: squad.filter((player, index) => active.has(playerKey(player, allSquad.indexOf(player)))),
+      bench: squad.filter((player, index) => !active.has(playerKey(player, allSquad.indexOf(player)))),
     };
   }
 
   const selectedSubstitutionState = liveMatch
     ? getTeamSubstitutionState(eventSide)
     : { squad: [], active: new Set(), lockedOut: new Set(), starters: [], bench: [] };
+
+  const selectedSquad = selectedSubstitutionState.squad;
 
   useEffect(() => {
     if (!liveMatch || liveMatch.timerRunning !== true) return;
@@ -942,9 +1021,78 @@ export default function MatchCenter({
     setSecondPlayerId("");
   }
 
+  function validateMatchLineups() {
+    if (!liveMatch) return "Canlı maç bulunamadı.";
+
+    for (const side of ["home", "away"]) {
+      const teamName = side === "home" ? liveMatch.home : liveMatch.away;
+      const teamSquad = getTeamSquad(teamName);
+      const lineup = getSideLineup(side);
+      const validIds = new Set(teamSquad.map((player, index) => playerKey(player, index)));
+      const selectedIds = [...lineup.starters, ...lineup.bench];
+
+      if (teamSquad.length < 12) {
+        return `${teamName} takımında en az 12 kayıtlı oyuncu olmalı. Şu an ${teamSquad.length} oyuncu var.`;
+      }
+      if (lineup.starters.length !== 7) {
+        return `${teamName} için tam 7 AS oyuncu seçilmeden maç başlayamaz.`;
+      }
+      if (lineup.bench.length !== 5) {
+        return `${teamName} için tam 5 YEDEK oyuncu seçilmeden maç başlayamaz.`;
+      }
+      if (new Set(selectedIds).size !== 12 || selectedIds.some((id) => !validIds.has(id))) {
+        return `${teamName} maç kadrosunda geçersiz veya tekrarlanan oyuncu var. Kadroyu yeniden seçin.`;
+      }
+    }
+
+    return "";
+  }
+
+  function renderLineupSelector(side) {
+    if (!liveMatch) return null;
+    const teamName = side === "home" ? liveMatch.home : liveMatch.away;
+    const teamSquad = getTeamSquad(teamName);
+    const lineup = getSideLineup(side);
+
+    return (
+      <div style={{ border: "1px solid rgba(255,255,255,.18)", borderRadius: "12px", padding: "12px", minWidth: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center", marginBottom: "10px", flexWrap: "wrap" }}>
+          <strong>{teamName}</strong>
+          <span style={{ fontSize: "12px", fontWeight: 900 }}>AS {lineup.starters.length}/7 • YEDEK {lineup.bench.length}/5</span>
+        </div>
+        {teamSquad.length === 0 ? (
+          <small>Bu takımın kayıtlı oyuncusu yok.</small>
+        ) : (
+          <div style={{ display: "grid", gap: "6px", maxHeight: "320px", overflowY: "auto" }}>
+            {teamSquad.map((player, index) => {
+              const id = playerKey(player, index);
+              const status = lineup.starters.includes(id) ? "starter" : lineup.bench.includes(id) ? "bench" : "out";
+              return (
+                <div key={id} style={{ display: "grid", gridTemplateColumns: "1fr 118px", gap: "8px", alignItems: "center", background: "rgba(255,255,255,.05)", padding: "7px", borderRadius: "8px" }}>
+                  <span><b>#{player.shirtNumber ?? player.number ?? "-"}</b> {getPlayerName(player)}</span>
+                  <select
+                    value={status}
+                    onChange={(event) => setPlayerLineupStatus(side, player, index, event.target.value)}
+                    disabled={matchPhase !== "waiting"}
+                    style={{ padding: "6px" }}
+                  >
+                    <option value="out">Kadro Dışı</option>
+                    <option value="starter">AS</option>
+                    <option value="bench">YEDEK</option>
+                  </select>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   function startPhase(phase) {
     if (!liveMatch) return;
     updateLiveMatch({
+      live: true,
       matchPhase: phase,
       timerRunning: true,
       timerStartedAt: Date.now(),
@@ -956,6 +1104,11 @@ export default function MatchCenter({
     if (!liveMatch) return;
 
     if (matchPhase === "waiting") {
+      const lineupError = validateMatchLineups();
+      if (lineupError) {
+        alert(`⛔ MAÇ BAŞLATILAMAZ\n\n${lineupError}`);
+        return;
+      }
       startPhase("first_half");
       return;
     }
@@ -1026,6 +1179,8 @@ export default function MatchCenter({
     );
 
     if (!confirmed) return;
+
+    localStorage.removeItem("sscup-match-center-active");
 
     const finishPatch = {
       played: true,
@@ -1231,6 +1386,21 @@ export default function MatchCenter({
               </strong>
               <small>Süreler Turnuva Ayarları bölümünden değiştirilebilir.</small>
             </div>
+
+            {matchPhase === "waiting" && (
+              <section style={{ margin: "16px 0", padding: "16px", borderRadius: "14px", background: "#111827", color: "white", border: "2px solid #d4af37" }}>
+                <div style={{ marginBottom: "12px" }}>
+                  <b>👕 MAÇ KADROSU • 7 AS + 5 YEDEK</b>
+                  <div style={{ fontSize: "12px", marginTop: "4px", opacity: .85 }}>
+                    Her iki takımda da 7 AS ve 5 YEDEK seçilmeden 1. devre başlatılamaz. Maç başladıktan sonra kadro kilitlenir.
+                  </div>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "12px" }}>
+                  {renderLineupSelector("home")}
+                  {renderLineupSelector("away")}
+                </div>
+              </section>
+            )}
 
             <div className="match-control-row">
               {matchPhase !== "completed" && matchPhase !== "penalty" && (

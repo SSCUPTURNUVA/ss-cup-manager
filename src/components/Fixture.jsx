@@ -221,6 +221,176 @@ export default function Fixture({
       }));
   }, [fixtures]);
 
+  function getMatchWeekPlanKey(match, index) {
+    return String(match?.id ?? match?.knockoutKey ?? `${match?.home || ""}-${match?.away || ""}-${index}`);
+  }
+
+  function findDisjointMatchIndexes(matches, targetCount, excludedTeam = "") {
+    const chosen = [];
+    const usedTeams = new Set();
+
+    function search(startIndex) {
+      if (chosen.length === targetCount) return true;
+      if (matches.length - startIndex < targetCount - chosen.length) return false;
+
+      for (let index = startIndex; index < matches.length; index += 1) {
+        const item = matches[index];
+        const home = String(item.match?.home || "");
+        const away = String(item.match?.away || "");
+
+        if (!home || !away) continue;
+        if (excludedTeam && (home === excludedTeam || away === excludedTeam)) continue;
+        if (usedTeams.has(home) || usedTeams.has(away)) continue;
+
+        chosen.push(index);
+        usedTeams.add(home);
+        usedTeams.add(away);
+
+        if (search(index + 1)) return true;
+
+        chosen.pop();
+        usedTeams.delete(home);
+        usedTeams.delete(away);
+      }
+
+      return false;
+    }
+
+    return search(0) ? chosen.map((index) => matches[index]) : null;
+  }
+
+  async function arrangeEightMatchesPerWeek() {
+    const leagueItems = fixtures
+      .map((match, index) => ({ match, index, key: getMatchWeekPlanKey(match, index) }))
+      .filter(({ match }) => match?.isKnockout !== true);
+
+    if (leagueItems.length === 0) {
+      alert("Düzenlenecek lig fikstürü bulunamadı.");
+      return;
+    }
+
+    const bayTeam = "Bayramdere Gençlik";
+    const teamNames = new Set();
+    leagueItems.forEach(({ match }) => {
+      if (match.home) teamNames.add(match.home);
+      if (match.away) teamNames.add(match.away);
+    });
+
+    const useBayRule = teamNames.has(bayTeam);
+    const remaining = [...leagueItems];
+    const assignments = new Map();
+    let week = 1;
+
+    while (remaining.length > 0) {
+      const target = Math.min(8, remaining.length);
+      let selected = findDisjointMatchIndexes(
+        remaining,
+        target,
+        week === 1 && useBayRule ? bayTeam : ""
+      );
+
+      if (!selected && target === 8) {
+        // Son haftalarda 8 maçlık tam eşleşme kalmadıysa o haftanın mümkün
+        // olan en büyük tek-maç-per-team grubunu bul. İlk iki hafta ise
+        // kullanıcı isteği gereği mutlaka 8 maç olmalıdır.
+        if (week <= 2) {
+          alert(
+            `${week}. hafta için aynı takımın iki kez oynamadığı 8 maçlık güvenli dağılım bulunamadı.\n\n` +
+            "Hiçbir eşleşme değiştirilmedi. Fikstür korunuyor."
+          );
+          return;
+        }
+
+        for (let size = Math.min(7, target); size >= 1 && !selected; size -= 1) {
+          selected = findDisjointMatchIndexes(remaining, size, "");
+        }
+      }
+
+      if (!selected || selected.length === 0) {
+        alert("Haftalık dağılım güvenli şekilde oluşturulamadı. Fikstüre dokunulmadı.");
+        return;
+      }
+
+      selected.forEach((item) => assignments.set(item.key, week));
+      const selectedKeys = new Set(selected.map((item) => item.key));
+      for (let index = remaining.length - 1; index >= 0; index -= 1) {
+        if (selectedKeys.has(remaining[index].key)) remaining.splice(index, 1);
+      }
+      week += 1;
+    }
+
+    const firstWeek = leagueItems.filter((item) => assignments.get(item.key) === 1);
+    const secondWeek = leagueItems.filter((item) => assignments.get(item.key) === 2);
+    if (firstWeek.length !== 8 || secondWeek.length !== 8) {
+      alert("1. ve 2. hafta 8'er maç olacak güvenli plan oluşturulamadı. Fikstüre dokunulmadı.");
+      return;
+    }
+
+    if (useBayRule && firstWeek.some(({ match }) => match.home === bayTeam || match.away === bayTeam)) {
+      alert("Bayramdere Gençlik 1. hafta BAY kuralı sağlanamadı. Fikstüre dokunulmadı.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Mevcut eşleşmeler KESİNLİKLE değişmeden yalnız hafta numaraları düzenlenecek.\n\n` +
+      `1. Hafta: 8 maç${useBayRule ? " • Bayramdere Gençlik BAY" : ""}\n` +
+      `2. Hafta: 8 maç\n` +
+      `Her takım bir haftada en fazla 1 maç oynayacak.\n\nDevam edilsin mi?`
+    );
+    if (!confirmed) return;
+
+    const originalWeeks = new Map(leagueItems.map((item) => [item.key, item.match.week]));
+    const changedCloudItems = [];
+
+    try {
+      for (const item of leagueItems) {
+        const nextWeek = assignments.get(item.key);
+        if (!Number.isFinite(Number(item.match.id)) || Number(item.match.week) === Number(nextWeek)) continue;
+
+        const { error } = await supabase
+          .from("fixtures")
+          .update({ week: nextWeek })
+          .eq("id", Number(item.match.id));
+
+        if (error) throw error;
+        changedCloudItems.push(item);
+      }
+    } catch (error) {
+      console.error("Hafta dağılımı kaydetme hatası:", error);
+
+      // Bulutta kısmi değişiklik olduysa eski hafta değerlerini geri yükle.
+      for (const item of changedCloudItems) {
+        try {
+          await supabase
+            .from("fixtures")
+            .update({ week: originalWeeks.get(item.key) })
+            .eq("id", Number(item.match.id));
+        } catch (rollbackError) {
+          console.error("Hafta geri alma hatası:", rollbackError);
+        }
+      }
+
+      alert("Haftalık plan kaydedilemedi. Mevcut fikstür korunmaya çalışıldı; hiçbir eşleşme silinmedi.");
+      return;
+    }
+
+    const updatedFixtures = fixtures.map((match, index) => {
+      if (match?.isKnockout === true) return match;
+      const nextWeek = assignments.get(getMatchWeekPlanKey(match, index));
+      return nextWeek ? { ...match, week: nextWeek } : match;
+    });
+
+    setFixtures(updatedFixtures);
+    localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));
+
+    alert(
+      `✅ Haftalık dağılım tamamlandı.\n\n` +
+      `1. hafta: 8 maç${useBayRule ? " • Bayramdere Gençlik BAY" : ""}\n` +
+      `2. hafta: 8 maç\n` +
+      `Eşleşmeler, maç kimlikleri, skorlar ve fikstür sırası korunmuştur.`
+    );
+  }
+
   function getSquads() {
     try {
       const saved =
@@ -684,42 +854,40 @@ export default function Fixture({
     );
   }
 
+  function getMatchCenterKey(match, index = 0) {
+    return String(match?.id ?? `${match?.home || ""}|${match?.away || ""}|${match?.week || ""}|${index}`);
+  }
+
   function toggleLiveMatch(index) {
     const selectedMatch = fixtures[index];
 
     if (selectedMatch.played === true) {
-      alert(
-        "Oynanmış bir maç canlı başlatılamaz."
-      );
-
+      alert("Oynanmış bir maç Maç Merkezi'ne alınamaz.");
       return;
     }
 
-    const shouldStart =
-      selectedMatch.live !== true;
+    const selectedKey = getMatchCenterKey(selectedMatch, index);
+    const activeKey = localStorage.getItem("sscup-match-center-active") || "";
+    const shouldSelect = activeKey !== selectedKey;
 
-    const updatedFixtures = fixtures.map(
-      (fixture, fixtureIndex) => {
-        if (fixtureIndex === index) {
-          if (shouldStart) {
-            return {
-              ...fixture,
-              live: true,
-              elapsedSeconds: 0,
-              timerRunning: true,
-              timerStartedAt: Date.now(),
-            };
-          }
+    const updatedFixtures = fixtures.map((fixture, fixtureIndex) => {
+      const fixtureKey = getMatchCenterKey(fixture, fixtureIndex);
 
-          return {
-            ...fixture,
-            live: false,
-            elapsedSeconds: 0,
-            timerRunning: false,
-            timerStartedAt: null,
-          };
-        }
+      if (fixtureIndex === index) {
+        return {
+          ...fixture,
+          // Maç Merkezi'ne almak CANLI başlatmak değildir.
+          // CANLI ancak 1. Devreyi Başlat ile açılır.
+          live: shouldSelect ? false : fixture.live === true,
+          matchPhase: fixture.matchPhase || "waiting",
+          elapsedSeconds: shouldSelect ? 0 : fixture.elapsedSeconds ?? 0,
+          timerRunning: shouldSelect ? false : fixture.timerRunning === true,
+          timerStartedAt: shouldSelect ? null : fixture.timerStartedAt ?? null,
+        };
+      }
 
+      // Başka bir maçı merkeze alırken gerçek başlamamış eski hazırlık maçlarını canlı bırakma.
+      if (fixture.matchPhase === "waiting") {
         return {
           ...fixture,
           live: false,
@@ -727,14 +895,18 @@ export default function Fixture({
           timerStartedAt: null,
         };
       }
-    );
+
+      return fixture;
+    });
+
+    if (shouldSelect) {
+      localStorage.setItem("sscup-match-center-active", selectedKey);
+    } else {
+      localStorage.removeItem("sscup-match-center-active");
+    }
 
     setFixtures(updatedFixtures);
-
-    localStorage.setItem(
-      "sscup-fixtures",
-      JSON.stringify(updatedFixtures)
-    );
+    localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));
   }
 
   function toggleTimer(index) {
@@ -1276,12 +1448,12 @@ export default function Fixture({
             toggleLiveMatch(index)
           }
         >
-          {match.live === true
-            ? "🔴 Canlıyı Bitir"
-            : "🟢 Canlı Başlat"}
+          {(localStorage.getItem("sscup-match-center-active") || "") === getMatchCenterKey(match, index)
+            ? "❌ Maç Merkezinden Çıkar"
+            : "🏟️ Maç Merkezine Al"}
         </button>
 
-        {match.live === true && (
+        {match.live === true && (match.matchPhase || "waiting") !== "waiting" && (
           <div
             style={{
               marginTop: "10px",
@@ -1398,7 +1570,7 @@ export default function Fixture({
                 💾 Golcüleri Kaydet
               </button>
 
-              {match.live === true && (
+              {match.live === true && (match.matchPhase || "waiting") !== "waiting" && (
                 <button
                   type="button"
                   style={{
@@ -1446,6 +1618,19 @@ export default function Fixture({
         yalnızca 1 maç oynar. Gün ve saatleri siz belirlersiniz. Maç ertelenirse
         tarihini değiştirebilirsiniz; fikstür haftası değişmez.
       </p>
+
+      {fixtures.some((match) => match?.isKnockout !== true) && (
+        <div style={{ margin: "14px 0 18px", padding: "14px", border: "2px solid #d4af37", borderRadius: "12px" }}>
+          <b>🔒 Mevcut fikstürü koruyan haftalık plan</b>
+          <p style={{ margin: "8px 0 12px" }}>
+            Eşleşmeler silinmez veya yeniden çekilmez. Yalnızca hafta numarası düzenlenir;
+            her takım haftada en fazla 1 maç oynar. Haftalık dağılım mevcut fikstür korunarak yapılır.
+          </p>
+          <button type="button" onClick={arrangeEightMatchesPerWeek}>
+            🗓️ 8 MAÇ / HAFTA DÜZENİNİ UYGULA
+          </button>
+        </div>
+      )}
 
       <p>
         Skoru girdikten sonra her gol

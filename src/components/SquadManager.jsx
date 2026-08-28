@@ -20,6 +20,8 @@ export default function SquadManager({ teams = [] }) {
   const [editingPlayerId, setEditingPlayerId] = useState(null);
   const [editingName, setEditingName] = useState("");
   const [editingNumber, setEditingNumber] = useState("");
+  const [bulkRows, setBulkRows] = useState(() => Array.from({ length: 24 }, () => ({ shirtNumber: "", name: "" })));
+  const localEditUntilRef = useRef(0);
   const cloudReadyRef = useRef(false);
   const applyingCloudRef = useRef(false);
 
@@ -80,6 +82,7 @@ export default function SquadManager({ teams = [] }) {
         (payload) => {
           const value = payload?.new?.value;
           if (!value || typeof value !== "object" || Array.isArray(value)) return;
+          if (Date.now() < localEditUntilRef.current) return;
           applyingCloudRef.current = true;
           setSquads(value);
           localStorage.setItem("sscup-squads", JSON.stringify(value));
@@ -160,6 +163,7 @@ export default function SquadManager({ teams = [] }) {
       shirtNumber: numericNumber,
     };
 
+    localEditUntilRef.current = Date.now() + 5000;
     setSquads((current) => ({
       ...current,
       [selectedTeam]: [...(current[selectedTeam] || []), newPlayer].sort((a, b) => Number(a.shirtNumber) - Number(b.shirtNumber)),
@@ -198,6 +202,7 @@ export default function SquadManager({ teams = [] }) {
     );
     if (duplicateName) return setMessage("Bu oyuncu aynı takımda zaten kayıtlı.");
 
+    localEditUntilRef.current = Date.now() + 5000;
     setSquads((current) => ({
       ...current,
       [selectedTeam]: (current[selectedTeam] || [])
@@ -212,6 +217,7 @@ export default function SquadManager({ teams = [] }) {
     const player = selectedSquad.find((item) => item.id === playerId);
     if (!player) return;
     if (!window.confirm(`${player.name} kadrodan silinsin mi?`)) return;
+    localEditUntilRef.current = Date.now() + 5000;
     setSquads((current) => ({
       ...current,
       [selectedTeam]: (current[selectedTeam] || []).filter((item) => item.id !== playerId),
@@ -226,14 +232,123 @@ export default function SquadManager({ teams = [] }) {
     setMessage("Takım kadrosu temizlendi.");
   }
 
+  useEffect(() => {
+    const list = selectedTeam ? (squads[selectedTeam] || []) : [];
+    setBulkRows(Array.from({ length: 24 }, (_, index) => ({
+      shirtNumber: list[index]?.shirtNumber ?? "",
+      name: list[index]?.name ?? "",
+    })));
+  }, [selectedTeam]);
+
+  function updateBulkRow(index, field, value) {
+    setBulkRows((rows) => rows.map((row, i) => i === index ? { ...row, [field]: value } : row));
+  }
+
+  async function saveBulkSquad() {
+    if (!selectedTeam) return;
+    const filled = bulkRows.filter((row) => String(row.name).trim() || String(row.shirtNumber).trim() !== "");
+    for (const row of filled) {
+      const name = String(row.name).trim();
+      const num = Number(String(row.shirtNumber).trim());
+      if (!name || !Number.isInteger(num) || num < 0 || num > 99) {
+        setMessage("Dolu satırlarda oyuncu adı ve 0-99 arası forma numarası olmalıdır.");
+        return;
+      }
+    }
+    const nums = filled.map((r) => Number(r.shirtNumber));
+    if (new Set(nums).size !== nums.length) return setMessage("Aynı forma numarası iki kez kullanılamaz.");
+    const names = filled.map((r) => String(r.name).trim().toLocaleLowerCase("tr-TR"));
+    if (new Set(names).size !== names.length) return setMessage("Aynı oyuncu iki kez yazılamaz.");
+
+    const players = filled.map((row, index) => ({
+      id: (squads[selectedTeam] || [])[index]?.id || (crypto?.randomUUID ? crypto.randomUUID() : `${Date.now()}-${index}`),
+      name: String(row.name).trim(),
+      shirtNumber: Number(row.shirtNumber),
+    })).sort((a,b) => a.shirtNumber - b.shirtNumber);
+    const next = { ...squads, [selectedTeam]: players };
+    localEditUntilRef.current = Date.now() + 10000;
+    setSquads(next);
+    localStorage.setItem("sscup-squads", JSON.stringify(next));
+    const { error } = await supabase.from("app_state").upsert({ id: CLOUD_KEY, value: next, updated_at: new Date().toISOString() });
+    setMessage(error ? `Kadro kaydedilemedi: ${error.message}` : `✅ ${players.length} oyuncu tek seferde kaydedildi.`);
+  }
+
   function getTotalPlayers() {
     return Object.values(squads).reduce((total, squad) => total + (Array.isArray(squad) ? squad.length : 0), 0);
+  }
+
+  function escapeExcelCell(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function exportAllPlayersToExcel() {
+    const rows = [];
+
+    teamNames.forEach((teamName) => {
+      const teamSquad = Array.isArray(squads[teamName]) ? squads[teamName] : [];
+      [...teamSquad]
+        .sort((a, b) => Number(a.shirtNumber ?? a.number ?? 999) - Number(b.shirtNumber ?? b.number ?? 999))
+        .forEach((player) => {
+          rows.push({
+            team: teamName,
+            shirtNumber: player.shirtNumber ?? player.number ?? "",
+            name: player.name || player.playerName || "",
+            tc: player.tc || player.tcNo || player.identityNumber || "",
+            phone: player.phone || player.telephone || player.mobile || "",
+          });
+        });
+    });
+
+    if (rows.length === 0) {
+      alert("Excel'e aktarılacak kayıtlı oyuncu bulunamadı.");
+      return;
+    }
+
+    const body = rows.map((row, index) => `
+      <tr>
+        <td>${index + 1}</td>
+        <td>${escapeExcelCell(row.team)}</td>
+        <td>${escapeExcelCell(row.shirtNumber)}</td>
+        <td>${escapeExcelCell(row.name)}</td>
+        <td>${escapeExcelCell(row.tc)}</td>
+        <td>${escapeExcelCell(row.phone)}</td>
+      </tr>`).join("");
+
+    const html = `<!doctype html>
+      <html><head><meta charset="UTF-8"></head><body>
+      <table border="1">
+        <thead><tr><th>Sıra</th><th>Takım</th><th>Forma No</th><th>Ad Soyad</th><th>TC</th><th>Telefon</th></tr></thead>
+        <tbody>${body}</tbody>
+      </table></body></html>`;
+
+    const blob = new Blob(["\ufeff", html], { type: "application/vnd.ms-excel;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const date = new Date().toLocaleDateString("en-CA");
+    link.href = url;
+    link.download = `SS-CUP-TUM-OYUNCULAR-${date}.xls`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   }
 
   return (
     <div className="card">
       <h2>👥 Kadro Yönetimi</h2>
       <p>Takımlara forma numarasıyla oyuncu ekleyin. Kadrolar artık PC ve telefon arasında bulut üzerinden eşitlenir.</p>
+
+      <button
+        type="button"
+        onClick={exportAllPlayersToExcel}
+        style={{ marginBottom: "18px", padding: "12px 16px", fontWeight: 900 }}
+      >
+        📊 TÜM TAKIM OYUNCULARINI EXCEL'E AKTAR
+      </button>
 
       {teamNames.length === 0 ? (
         <p>Önce Takım Yönetimi bölümünden takım eklemelisiniz.</p>
@@ -249,12 +364,20 @@ export default function SquadManager({ teams = [] }) {
 
           {selectedTeam && (
             <>
-              <form onSubmit={addPlayer} style={{ padding: "15px", border: "1px solid #ddd", borderRadius: "10px", marginBottom: "25px" }}>
-                <h3>{selectedTeam} – Oyuncu Ekle</h3>
-                <input type="number" min="0" max="99" placeholder="Forma No" value={shirtNumber} onChange={(event) => setShirtNumber(event.target.value)} />{" "}
-                <input type="text" placeholder="Oyuncu adı soyadı" value={playerName} onChange={(event) => setPlayerName(event.target.value)} />{" "}
-                <button type="submit">Oyuncu Ekle</button>
-              </form>
+              <div style={{ padding: "15px", border: "1px solid #ddd", borderRadius: "10px", marginBottom: "25px" }}>
+                <h3>{selectedTeam} – 24 Kişilik Kadro Girişi</h3>
+                <p>Oyuncuları doldurun, en alttaki <b>24 KİŞİLİK KADROYU KAYDET</b> butonuna bir kez basın.</p>
+                <div style={{ display: "grid", gap: "8px" }}>
+                  {bulkRows.map((row, index) => (
+                    <div key={index} style={{ display: "grid", gridTemplateColumns: "50px 110px 1fr", gap: "8px", alignItems: "center" }}>
+                      <b>{index + 1}.</b>
+                      <input type="number" min="0" max="99" placeholder="Forma No" value={row.shirtNumber} onChange={(e) => updateBulkRow(index, "shirtNumber", e.target.value)} />
+                      <input type="text" placeholder="Oyuncu adı soyadı" value={row.name} onChange={(e) => updateBulkRow(index, "name", e.target.value)} />
+                    </div>
+                  ))}
+                </div>
+                <button type="button" onClick={saveBulkSquad} style={{ marginTop: "16px", width: "100%", padding: "14px", fontWeight: 900 }}>💾 24 KİŞİLİK KADROYU KAYDET</button>
+              </div>
 
               {message && <p><b>{message}</b></p>}
               <h3>{selectedTeam} Kadrosu ({selectedSquad.length})</h3>

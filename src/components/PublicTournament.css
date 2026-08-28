@@ -375,3 +375,9 @@
   .public-champion-final > strong { font-size: 20px; }
   .public-champion-final em { width: 100%; padding: 4px 0 0; border-left: 0; border-top: 1px solid rgba(255,210,60,.25); }
 }
+
+/* 17 takımlı ligde ana ekrandaki mini puan tablosunun tamamı kaydırılarak görülsün. */
+.public-side-table-wrap {
+  max-height: 520px;
+  overflow-y: auto;
+}
