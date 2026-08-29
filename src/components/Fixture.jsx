@@ -143,6 +143,15 @@ export default function Fixture({
           ? {
               ...item,
               ...localMatch,
+              // Fikstürün tarih/saat/hafta bilgisi için bulut kaydı tek kaynaktır.
+              // Maç Merkezi'nden kalan eski localStorage verisi sıralamayı bozamaz.
+              id: item.id,
+              home: item.home,
+              away: item.away,
+              date: item.date,
+              time: item.time,
+              field: item.field,
+              week: item.week,
               played:
                 localMatch.played === true
                   ? true
@@ -961,13 +970,13 @@ export default function Fixture({
       if (fixtureIndex === index) {
         return {
           ...fixture,
-          // Maç Merkezi'ne almak CANLI başlatmak değildir.
-          // CANLI ancak 1. Devreyi Başlat ile açılır.
-          live: shouldSelect ? false : fixture.live === true,
-          matchPhase: fixture.matchPhase || "waiting",
-          elapsedSeconds: shouldSelect ? 0 : fixture.elapsedSeconds ?? 0,
-          timerRunning: shouldSelect ? false : fixture.timerRunning === true,
-          timerStartedAt: shouldSelect ? null : fixture.timerStartedAt ?? null,
+          // Maç Merkezi'ne almak da geri çıkarmak da fikstür sırasını değiştirmez.
+          // Geri çekilen test maçı tamamen normal "bekleyen maç" durumuna döner.
+          live: false,
+          matchPhase: "waiting",
+          elapsedSeconds: 0,
+          timerRunning: false,
+          timerStartedAt: null,
         };
       }
 
