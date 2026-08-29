@@ -23,6 +23,7 @@ import TeamContacts from "./components/TeamContacts";
 import DisciplineBoard from "./components/DisciplineBoard";
 import BackupManager from "./components/BackupManager";
 import { sortFixturesBySchedule } from "./utils/fixtureOrder";
+import { flushPendingFixtureSync } from "./utils/pendingFixtureSync";
 
 const mobileMenuItems = [
   { id: "home", icon: "🏠", label: "Ana Sayfa" },
@@ -234,6 +235,19 @@ function AdminPinGate({ onUnlock }) {
 }
 
 export default function App() {
+  // Saha kenarında internet kısa süre kesilirse yerel maç kaydı kaybolmaz.
+  // Bekleyen Supabase yazıları uygulama açık kaldığı sürece ve bağlantı geri geldiğinde tamamlanır.
+  useEffect(() => {
+    const flush = () => { flushPendingFixtureSync(); };
+    flush();
+    window.addEventListener("online", flush);
+    const timer = window.setInterval(flush, 10000);
+    return () => {
+      window.removeEventListener("online", flush);
+      window.clearInterval(timer);
+    };
+  }, []);
+
   // MASAÜSTÜ EXE her zaman yönetim modudur.
   // Web/PWA varsayılan olarak salt-okunur canlı takiptir; yalnızca organizatörün
   // özel yönetim bağlantısı bu cihazı yönetici olarak yetkilendirir.
@@ -660,6 +674,7 @@ export default function App() {
               setTeams={setTeams}
               drawOrder={drawOrder}
               setDrawOrder={setDrawOrder}
+              fixtures={fixtures}
               setFixtures={setFixtures}
             />
             <SquadManager teams={teams} />

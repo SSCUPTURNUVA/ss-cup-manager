@@ -1,0 +1,27 @@
+S&S CUP MANAGER PRO - SAHA SURUMU KONTROL RAPORU
+Tarih: 2026-08-29
+
+KONTROL EDILEN KRITIK KONULAR
+[PASS] Kaynakta 29 JS/JSX dosyasinin tamaminda parser/syntax hatasi yok.
+[PASS] Fikstur tarih + saat siralama testi: 20:00 -> 21:00 -> 22:00 -> 23:00.
+[PASS] 20:00/21:00 saatleri nokta, iki nokta ve tam-genislik ayirici ile normalize ediliyor.
+[PASS] PublicTournament yalniz mevcut turnuvanin active_fixture_ids listesindeki lig maclarini gosteriyor.
+[PASS] Eski/test Supabase fikstur satiri active_fixture_ids disindaysa Canli Takip'e karismiyor.
+[PASS] Mac Merkezi hazirlik/geri cekme durumunda live/timer bekleyen duruma temizleniyor.
+[PASS] Lig mac durumu internet kesilirse sscup-pending-fixture-sync kuyrugunda saklaniyor ve baglanti gelince tekrar deneniyor.
+[PASS] Mac baslatma icin iki takimda da tam 7 AS + 5 YEDEK zorunlu.
+[PASS] Turnuva fiksturu olustuktan sonra takim ekleme/silme kilitli.
+[PASS] Genel sayfasi Puan Durumu tum takimlari listeliyor; 13 takim slice limiti yok.
+[PASS] Canli Takip Takimlar sekmesi mevcut.
+[PASS] Yedek dosyasi sscup-* yerel verilerin tamamini ve erisilebilen Supabase bulut anlik goruntusunu aliyor.
+[PASS] EXE/web yonetim tarafinda 4 haneli PIN kapisi mevcut ve yenilemede yeniden PIN istiyor.
+
+21:00 MACIN EN BASTA KALMASI ICIN KOK DUZELTME
+- Sorun yalniz saat sort'u degildi.
+- Supabase'de onceki/test fikstur satirlari kalabiliyordu.
+- DrawManager mevcut turnuvanin gercek fikstur ID'lerini active_fixture_ids kaydina yaziyor.
+- Canli Takip ve yonetim fikstur yukleme artik bu ID listesini esas aliyor.
+- Boylece eski 21:00 test satiri yeni turnuvaya karisamaz; mevcut maclar kendi tarih/saat sirasinda kalir.
+
+ONEMLI SINIR
+Bu kaynak arsivinde package.json / Electron builder dosyalari yoktur. Bu nedenle bu ortamda gercek Windows Setup.exe derleme/acilis testi yapilamadi. Kod ve saha mantigi statik + senaryo testlerinden gecirildi. Tam Electron proje klasoru ile son adimda npm build/dist:win testi yapilmalidir.

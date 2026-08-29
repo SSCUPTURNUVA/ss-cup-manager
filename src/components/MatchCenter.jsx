@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../supabase";
 import { sortFixturesBySchedule } from "../utils/fixtureOrder";
+import { flushPendingFixtureSync, syncLeagueFixtureWithRetry } from "../utils/pendingFixtureSync";
 
 function safeNumber(value, fallback = 0) {
   const parsed = Number(value);
@@ -144,6 +145,7 @@ function getMatchEvents(match) {
     .sort((a, b) => safeNumber(a.minute) - safeNumber(b.minute));
 }
 
+
 export default function MatchCenter({
   fixtures = [],
   standings = [],
@@ -188,6 +190,20 @@ export default function MatchCenter({
     }, 1000);
 
     return () => window.clearInterval(timer);
+  }, []);
+
+
+  // İnternet saha kenarında kısa süre kesilirse maç yönetimi durmaz.
+  // Yerel kayıt devam eder; bekleyen bulut yazıları bağlantı gelince otomatik tamamlanır.
+  useEffect(() => {
+    const flush = () => { flushPendingFixtureSync(); };
+    flush();
+    window.addEventListener("online", flush);
+    const retryTimer = window.setInterval(flush, 10000);
+    return () => {
+      window.removeEventListener("online", flush);
+      window.clearInterval(retryTimer);
+    };
   }, []);
 
   useEffect(() => {
@@ -537,26 +553,8 @@ export default function MatchCenter({
 
       if (activeMatch?.isKnockout === true) {
         await syncKnockoutStateToCloud(activeMatch);
-      } else if (activeMatch?.id) {
-        const safeId = Number(activeMatch.id);
-        if (Number.isFinite(safeId)) {
-          const { error } = await supabase
-            .from("fixtures")
-            .update({
-              home_score: activeMatch.homeScore ?? 0,
-              away_score: activeMatch.awayScore ?? 0,
-              played: activeMatch.played ?? false,
-              live: activeMatch.live ?? false,
-              timer_running: activeMatch.timerRunning ?? false,
-              timer_started_at: activeMatch.timerStartedAt ?? null,
-              elapsed_seconds: activeMatch.elapsedSeconds ?? 0,
-              match_phase: activeMatch.matchPhase ?? "waiting",
-              events: Array.isArray(activeMatch.events) ? activeMatch.events : [],
-            })
-            .eq("id", safeId);
-
-          if (error) console.error("Supabase fixture kayıt hatası:", error);
-        }
+      } else if (activeMatch) {
+        await syncLeagueFixtureWithRetry(activeMatch);
       }
     } catch (error) {
       console.error("Supabase kayıt hatası:", error);
@@ -816,10 +814,10 @@ export default function MatchCenter({
     await persistFixtures(updatedFixtures);
     const updatedMatch = updatedFixtures[liveMatchIndex];
 
-    const safeId = Number(updatedMatch.id);
+    const cloudId = updatedMatch?.id;
     if (updatedMatch.isKnockout) {
       await syncKnockoutStateToCloud(updatedMatch);
-    } else if (Number.isFinite(safeId)) {
+    } else if (cloudId !== null && cloudId !== undefined && cloudId !== "") {
       await supabase
         .from("fixtures")
         .update({
@@ -827,7 +825,7 @@ export default function MatchCenter({
           home_score: updatedMatch.homeScore,
           away_score: updatedMatch.awayScore,
         })
-        .eq("id", safeId);
+        .eq("id", cloudId);
     }
 
     if (EVENT_TYPES[eventType]?.countsGoal === true) {
@@ -944,23 +942,11 @@ export default function MatchCenter({
     if (typeof setFixtures === "function") setFixtures(updatedFixtures);
     localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));
 
-    const safeId = Number(nextMatch?.id);
-    if (Number.isFinite(safeId)) {
-      const { error } = await supabase
-        .from("fixtures")
-        .update({
-          live: false,
-          timer_running: false,
-          timer_started_at: null,
-          elapsed_seconds: 0,
-          match_phase: "waiting",
-          played: false,
-          home_score: 0,
-          away_score: 0,
-          events: [],
-        })
-        .eq("id", safeId);
-      if (error) console.error("Maç Merkezi hazırlığı buluta yazılamadı:", error);
+    const preparedMatch = updatedFixtures[nextIndex];
+    if (preparedMatch?.isKnockout === true) {
+      await syncKnockoutStateToCloud(preparedMatch);
+    } else if (preparedMatch) {
+      await syncLeagueFixtureWithRetry(preparedMatch);
     }
 
     window.dispatchEvent(new CustomEvent("sscup-fixtures-updated", { detail: updatedFixtures }));
@@ -1218,35 +1204,21 @@ export default function MatchCenter({
     };
 
     const finishedMatch = { ...liveMatch, ...finishPatch };
-    const safeId = Number(liveMatch.id);
 
-    // Maç bittiği anda buluta da kesin olarak CANLI=false yaz.
-    // Takip sayfasının eski maçta kalmasının ana sebebi burada live=true kalabilmesiydi.
+    // Maç sonucu önce yerelde kesinleşir. İnternet yoksa bulut kaydı kuyruğa alınır;
+    // saha kenarında "maçı bitirememe" durumu oluşmaz.
+    let cloudSynced = true;
     if (liveMatch.isKnockout === true) {
       await syncKnockoutStateToCloud(finishedMatch);
-    } else if (Number.isFinite(safeId)) {
-      const { error } = await supabase
-        .from("fixtures")
-        .update({
-          home_score: finishedMatch.homeScore,
-          away_score: finishedMatch.awayScore,
-          played: true,
-          live: false,
-          timer_running: false,
-          timer_started_at: null,
-          elapsed_seconds: finishedMatch.elapsedSeconds ?? 0,
-          events: Array.isArray(finishedMatch.events) ? finishedMatch.events : [],
-        })
-        .eq("id", safeId);
-
-      if (error) {
-        console.log("MAÇ BİTİRME KAYIT HATASI:", error);
-        alert(error.message);
-        return;
-      }
+    } else {
+      cloudSynced = await syncLeagueFixtureWithRetry(finishedMatch);
     }
 
     await updateLiveMatch(finishPatch);
+
+    if (!cloudSynced) {
+      alert("⚠️ Maç yerelde güvenle bitirildi. İnternet bağlantısı gelince canlı takip otomatik eşitlenecek.");
+    }
   }
 
   async function toggleFullscreen() {

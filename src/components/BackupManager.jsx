@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { supabase } from "../supabase";
 
 const BACKUP_VERSION = 2;
 const STORAGE_PREFIX = "sscup-";
@@ -30,7 +31,7 @@ export default function BackupManager() {
   const fileRef = useRef(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  function saveBackup() {
+  async function saveBackup() {
     const storage = getTournamentStorage();
 
     if (Object.keys(storage).length === 0) {
@@ -38,11 +39,34 @@ export default function BackupManager() {
       return;
     }
 
+    // Yerel verinin yanında buluttaki güncel turnuva durumunu da salt-okunur
+    // olarak yedeğe koy. Böylece cihaz değişse bile kurtarma için tek dosya kalır.
+    let cloud = null;
+    try {
+      const [fixturesResult, teamsResult, stateResult, scorersResult] = await Promise.all([
+        supabase.from("fixtures").select("*").order("id"),
+        supabase.from("teams").select("*").order("id"),
+        supabase.from("app_state").select("*").in("id", ["squads", "knockout", "active_fixture_ids"]),
+        supabase.from("goal_scorers").select("*"),
+      ]);
+
+      cloud = {
+        fixtures: fixturesResult.error ? null : fixturesResult.data,
+        teams: teamsResult.error ? null : teamsResult.data,
+        appState: stateResult.error ? null : stateResult.data,
+        goalScorers: scorersResult.error ? null : scorersResult.data,
+        complete: !fixturesResult.error && !teamsResult.error && !stateResult.error && !scorersResult.error,
+      };
+    } catch (error) {
+      console.warn("Bulut yedeği alınamadı; yerel yedek yine oluşturulacak:", error);
+    }
+
     const backup = {
       app: "S&S CUP MANAGER PRO",
       version: BACKUP_VERSION,
       createdAt: new Date().toISOString(),
       storage,
+      cloud,
     };
 
     const blob = new Blob([JSON.stringify(backup, null, 2)], {
@@ -64,7 +88,9 @@ export default function BackupManager() {
       new Date().toISOString()
     );
 
-    alert("S&S CUP turnuva yedeği bilgisayarına indirildi.");
+    alert(cloud?.complete
+      ? "S&S CUP tam yedeği (yerel + bulut) bilgisayarına indirildi."
+      : "S&S CUP yerel yedeği indirildi. Bulut bağlantısı eksik olduğu için bulut kopyası tamamlanamadı.");
   }
 
   function restoreLegacyBackup(data) {

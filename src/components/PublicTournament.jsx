@@ -311,10 +311,19 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     if (fixturesResult.status === "fulfilled") {
       const { data, error } = fixturesResult.value;
       if (!error && Array.isArray(data)) {
-        // Canlı takip fikstürünü active_fixture_ids ile daraltma.
-        // Bu liste yalnız Maç Merkezi seçimini temsil eder; fikstürün geri kalanını
-        // gizlerse "Gecenin Maçları" aynı tarihteki diğer maçları göremez.
-        mappedFixtures = data.map(mapCloudFixture);
+        // active_fixture_ids Maç Merkezi seçimi değildir; DrawManager mevcut turnuvanın
+        // TÜM lig fikstür ID'lerini buraya yazar. Supabase DELETE/RLS eski satırları
+        // bıraksa bile canlı takip yalnız güncel turnuvanın maçlarını göstermelidir.
+        // Bu filtre eski test maçının (ör. 21:00) gecenin en başında kalmasını da önler.
+        const activeIdSet = Array.isArray(currentActiveIds)
+          ? new Set(currentActiveIds.map((id) => String(id)))
+          : null;
+
+        const currentRows = activeIdSet
+          ? data.filter((row) => activeIdSet.has(String(row?.id)))
+          : data;
+
+        mappedFixtures = sortFixturesBySchedule(currentRows.map(mapCloudFixture));
         setRemoteFixtures(mappedFixtures);
       }
     }

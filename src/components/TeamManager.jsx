@@ -5,6 +5,7 @@ export default function TeamManager({
   setTeams,
   drawOrder,
   setDrawOrder,
+  fixtures = [],
   setFixtures,
 }) {
   const [teamName, setTeamName] = useState("");
@@ -18,6 +19,10 @@ export default function TeamManager({
       teams.every((team) => drawOrder.includes(team))
     );
   }, [teams, drawOrder]);
+
+  // Fikstür oluştuysa kura dizisi yanlışlıkla bozulsa bile takım ekleme/silme açılmaz.
+  // Saha sürümünde mevcut turnuva verisini kazara sıfırlamaya karşı ikinci kilit.
+  const competitionLocked = drawCompleted || (Array.isArray(fixtures) && fixtures.length > 0);
 
   async function clearCompetitionData() {
     try {
@@ -76,9 +81,9 @@ export default function TeamManager({
 
   async function addTeam() {
 
-    if (drawCompleted) {
+    if (competitionLocked) {
       alert(
-        "Fanus kurası tamamlandığı için takım listesi değiştirilemez."
+        "Turnuva fikstürü/kurası oluşturulduğu için takım listesi değiştirilemez."
       );
       return;
     }
@@ -249,9 +254,9 @@ export default function TeamManager({
   }
 
   async function deleteTeam(index) {
-    if (drawCompleted) {
+    if (competitionLocked) {
       alert(
-        "Fanus kurası tamamlandığı için takım silinemez."
+        "Turnuva fikstürü/kurası oluşturulduğu için takım silinemez."
       );
       return;
     }
@@ -400,7 +405,7 @@ export default function TeamManager({
         </div>
       </div>
 
-      {drawCompleted && (
+      {competitionLocked && (
         <div className="team-lock-notice">
           <div className="team-lock-icon">🔒</div>
           <div>
@@ -416,12 +421,12 @@ export default function TeamManager({
           <input
             type="text"
             placeholder={
-              drawCompleted
-                ? "Kura tamamlandı — yeni takım ekleme kapalı"
+              competitionLocked
+                ? "Turnuva başladı — yeni takım ekleme kapalı"
                 : "Takım adını yazın..."
             }
             value={teamName}
-            disabled={drawCompleted}
+            disabled={competitionLocked}
             onChange={(event) => setTeamName(event.target.value)}
             onKeyDown={handleKeyDown}
           />
@@ -430,9 +435,9 @@ export default function TeamManager({
             type="button"
             className="team-add-button"
             onClick={addTeam}
-            disabled={drawCompleted}
+            disabled={competitionLocked}
           >
-            {drawCompleted ? "🔒 Kilitli" : "＋ Takım Ekle"}
+            {competitionLocked ? "🔒 Kilitli" : "＋ Takım Ekle"}
           </button>
         </div>
       </div>
@@ -491,11 +496,11 @@ export default function TeamManager({
                       <button
                         type="button"
                         className="team-delete-button"
-                        disabled={drawCompleted}
+                        disabled={competitionLocked}
                         onClick={() => deleteTeam(index)}
-                        title={drawCompleted ? "Kura tamamlandığı için takım silinemez" : "Takımı sil"}
+                        title={competitionLocked ? "Turnuva başladığı için takım silinemez" : "Takımı sil"}
                       >
-                        {drawCompleted ? "🔒 Sil" : "🗑️ Sil"}
+                        {competitionLocked ? "🔒 Sil" : "🗑️ Sil"}
                       </button>
                     </>
                   )}

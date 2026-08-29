@@ -6,6 +6,7 @@ import {
 } from "react";
 import { supabase } from "../supabase";
 import { compareFixturesBySchedule, sortFixturesBySchedule } from "../utils/fixtureOrder";
+import { syncLeagueFixtureWithRetry } from "../utils/pendingFixtureSync";
 
 const TURKISH_DAYS = [
   "Pazar",
@@ -102,10 +103,12 @@ export default function Fixture({
 
   useEffect(() => {
   async function loadFixtures() {
-    const { data, error } = await supabase
-      .from("fixtures")
-      .select("*")
-      .order("id");
+    const [fixtureResult, activeResult] = await Promise.all([
+      supabase.from("fixtures").select("*").order("id"),
+      supabase.from("app_state").select("value").eq("id", "active_fixture_ids").maybeSingle(),
+    ]);
+
+    const { data, error } = fixtureResult;
 
     if (error) {
       console.log("Fikstür çekme hatası:", error);
@@ -113,8 +116,21 @@ export default function Fixture({
     }
 
     if (data) {
-      const converted = data.map((item) => ({
-        id: Number(item.id),
+      // DrawManager mevcut turnuvanın bütün lig maç ID'lerini active_fixture_ids içinde tutar.
+      // Supabase/RLS eski fikstür satırlarını silememiş olsa bile yönetim ekranına karışmasın.
+      const activeIds = !activeResult?.error && Array.isArray(activeResult?.data?.value?.ids)
+        ? activeResult.data.value.ids
+        : null;
+      const activeIdSet = Array.isArray(activeIds)
+        ? new Set(activeIds.map((id) => String(id)))
+        : null;
+      const currentData = activeIdSet
+        ? data.filter((item) => activeIdSet.has(String(item?.id)))
+        : data;
+
+      const converted = currentData.map((item) => ({
+        // Supabase ID'sini olduğu tipte koru. Sayısal/string ID farkı cloud güncellemesini bozmasın.
+        id: item.id,
         home: item.home,
         away: item.away,
         date: item.date,
@@ -128,18 +144,25 @@ export default function Fixture({
         timerRunning: item.timer_running,
         timerStartedAt: item.timer_started_at,
         elapsedSeconds: item.elapsed_seconds,
+        matchPhase: item.match_phase || "waiting",
+        events: Array.isArray(item.events) ? item.events : [],
       }));
 
-      const localSaved = JSON.parse(
-        localStorage.getItem("sscup-fixtures") || "[]"
-      );
+      let localSaved = [];
+      try {
+        const parsed = JSON.parse(localStorage.getItem("sscup-fixtures") || "[]");
+        localSaved = Array.isArray(parsed) ? parsed : [];
+      } catch (storageError) {
+        console.error("Yerel fikstür okunamadı; bulut verisi kullanılacak:", storageError);
+        localSaved = [];
+      }
 
       const mergedLeague = converted.map((item) => {
         const localMatch = localSaved.find(
           (saved) => String(saved.id) === String(item.id)
         );
 
-        return localMatch
+        const mergedItem = localMatch
           ? {
               ...item,
               ...localMatch,
@@ -152,12 +175,23 @@ export default function Fixture({
               time: item.time,
               field: item.field,
               week: item.week,
-              played:
-                localMatch.played === true
-                  ? true
-                  : item.played,
+              played: localMatch.played === true ? true : item.played,
             }
           : item;
+
+        // Başlamamış/bekleyen maçta eski test timer/live kalıntısı taşınmasın.
+        if (mergedItem.played !== true && (item.matchPhase || "waiting") === "waiting") {
+          return {
+            ...mergedItem,
+            live: false,
+            matchPhase: "waiting",
+            timerRunning: false,
+            timerStartedAt: null,
+            elapsedSeconds: 0,
+          };
+        }
+
+        return mergedItem;
       });
 
       // Eleme maçları Supabase fixtures tablosunda değil app_state içinde tutulur.
@@ -663,9 +697,9 @@ export default function Fixture({
     // Manuel tarih/saat/saha değişikliği telefondaki canlı takipte de
     // anında sabit kalsın diye Supabase'e kaydedilir.
     const selectedMatch = updatedFixtures[index];
-    const safeId = Number(selectedMatch?.id);
+    const cloudId = selectedMatch?.id;
 
-    if (Number.isFinite(safeId)) {
+    if (selectedMatch?.isKnockout !== true && cloudId !== null && cloudId !== undefined && cloudId !== "") {
       const cloudField = field === "field" ? "pitch" : field;
       const cloudValue =
         (field === "date" || field === "time") && value === ""
@@ -675,7 +709,7 @@ export default function Fixture({
       const { error } = await supabase
         .from("fixtures")
         .update({ [cloudField]: cloudValue })
-        .eq("id", safeId);
+        .eq("id", cloudId);
 
       if (error) {
         console.error("Maç programı kaydedilemedi:", error);
@@ -1002,24 +1036,11 @@ export default function Fixture({
     setFixtures(updatedFixtures);
     localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));
 
-    // Maç Merkezi hazırlığı bulutta CANLI sayılmasın. Eski live=true kaydını da
-    // seçildiği anda temizle ki telefon fikstüründe maç görünmeye devam etsin.
-    const safeId = Number(selectedMatch?.id);
-    if (Number.isFinite(safeId)) {
-      const { error } = await supabase
-        .from("fixtures")
-        .update({
-          live: false,
-          timer_running: false,
-          timer_started_at: null,
-          elapsed_seconds: 0,
-          match_phase: "waiting",
-        })
-        .eq("id", safeId);
-
-      if (error) {
-        console.error("Maç Merkezi hazırlık durumu buluta yazılamadı:", error);
-      }
+    // Maç Merkezi hazırlığı bulutta CANLI sayılmasın. İnternet kısa süre kesilirse
+    // bu bekleyen durum kuyruğa alınır ve bağlantı gelince otomatik tamamlanır.
+    const resetMatch = updatedFixtures[index];
+    if (resetMatch?.isKnockout !== true) {
+      await syncLeagueFixtureWithRetry(resetMatch);
     }
   }
 
@@ -1258,8 +1279,8 @@ export default function Fixture({
         return;
       }
     } else {
-      const safeId = Number(match.id);
-      if (!Number.isFinite(safeId)) {
+      const cloudId = match?.id;
+      if (cloudId === null || cloudId === undefined || cloudId === "") {
         alert("Lig maçı kimliği geçersiz.");
         return;
       }
@@ -1271,7 +1292,7 @@ export default function Fixture({
           away_score: awayScore,
           played: finishMatch,
         })
-        .eq("id", safeId);
+        .eq("id", cloudId);
 
       if (error) {
         console.error("SUPABASE HATA:", error);
