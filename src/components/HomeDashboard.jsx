@@ -193,6 +193,7 @@ export default function HomeDashboard({
     { id: "knockout", icon: "🏆", label: "Eleme Turu" },
     { id: "fixture", icon: "📅", label: "Fikstür" },
     { id: "teams", icon: "👥", label: "Takımlar" },
+    { id: "backup", icon: "💾", label: "Turnuvayı Yedekle" },
   ];
 
   return (

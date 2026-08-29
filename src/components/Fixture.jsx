@@ -143,8 +143,8 @@ export default function Fixture({
           ? {
               ...item,
               ...localMatch,
-              // Fikstürün tarih/saat/hafta bilgisi için bulut kaydı tek kaynaktır.
-              // Maç Merkezi'nden kalan eski localStorage verisi sıralamayı bozamaz.
+              // Buluttaki fikstür programı tek kaynaktır. Maç Merkezi testi
+              // localStorage içindeki tarih/saat/hafta bilgisini ezemez.
               id: item.id,
               home: item.home,
               away: item.away,
@@ -971,7 +971,7 @@ export default function Fixture({
         return {
           ...fixture,
           // Maç Merkezi'ne almak da geri çıkarmak da fikstür sırasını değiştirmez.
-          // Geri çekilen test maçı tamamen normal "bekleyen maç" durumuna döner.
+          // Geri çekilen maç normal bekleyen maç durumuna tamamen döner.
           live: false,
           matchPhase: "waiting",
           elapsedSeconds: 0,

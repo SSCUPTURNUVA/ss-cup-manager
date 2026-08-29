@@ -39,7 +39,7 @@ export default function BackupManager() {
     }
 
     const backup = {
-      app: "ArenaCup Pro",
+      app: "S&S CUP MANAGER PRO",
       version: BACKUP_VERSION,
       createdAt: new Date().toISOString(),
       storage,
@@ -60,11 +60,11 @@ export default function BackupManager() {
     URL.revokeObjectURL(url);
 
     localStorage.setItem(
-      "arenacup-last-backup",
+      "sscup-last-backup",
       new Date().toISOString()
     );
 
-    alert("ArenaCup Pro yedeği bilgisayarına indirildi.");
+    alert("S&S CUP turnuva yedeği bilgisayarına indirildi.");
   }
 
   function restoreLegacyBackup(data) {
@@ -114,7 +114,7 @@ export default function BackupManager() {
       } else if (data?.teams || data?.fixtures || data?.goals) {
         restoreLegacyBackup(data);
       } else {
-        throw new Error("Geçerli ArenaCup Pro yedeği değil.");
+        throw new Error("Geçerli S&S CUP turnuva yedeği değil.");
       }
 
       alert("Yedek başarıyla yüklendi. Uygulama yeniden açılıyor.");
@@ -122,7 +122,7 @@ export default function BackupManager() {
     } catch (error) {
       console.error("Yedek yükleme hatası:", error);
       alert(
-        "Yedek yüklenemedi. Dosyanın ArenaCup Pro yedeği olduğundan emin ol."
+        "Yedek yüklenemedi. Dosyanın S&S CUP turnuva yedeği olduğundan emin ol."
       );
     } finally {
       setIsLoading(false);
@@ -131,7 +131,7 @@ export default function BackupManager() {
 
   return (
     <div className="card backup-manager-card">
-      <h2>💾 Turnuva Yedekleme</h2>
+      <h2>💾 Turnuvayı Yedekle / Geri Yükle</h2>
       <p>
         Takımlar, fikstür, skorlar, kadrolar, kura ve ayarlar tek dosyada
         saklanır.

@@ -152,7 +152,7 @@
 .public-stat-grid.public-stat-grid-top article>span{background:linear-gradient(145deg,#ffdb3a,#ffb700);box-shadow:0 6px 22px rgba(255,190,0,.18)}
 .public-stat-grid.public-stat-grid-top strong,.public-stat-grid.public-stat-grid-top b{color:#fff}.public-stat-grid.public-stat-grid-top small{color:#8998aa}
 
-.public-tabbar{grid-template-columns:repeat(5,1fr);background:#080d14;border-color:#263343;border-radius:14px;box-shadow:0 12px 30px rgba(0,0,0,.24)}
+.public-tabbar{grid-template-columns:repeat(6,1fr);background:#080d14;border-color:#263343;border-radius:14px;box-shadow:0 12px 30px rgba(0,0,0,.24)}
 .public-tabbar button{background:#080d14;color:#aeb9c6;border-color:#22303f}.public-tabbar button:hover{background:#111b27;color:#fff}.public-tabbar button.active{background:linear-gradient(135deg,#ffd029,#ffb700);color:#08101a;box-shadow:inset 0 -3px rgba(0,0,0,.12)}
 
 .public-dashboard-grid{background:transparent}.public-section,.public-side-card{background:linear-gradient(145deg,#0e1722,#0a111a);border-color:#243242;box-shadow:0 12px 30px rgba(0,0,0,.23)}
@@ -189,7 +189,7 @@
 @media(max-width:680px){
   .public-live-header{min-height:210px;background:linear-gradient(180deg,#03070c,#0a1018)}
   .public-brand-mark{width:62px;height:62px;min-width:62px;border-radius:16px;font-size:27px}.public-brand-block h1{font-size:36px}.public-live-shell{margin-top:-58px}
-  .public-tabbar{grid-template-columns:repeat(5,1fr);overflow-x:auto}.public-tabbar button{min-width:0;font-size:8px;padding:4px 2px}.public-tabbar button span{font-size:14px}
+  .public-tabbar{grid-template-columns:repeat(6,1fr);overflow-x:auto}.public-tabbar button{min-width:0;font-size:8px;padding:4px 2px}.public-tabbar button span{font-size:14px}
   .public-stat-grid.public-stat-grid-top article{background:#0d1721}
   .public-dashboard-grid{padding-top:8px}.public-section,.public-side-card{border-radius:10px}
   .public-night-row{background:#0d1722;border-color:#263546}.public-night-vs{background:#ffc400}
@@ -376,8 +376,20 @@
   .public-champion-final em { width: 100%; padding: 4px 0 0; border-left: 0; border-top: 1px solid rgba(255,210,60,.25); }
 }
 
-/* 17 takımlı ligde ana ekrandaki mini puan tablosunun tamamı kaydırılarak görülsün. */
+/* Ana ekranda puan durumu 17 takımın tamamını sayfa akışında gösterir. */
 .public-side-table-wrap {
-  max-height: 520px;
-  overflow-y: auto;
+  max-height: none;
+  overflow: visible;
 }
+
+/* S&S CUP - Canlı Takip Takımlar / Kadrolar */
+.public-team-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.public-team-card{border:1px solid #263546;border-radius:12px;background:linear-gradient(145deg,#101b27,#0b131d);color:#fff;padding:16px;text-align:left;display:grid;grid-template-columns:auto 1fr;gap:5px 12px;align-items:center;cursor:pointer;transition:.18s}
+.public-team-card:hover{transform:translateY(-1px);border-color:#ffc400;box-shadow:0 10px 24px rgba(0,0,0,.22)}
+.public-team-card-number{grid-row:1/4;width:38px;height:38px;border-radius:10px;background:linear-gradient(135deg,#ffd029,#ffb700);color:#0a1018;display:grid;place-items:center;font-weight:1000}
+.public-team-card strong{font-size:14px}.public-team-card small{color:#8fa0b2;font-size:10px}.public-team-card b{color:#ffc400;font-size:10px}
+.public-squad-panel{display:flex;flex-direction:column;gap:12px}.public-team-back{align-self:flex-start;border:1px solid #34475c;background:#101b27;color:#ffc400;border-radius:10px;padding:9px 12px;font-weight:900;cursor:pointer}
+.public-squad-title{display:flex;align-items:center;gap:12px;padding:14px;border:1px solid #263546;border-radius:12px;background:#0c151f}.public-squad-title>span{font-size:30px}.public-squad-title small{color:#ffc400;font-size:9px;font-weight:1000;letter-spacing:.08em}.public-squad-title h3{margin:2px 0 0;color:#fff;font-size:22px}
+.public-player-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.public-player-row{display:grid;grid-template-columns:48px 1fr;align-items:center;border:1px solid #253444;border-radius:10px;background:#0c151f;overflow:hidden}.public-player-row span{height:44px;display:grid;place-items:center;background:linear-gradient(135deg,#ffd029,#ffb700);color:#0a1018;font-size:15px;font-weight:1000}.public-player-row strong{padding:0 12px;color:#fff;font-size:12px}
+@media(max-width:900px){.public-team-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:640px){.public-team-grid{grid-template-columns:1fr}.public-player-list{grid-template-columns:1fr}.public-team-card{padding:13px}.public-squad-title h3{font-size:18px}}

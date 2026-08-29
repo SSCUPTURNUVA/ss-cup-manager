@@ -259,6 +259,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const [activeTab, setActiveTab] = useState("overview");
   const [remoteFixtures, setRemoteFixtures] = useState(null);
   const [remoteTeams, setRemoteTeams] = useState(null);
+  const [remoteSquads, setRemoteSquads] = useState(null);
   const [remoteKnockout, setRemoteKnockout] = useState([]);
   const [activeFixtureIds, setActiveFixtureIds] = useState(null);
   const activeFixtureIdsRef = useRef(null);
@@ -282,9 +283,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current;
 
-    const [fixturesResult, teamsResult, knockoutResult, activeFixtureResult] = await Promise.allSettled([
+    const [fixturesResult, teamsResult, squadsResult, knockoutResult, activeFixtureResult] = await Promise.allSettled([
       supabase.from("fixtures").select("*").order("id"),
       supabase.from("teams").select("id,name").order("id"),
+      supabase.from("app_state").select("value,updated_at").eq("id", "squads").maybeSingle(),
       supabase.from("app_state").select("value,updated_at").eq("id", "knockout").maybeSingle(),
       supabase.from("app_state").select("value,updated_at").eq("id", "active_fixture_ids").maybeSingle(),
     ]);
@@ -321,6 +323,18 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       const { data: teamRows, error: teamsError } = teamsResult.value;
       if (!teamsError && Array.isArray(teamRows)) {
         setRemoteTeams(teamRows.map((row) => row?.name).filter(Boolean));
+      }
+    }
+
+    if (squadsResult.status === "fulfilled") {
+      const { data: squadsRow, error: squadsError } = squadsResult.value;
+      if (!squadsError) {
+        const value = squadsRow?.value;
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+          setRemoteSquads(value);
+        } else {
+          setRemoteSquads({});
+        }
       }
     }
 
@@ -400,6 +414,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     const channel = supabase
       .channel(`sscup-public-live-${Math.random().toString(36).slice(2)}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "fixtures" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.squads" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.active_fixture_ids" }, refresh)
       .subscribe();
@@ -428,6 +443,17 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   }, [selectedMatch]);
 
   const displayTeams = Array.isArray(remoteTeams) ? remoteTeams : teams;
+  const displaySquads = remoteSquads && typeof remoteSquads === "object"
+    ? remoteSquads
+    : (() => {
+        try {
+          const saved = localStorage.getItem("sscup-squads");
+          return saved ? JSON.parse(saved) : {};
+        } catch {
+          return {};
+        }
+      })();
+  const [selectedTeamName, setSelectedTeamName] = useState("");
   const leagueFixtures = Array.isArray(remoteFixtures) ? remoteFixtures : fixtures;
   const localKnockout = (fixtures || []).filter((match) => match?.isKnockout === true);
   const rawKnockoutMatches = remoteKnockout.length > 0 ? remoteKnockout : localKnockout;
@@ -505,9 +531,19 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const todayKey = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, "0")}-${String(todayDate.getDate()).padStart(2, "0")}`;
 
   const nightMatches = useMemo(() => {
-    return displayFixtures.filter(
-      (match) => normalizeFixtureDate(match?.date) === todayKey
-    );
+    // Maç Merkezi seçimi / geri çekme sıralamayı ASLA etkilemez.
+    // Gecenin maçları yalnız gerçek fikstür saatine göre dizilir.
+    return displayFixtures
+      .filter((match) => normalizeFixtureDate(match?.date) === todayKey)
+      .slice()
+      .sort((a, b) => {
+        const timeDiff = fixtureTimeMinutes(a?.time) - fixtureTimeMinutes(b?.time);
+        if (timeDiff !== 0) return timeDiff;
+        const idA = Number(a?.id);
+        const idB = Number(b?.id);
+        if (Number.isFinite(idA) && Number.isFinite(idB) && idA !== idB) return idA - idB;
+        return String(a?.id ?? "").localeCompare(String(b?.id ?? ""), "tr", { numeric: true });
+      });
   }, [displayFixtures, todayKey]);
 
   const liveStandings = useMemo(() => {
@@ -613,7 +649,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         </section>
 
         <nav className="public-tabbar">
-          {[["overview","⚡","Genel"],["fixtures","📅","Fikstür"],["standings","📊","Puan Durumu"],["scorers","👑","Gol Krallığı"],["knockout","🏆","Eleme Turları"]].map(([id, icon, label]) => (
+          {[["overview","⚡","Genel"],["fixtures","📅","Fikstür"],["standings","📊","Puan Durumu"],["scorers","👑","Gol Krallığı"],["teams","👕","Takımlar"],["knockout","🏆","Eleme Turları"]].map(([id, icon, label]) => (
             <button key={id} className={activeTab === id ? "active" : ""} onClick={() => setActiveTab(id)}><span>{icon}</span>{label}</button>
           ))}
         </nav>
@@ -691,6 +727,47 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
               <div className="public-podium">{[1,0,2].map((sourceIndex, podiumIndex) => { const p = liveScorers[sourceIndex]; if (!p) return <div key={podiumIndex} className="public-podium-card empty" />; const medal = sourceIndex === 0 ? "🥇" : sourceIndex === 1 ? "🥈" : "🥉"; return <article key={p.id || sourceIndex} className={`public-podium-card place-${sourceIndex + 1}`}><div className="public-medal">{medal}</div><span>{sourceIndex + 1}. SIRA</span><strong>{p.playerName || p.name}</strong><small>{p.team}</small><b>⚽ {p.goals} GOL</b></article>; })}</div>
               {liveScorers.length > 3 && <div className="public-scorer-list">{liveScorers.slice(3,10).map((p,index) => <div key={p.id || index}><span>{index+4}</span><strong>{p.playerName || p.name}<small>{p.team}</small></strong><b>⚽ {p.goals}</b></div>)}</div>}
             </>}
+          </section>
+        )}
+
+        {activeTab === "teams" && (
+          <section className="public-section public-teams-section">
+            <div className="public-section-head"><div><span>TAKIM KADROLARI</span><h2>Takımlar</h2></div><b>{displayTeams.length} takım</b></div>
+            {!selectedTeamName ? (
+              <div className="public-team-grid">
+                {displayTeams.map((team, index) => {
+                  const teamName = typeof team === "string" ? team : team?.name || team?.teamName || `Takım ${index + 1}`;
+                  const playerCount = Array.isArray(displaySquads?.[teamName]) ? displaySquads[teamName].length : 0;
+                  return (
+                    <button key={teamName} type="button" className="public-team-card" onClick={() => setSelectedTeamName(teamName)}>
+                      <span className="public-team-card-number">{String(index + 1).padStart(2, "0")}</span>
+                      <strong>{teamName}</strong>
+                      <small>{playerCount} oyuncu</small>
+                      <b>Kadroyu Gör ›</b>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="public-squad-panel">
+                <button type="button" className="public-team-back" onClick={() => setSelectedTeamName("")}>‹ Tüm Takımlar</button>
+                <div className="public-squad-title"><span>👕</span><div><small>TAKIM KADROSU</small><h3>{selectedTeamName}</h3></div></div>
+                {(!Array.isArray(displaySquads?.[selectedTeamName]) || displaySquads[selectedTeamName].length === 0) ? (
+                  <div className="public-empty-box">Bu takım için kayıtlı oyuncu bulunmuyor.</div>
+                ) : (
+                  <div className="public-player-list">
+                    {[...displaySquads[selectedTeamName]]
+                      .sort((a, b) => Number(a?.shirtNumber ?? a?.number ?? 999) - Number(b?.shirtNumber ?? b?.number ?? 999))
+                      .map((player, index) => (
+                        <div className="public-player-row" key={player?.id || `${selectedTeamName}-${index}`}>
+                          <span>{player?.shirtNumber ?? player?.number ?? "-"}</span>
+                          <strong>{player?.name || player?.playerName || "Oyuncu"}</strong>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
           </section>
         )}
 

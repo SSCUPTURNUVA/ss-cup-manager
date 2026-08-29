@@ -187,6 +187,51 @@ function calculateStandings(teams, fixtures) {
 }
 
 const MOBILE_ADMIN_ACCESS_TOKEN = "SSCUP-YONETIM-2026-7pQ4mN9xK2vR8sT5";
+const ADMIN_PIN = "2026";
+
+function AdminPinGate({ onUnlock }) {
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+
+  function submit(event) {
+    event.preventDefault();
+    if (pin === ADMIN_PIN) {
+      setError("");
+      onUnlock();
+      return;
+    }
+    setPin("");
+    setError("PIN yanlış. Tekrar deneyin.");
+  }
+
+  return (
+    <div className="admin-pin-page">
+      <form className="admin-pin-card" onSubmit={submit}>
+        <div className="admin-pin-logo"><span>S&amp;S</span><small>CUP</small></div>
+        <span className="admin-pin-kicker">YÖNETİM GÜVENLİĞİ</span>
+        <h1>4 Haneli PIN</h1>
+        <p>Yönetim paneline girmek için PIN kodunu girin.</p>
+        <input
+          autoFocus
+          inputMode="numeric"
+          pattern="[0-9]*"
+          type="password"
+          maxLength={4}
+          value={pin}
+          onChange={(event) => {
+            setPin(event.target.value.replace(/\D/g, "").slice(0, 4));
+            setError("");
+          }}
+          placeholder="••••"
+          aria-label="4 haneli yönetim PIN kodu"
+        />
+        {error && <div className="admin-pin-error">{error}</div>}
+        <button type="submit" disabled={pin.length !== 4}>YÖNETİME GİR</button>
+        <small>EXE ve telefon yönetimi korumalıdır • Canlı Takip halka açıktır</small>
+      </form>
+    </div>
+  );
+}
 
 export default function App() {
   // MASAÜSTÜ EXE her zaman yönetim modudur.
@@ -249,6 +294,7 @@ export default function App() {
   );
 
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [adminUnlocked, setAdminUnlocked] = useState(false);
 
   const [tournamentFormat, setTournamentFormat] = useState(() =>
     readStorage("sscup-format", "league")
@@ -584,6 +630,12 @@ export default function App() {
         settings={settings}
       />
     );
+  }
+
+  // Yönetim tarafı her uygulama/sayfa açılışında yeniden PIN ister.
+  // Yetki localStorage'a yazılmaz; kapat-aç veya yenilemede kilit geri gelir.
+  if (!adminUnlocked) {
+    return <AdminPinGate onUnlock={() => setAdminUnlocked(true)} />;
   }
 
   function renderPage() {

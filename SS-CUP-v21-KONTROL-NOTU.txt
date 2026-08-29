@@ -1,0 +1,27 @@
+S&S CUP v21 - KONTROL NOTU
+
+Temel kaynak: kullanıcının yüklediği v19.
+
+EKLENEN / DÜZELTİLENLER
+1) Windows EXE ve telefon yönetim ekranı 4 haneli PIN kapısı ile korunuyor.
+   Varsayılan PIN: 2026
+   Canlı Takip halka açık kalır.
+2) Maç Merkezi'ne alınıp geri çekilen maçın live/timer hazırlık durumu sıfırlanır.
+   Fikstür tarih/saat/hafta bilgisi değiştirilmez; bulut programı esas alınır.
+3) Ana ekrana görünür "Turnuvayı Yedekle" kısayolu eklendi.
+   Yedek sistemi tüm sscup-* localStorage kayıtlarını kapsar; sscup-squads dahil.
+4) Canlı Takip'e "Takımlar" sekmesi eklendi.
+   Takım seçilince oyuncular forma numarası + ad soyad ile salt okunur gösterilir.
+   Kadrolar app_state/squads bulut kaydından okunur.
+5) Genel sayfasındaki mini Puan Durumu 13 satırda kesilmez; 17 takımın tamamı sayfa akışında görünür.
+
+KORUNANLAR
+- Fikstür tarihleri
+- Fikstür saatleri
+- Hafta bilgileri
+- 1 hafta = 8 maç program düzeni
+- Maç başlatma / skor / gol / kart / eleme mantığına genel yeniden yazım yapılmadı.
+
+KONTROL
+- Değiştirilen JSX dosyaları TypeScript JSX parser ile sözdizimi kontrolünden geçti.
+- ZIP bütünlük testi yapılmıştır.
