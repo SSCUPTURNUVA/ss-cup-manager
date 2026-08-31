@@ -382,7 +382,7 @@ export default function SquadManager({ teams = [] }) {
                 <p>Oyuncuları doldurun, en alttaki <b>24 KİŞİLİK KADROYU KAYDET</b> butonuna bir kez basın.</p>
                 <div style={{ display: "grid", gap: "8px" }}>
                   {bulkRows.map((row, index) => (
-                    <div key={index} style={{ display: "grid", gridTemplateColumns: "50px 110px 1fr", gap: "8px", alignItems: "center" }}>
+                    <div key={index} style={{ display: "grid", gridTemplateColumns: "42px 82px minmax(0, 1fr)", gap: "8px", alignItems: "center" }}>
                       <b>{index + 1}.</b>
                       <input type="number" min="0" max="99" placeholder="Forma No" value={row.shirtNumber} onChange={(e) => updateBulkRow(index, "shirtNumber", e.target.value)} />
                       <input type="text" placeholder="Oyuncu adı soyadı" value={row.name} onChange={(e) => updateBulkRow(index, "name", e.target.value)} />

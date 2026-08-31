@@ -275,10 +275,52 @@ export default function MatchCenter({
   }
 
   const activeMatchCenterKey = localStorage.getItem("sscup-match-center-active") || "";
+
+  // Maç Merkezi'ne hazırlanıp sonra geri çekilmiş eski bir maç localStorage'da
+  // seçili kalabiliyordu. Böyle bir "waiting" kaydı, kendisinden daha erken
+  // oynanmamış bir maç varken aktif kabul edilmez. Bu sayede saha kenarında
+  // yanlış (ör. 21:00) maçın 20:00 maçından önce açılması engellenir.
+  const activeKeyIndex = activeMatchCenterKey
+    ? fixtures.findIndex((match, index) => getMatchCenterKey(match, index) === activeMatchCenterKey)
+    : -1;
+  const activeKeyMatch = activeKeyIndex >= 0 ? fixtures[activeKeyIndex] : null;
+  const activeKeyPhase = activeKeyMatch?.matchPhase || "waiting";
+  const activeKeyIsRunning =
+    activeKeyMatch?.live === true &&
+    ["first_half", "halftime", "second_half", "penalty"].includes(activeKeyPhase);
+
+  const earlierUnplayedMatchExists = Boolean(
+    activeKeyMatch &&
+      sortFixturesBySchedule(
+        fixtures.filter(
+          (match) =>
+            match?.played !== true &&
+            match?.participantsReady !== false &&
+            match?.home &&
+            match?.away
+        )
+      ).some((match) => {
+        if (match === activeKeyMatch || String(match?.id ?? "") === String(activeKeyMatch?.id ?? "")) return false;
+        return sortFixturesBySchedule([match, activeKeyMatch])[0] === match;
+      })
+  );
+
+  const stalePreparedSelection = Boolean(
+    activeKeyMatch &&
+      !activeKeyIsRunning &&
+      activeKeyPhase === "waiting" &&
+      earlierUnplayedMatchExists
+  );
+
+  useEffect(() => {
+    if (!stalePreparedSelection) return;
+    localStorage.removeItem("sscup-match-center-active");
+  }, [stalePreparedSelection, activeMatchCenterKey]);
+
   const liveMatchIndex = fixtures.findIndex(
     (match, index) =>
-      match.live === true ||
-      (activeMatchCenterKey && getMatchCenterKey(match, index) === activeMatchCenterKey)
+      (match.live === true && ["first_half", "halftime", "second_half", "penalty"].includes(match.matchPhase || "waiting")) ||
+      (!stalePreparedSelection && activeMatchCenterKey && getMatchCenterKey(match, index) === activeMatchCenterKey)
   );
 
   const liveMatch = liveMatchIndex >= 0 ? fixtures[liveMatchIndex] : null;

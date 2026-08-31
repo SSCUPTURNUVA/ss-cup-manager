@@ -35,22 +35,22 @@ const mobileMenuItems = [
 
 const menuItems = [
   { id: "home", icon: "🏠", label: "Ana Sayfa" },
-  { id: "settings", icon: "⚙️", label: "Turnuva Ayarları" },
-  { id: "format", icon: "🏆", label: "Turnuva Formatı" },
+  { id: "matchcenter", icon: "📺", label: "Maç Merkezi" },
+  { id: "fixture", icon: "📅", label: "Lig Fikstürü", format: "league" },
+  { id: "group-fixture", icon: "🗓️", label: "Grup Fikstürü", format: "groups" },
+  { id: "standings", icon: "📊", label: "Puan Durumu", format: "league" },
+  { id: "group-standings", icon: "📊", label: "Grup Puan Durumu", format: "groups" },
+  { id: "knockout", icon: "🏆", label: "Eleme Turu" },
   { id: "teams", icon: "👥", label: "Takımlar" },
   { id: "teamcontacts", icon: "📲", label: "Takım Bilgileri" },
-  { id: "draw", icon: "🎲", label: "Lig Kurası" },
-  { id: "fixture", icon: "📅", label: "Lig Fikstürü" },
+  { id: "draw", icon: "🎲", label: "Lig Kurası", format: "league" },
   { id: "dailyschedule", icon: "🖼️", label: "Gecenin Maçları Görseli" },
-  { id: "group-fixture", icon: "🗓️", label: "Grup Fikstürü" },
-  { id: "group-standings", icon: "📊", label: "Grup Puan Durumu" },
-  { id: "matchcenter", icon: "📺", label: "Maç Merkezi" },
-  { id: "standings", icon: "📊", label: "Puan Durumu" },
   { id: "scorers", icon: "⚽", label: "Gol Krallığı" },
-  { id: "knockout", icon: "🏆", label: "Eleme Turu" },
-  { id: "announcements", icon: "📢", label: "Duyuru Merkezi" },
   { id: "discipline", icon: "🟨", label: "Disiplin Kurulu" },
+  { id: "announcements", icon: "📢", label: "Duyuru Merkezi" },
   { id: "statistics", icon: "📈", label: "İstatistikler" },
+  { id: "format", icon: "🏆", label: "Turnuva Formatı" },
+  { id: "settings", icon: "⚙️", label: "Turnuva Ayarları" },
   { id: "backup", icon: "💾", label: "Turnuvayı Yedekle" },
   { id: "public", icon: "🌐", label: "Canlı Durum" },
 ];
@@ -441,6 +441,28 @@ export default function App() {
       }
 
       if (data) {
+        // SADECE GÜNCEL TURNUVA FİKSTÜRÜ:
+        // DrawManager yeni fikstürü oluştururken gerçek maç ID'lerini app_state/active_fixture_ids'e yazar.
+        // Supabase'de DELETE/RLS yüzünden kalmış eski test satırları yönetim ekranına karışmasın.
+        const { data: activeFixtureRow, error: activeFixtureError } = await supabase
+          .from("app_state")
+          .select("value")
+          .eq("id", "active_fixture_ids")
+          .maybeSingle();
+
+        if (activeFixtureError) {
+          console.warn("Aktif fikstür ID'leri okunamadı; tüm satırlar kullanılacak:", activeFixtureError);
+        } else {
+          const activeIds = Array.isArray(activeFixtureRow?.value?.ids)
+            ? activeFixtureRow.value.ids.map((id) => String(id))
+            : [];
+
+          if (activeIds.length > 0) {
+            const activeIdSet = new Set(activeIds);
+            data = data.filter((row) => activeIdSet.has(String(row?.id)));
+          }
+        }
+
         // Bulut boşsa yerel dolu fikstürü silmek yerine önce buluta taşı.
         if (Array.isArray(data) && data.length === 0) {
           const localFixtures = readStorage("sscup-fixtures", []);
@@ -558,6 +580,25 @@ export default function App() {
         // oynandı bilgisi yeni turnuvaya taşınmasın. Eleme tarafı kendi
         // app_state kaydından yönetildiği için burada yerel eleme de eklenmez.
         const sortedSupabaseFixtures = sortFixturesBySchedule(supabaseFixtures);
+
+        // Maç Merkezi'ne alınmış ama BAŞLATILMADAN geri çekilmiş eski seçimi tamamen unut.
+        // Gerçekten devam eden bir maç varsa anahtarı koruruz; yoksa Maç Merkezi her açılışta
+        // fikstürün tarih+saat sırasındaki ilk oynanmamış maçından başlar.
+        const actuallyRunningMatch = sortedSupabaseFixtures.find((match) => {
+          const phase = match?.matchPhase || "waiting";
+          return (
+            match?.played !== true &&
+            match?.live === true &&
+            ["first_half", "halftime", "second_half", "penalty"].includes(phase)
+          );
+        });
+
+        if (!actuallyRunningMatch) {
+          localStorage.removeItem("sscup-match-center-active");
+        } else {
+          localStorage.setItem("sscup-match-center-active", String(actuallyRunningMatch.id));
+        }
+
         setFixtures(sortedSupabaseFixtures);
         localStorage.setItem("sscup-fixtures", JSON.stringify(sortedSupabaseFixtures));
       }
@@ -796,6 +837,7 @@ export default function App() {
     }
   }
 
+  const visibleMenuItems = menuItems.filter((item) => !item.format || item.format === tournamentFormat);
   const activeMenuItem = menuItems.find((item) => item.id === activePage);
 
   return (
@@ -811,7 +853,7 @@ export default function App() {
         </div>
 
         <nav className="sidebar-nav">
-          {menuItems.map((item) => (
+          {visibleMenuItems.map((item) => (
             <button
               key={item.id}
               type="button"

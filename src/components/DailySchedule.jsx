@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import "./DailySchedule.css";
-import { sortFixturesBySchedule } from "../utils/fixtureOrder";
+import { normalizeFixtureDate, sortFixturesBySchedule } from "../utils/fixtureOrder";
+import { supabase } from "../supabase";
 
 function formatLongDate(date) {
   if (!date) return "TARİH BELİRLENECEK";
@@ -13,6 +14,21 @@ function formatLongDate(date) {
   }
 }
 
+
+function normalizePhone(phone) {
+  const clean = String(phone || "").replace(/\D/g, "");
+  if (!clean) return "";
+  return clean.startsWith("90") ? clean : `90${clean.replace(/^0/, "")}`;
+}
+
+function formatShortDate(date) {
+  if (!date) return "Tarih açıklanacak";
+  try {
+    return new Intl.DateTimeFormat("tr-TR", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(`${date}T12:00:00`));
+  } catch {
+    return date;
+  }
+}
 function escapeXml(value = "") {
   return String(value).replace(/[<>&'\"]/g, (char) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" }[char]));
 }
@@ -84,12 +100,81 @@ function buildPosterSvg({ title, dateText, venue, matches }) {
 }
 
 export default function DailySchedule({ fixtures = [], settings = {} }) {
-  const availableDates = useMemo(() => [...new Set(fixtures.map((m) => m.date).filter(Boolean))].sort(), [fixtures]);
-  const [selectedDate, setSelectedDate] = useState(availableDates[0] || new Date().toISOString().split("T")[0]);
+  // Bazı eski/test kayıtlarında aynı takvim günü farklı ham tarih değerleriyle
+  // kalmış olabiliyor. Açılır listede görünen gün etiketini tek anahtar kabul
+  // ederek aynı günü kesin olarak tek seçenekte birleştiriyoruz.
+  const dateGroups = useMemo(() => {
+    const groups = new Map();
 
-  const dayMatches = useMemo(() => sortFixturesBySchedule(
-    fixtures.filter((m) => m.date === selectedDate)
-  ).slice(0, 4), [fixtures, selectedDate]);
+    fixtures.forEach((match) => {
+      const normalized = normalizeFixtureDate(match?.date);
+      if (!normalized || normalized === "9999-12-31") return;
+      const visibleKey = formatLongDate(normalized);
+      const existing = groups.get(visibleKey);
+      if (!existing || normalized < existing.date) {
+        groups.set(visibleKey, { key: visibleKey, date: normalized });
+      }
+    });
+
+    return [...groups.values()].sort((a, b) => a.date.localeCompare(b.date, "tr"));
+  }, [fixtures]);
+
+  const availableDates = useMemo(() => dateGroups.map((item) => item.date), [dateGroups]);
+  const [selectedDate, setSelectedDate] = useState(availableDates[0] || new Date().toISOString().split("T")[0]);
+  const [contacts, setContacts] = useState({});
+  const [selectedMatch, setSelectedMatch] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    try {
+      const saved = localStorage.getItem("sscup-team-contacts");
+      if (saved) setContacts(JSON.parse(saved));
+    } catch {}
+
+    supabase.from("app_state").select("value").eq("id", "team_contacts").maybeSingle().then(({ data, error }) => {
+      if (cancelled || error) return;
+      if (data?.value && typeof data.value === "object" && !Array.isArray(data.value)) {
+        setContacts(data.value);
+      }
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  const selectedManagers = useMemo(() => {
+    if (!selectedMatch) return [];
+    return [selectedMatch.home, selectedMatch.away].flatMap((teamName) => {
+      const info = contacts?.[teamName] || {};
+      return [
+        { team: teamName, name: info.manager1, phone: info.phone1 },
+        { team: teamName, name: info.manager2, phone: info.phone2 },
+      ].filter((row) => row.name || row.phone);
+    });
+  }, [selectedMatch, contacts]);
+
+  const sendMatchWhatsapp = (row) => {
+    if (!selectedMatch) return;
+    const phone = normalizePhone(row.phone);
+    if (!phone) {
+      alert("Bu sorumlu için telefon numarası kayıtlı değil.");
+      return;
+    }
+    const text = `S&S CUP MAÇ HATIRLATMASI\n\nSelam,\nBugün maçınız var, hatırlatmak istedik.\n\n${selectedMatch.home} - ${selectedMatch.away}\nTarih: ${formatShortDate(selectedMatch.date)}\nSaat: ${selectedMatch.time || "Saat açıklanacak"}\nYer: ${selectedMatch.field || settings.venue || "GolPark Halı Saha - Saha 1"}\n\nMaç saatinden en az 15 dakika önce sahada olmanızı rica ederiz.\n\nHerkese başarılar, güzel bir maç olsun!\n\nS&S CUP`;
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, "_blank", "noopener,noreferrer");
+  };
+
+  const selectedVisibleKey = formatLongDate(selectedDate);
+  const dayMatches = useMemo(() => {
+    const seen = new Set();
+    return sortFixturesBySchedule(
+      fixtures.filter((match) => formatLongDate(normalizeFixtureDate(match?.date)) === selectedVisibleKey)
+    ).filter((match) => {
+      // Aynı maç eski test kaydı nedeniyle iki kez kaldıysa görselde tek kez göster.
+      const identity = `${String(match?.home || "").trim().toLocaleUpperCase("tr-TR")}|${String(match?.away || "").trim().toLocaleUpperCase("tr-TR")}|${String(match?.time || "").trim()}`;
+      if (seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    }).slice(0, 4);
+  }, [fixtures, selectedVisibleKey]);
 
   const tournamentName = settings.tournamentName || settings.title || "S&S CUP";
   const venue = settings.venue || "GOL PARK HALI SAHA TESİSLERİ • SAHA 1";
@@ -201,6 +286,36 @@ export default function DailySchedule({ fixtures = [], settings = {} }) {
         </div>
         <div className="night-poster-footer"><div><span>📍</span><p><small>MAÇLARIN ADRESİ</small><strong>{venue}</strong></p></div><b>HEYECAN<br/><i>SAHADA!</i></b></div>
       </div>
+
+      <section className="night-private-matches">
+        <div className="night-private-head"><span>🔒 SADECE YÖNETİM</span><h3>Maç Sorumluları & WhatsApp</h3><p>Bu bölüm canlı takipte görünmez. Maça tıkla, iki takımın kayıtlı sorumlularını aç.</p></div>
+        <div className="night-private-list">
+          {dayMatches.map((match, index) => (
+            <button type="button" className="night-private-match" key={`private-${match?.id || index}`} onClick={() => setSelectedMatch(match)}>
+              <b>{match?.time || "--:--"}</b><span>{match?.home || "TAKIM"} <i>VS</i> {match?.away || "TAKIM"}</span><em>Detay ›</em>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {selectedMatch && (
+        <div className="night-admin-modal-backdrop" onMouseDown={() => setSelectedMatch(null)}>
+          <div className="night-admin-modal" onMouseDown={(e) => e.stopPropagation()}>
+            <button className="night-admin-modal-close" type="button" onClick={() => setSelectedMatch(null)}>×</button>
+            <span className="night-admin-modal-kicker">🔒 YÖNETİM • MAÇ DETAYI</span>
+            <h3>{selectedMatch.home} <i>VS</i> {selectedMatch.away}</h3>
+            <p>{formatShortDate(selectedMatch.date)} • {selectedMatch.time || "--:--"} • {selectedMatch.field || settings.venue || "Saha 1"}</p>
+            <div className="night-admin-manager-list">
+              {selectedManagers.length === 0 ? <div className="night-admin-manager-empty">Bu iki takım için kayıtlı sorumlu bulunamadı.</div> : selectedManagers.map((row, index) => (
+                <button type="button" key={`${row.team}-${index}`} onClick={() => sendMatchWhatsapp(row)} disabled={!normalizePhone(row.phone)}>
+                  <span><strong>{row.team}</strong><small>{row.name || "Takım sorumlusu"}</small></span>
+                  <em>{row.phone ? `📲 ${row.phone}` : "Telefon yok"}</em>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
