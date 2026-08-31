@@ -4,6 +4,7 @@ const EVENT_LABELS = {
   scorer_record: "⚽ Golcü Kaydı",
   goal: "⚽ Gol",
   penalty_goal: "🥅 Penaltı Golü",
+  assist: "🅰️ Asist",
   yellow_card: "🟨 Sarı Kart",
   red_card: "🟥 Kırmızı Kart",
   man_of_match: "⭐ Maçın Adamı",
@@ -363,6 +364,7 @@ export default function CompletedMatches({
                 }
               >
                 <option value="scorer_record">⚽ Golcü Kaydı</option>
+                <option value="assist">🅰️ Asist</option>
                 <option value="yellow_card">🟨 Sarı Kart</option>
                 <option value="red_card">🟥 Kırmızı Kart</option>
                 <option value="man_of_match">⭐ Maçın Adamı</option>
