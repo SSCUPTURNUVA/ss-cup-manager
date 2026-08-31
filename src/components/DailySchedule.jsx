@@ -33,69 +33,106 @@ function escapeXml(value = "") {
   return String(value).replace(/[<>&'\"]/g, (char) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '"': "&quot;" }[char]));
 }
 
-function fitTeamName(name = "") {
-  const text = String(name).trim();
-  return text.length > 18 ? `${text.slice(0, 17)}…` : text;
+function splitTeamName(name = "") {
+  const text = String(name || "TAKIM").trim();
+  if (text.length <= 14) return [text];
+
+  const words = text.split(/\s+/);
+  let first = "";
+  let second = "";
+  for (const word of words) {
+    const candidate = `${first} ${word}`.trim();
+    if (!second && candidate.length <= 14) first = candidate;
+    else second = `${second} ${word}`.trim();
+  }
+
+  if (!first) first = words[0] || text;
+  if (!second && text.length > 14) {
+    const cut = Math.ceil(text.length / 2);
+    return [text.slice(0, cut).trim(), text.slice(cut).trim()];
+  }
+  return second ? [first, second] : [first];
 }
 
-function getPosterHeight(matchCount) {
-  const safeCount = Math.max(1, Math.min(4, Number(matchCount) || 1));
-  return 780 + safeCount * 145;
+function teamNameSvg(name, x, centerY) {
+  const text = String(name || "TAKIM").trim();
+  const lines = splitTeamName(text);
+  const fontSize = lines.length > 1 ? 27 : (text.length > 12 ? 29 : 33);
+
+  if (lines.length === 1) {
+    return `<text x="${x}" y="${centerY + 11}" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-size="${fontSize}" font-weight="900">${escapeXml(lines[0])}</text>`;
+  }
+
+  return `<text x="${x}" y="${centerY - 10}" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-size="${fontSize}" font-weight="900"><tspan x="${x}">${escapeXml(lines[0])}</tspan><tspan x="${x}" dy="35">${escapeXml(lines[1])}</tspan></text>`;
 }
 
-function buildPosterSvg({ title, dateText, venue, matches }) {
+function buildPosterSvg({ title, dateText, venuePrimary, venueSecondary, matches }) {
   const width = 1080;
+  const height = 1920;
   const rows = matches.slice(0, 4);
-  const rowCount = Math.max(1, rows.length);
-  const height = getPosterHeight(rowCount);
-  const footerY = 555 + rowCount * 145 + 25;
+  const count = Math.max(1, rows.length);
+  const rowHeight = 170;
+  const gap = 22;
+  const blockHeight = count * rowHeight + (count - 1) * gap;
+  // 4 maç tüm orta alanı doldurur; 3 maç aynı orta alanda otomatik dikey ortalanır.
+  const matchesCenterY = 1065;
+  const startY = Math.round(matchesCenterY - blockHeight / 2);
+  const venueY = Math.min(startY + blockHeight + 42, 1490);
+
   const rowSvg = rows.map((match, index) => {
-    const y = 555 + index * 145;
+    const y = startY + index * (rowHeight + gap);
+    const middleY = y + rowHeight / 2;
     const time = match?.time || "--:--";
-    const home = fitTeamName(match?.home || "TAKIM");
-    const away = fitTeamName(match?.away || "TAKIM");
     const field = match?.field || match?.pitch || "SAHA 1";
-    return `
-      <g>
-        <rect x="72" y="${y}" width="936" height="118" rx="22" fill="#11151b" stroke="#f4c400" stroke-width="2"/>
-        <rect x="72" y="${y}" width="190" height="118" rx="22" fill="url(#gold)"/>
-        <rect x="240" y="${y}" width="22" height="118" fill="url(#gold)"/>
-        <text x="167" y="${y + 57}" text-anchor="middle" fill="#080808" font-size="34" font-weight="900">${escapeXml(time)}</text>
-        <text x="167" y="${y + 84}" text-anchor="middle" fill="#2c2600" font-size="17" font-weight="800">${escapeXml(field)}</text>
-        <text x="470" y="${y + 70}" text-anchor="end" fill="#ffffff" font-size="31" font-weight="900">${escapeXml(home)}</text>
-        <polygon points="520,${y + 18} 605,${y + 18} 635,${y + 59} 605,${y + 100} 520,${y + 100} 490,${y + 59}" fill="#171b22" stroke="#f4c400" stroke-width="2"/>
-        <text x="562" y="${y + 72}" text-anchor="middle" fill="#ffd21f" font-size="34" font-weight="900">VS</text>
-        <text x="655" y="${y + 70}" fill="#ffffff" font-size="31" font-weight="900">${escapeXml(away)}</text>
-      </g>`;
+    return `<g>
+      <rect x="60" y="${y}" width="960" height="${rowHeight}" rx="28" fill="#11151b" stroke="#f4c400" stroke-width="4"/>
+      <path d="M88 ${y} H275 V${y + rowHeight} H88 Q60 ${y + rowHeight} 60 ${y + rowHeight - 28} V${y + 28} Q60 ${y} 88 ${y}Z" fill="url(#gold)"/>
+      <text x="168" y="${y + 72}" text-anchor="middle" fill="#080808" font-family="Arial, sans-serif" font-size="43" font-weight="900">${escapeXml(time)}</text>
+      <text x="168" y="${y + 112}" text-anchor="middle" fill="#2c2600" font-family="Arial, sans-serif" font-size="20" font-weight="900">${escapeXml(field)}</text>
+      ${teamNameSvg(match?.home || "TAKIM", 420, middleY)}
+      <text x="620" y="${middleY + 13}" text-anchor="middle" fill="#ffd21f" font-family="Arial, sans-serif" font-size="40" font-weight="1000">VS</text>
+      ${teamNameSvg(match?.away || "TAKIM", 835, middleY)}
+    </g>`;
   }).join("");
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920">
     <defs>
       <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#050505"/><stop offset=".55" stop-color="#11151c"/><stop offset="1" stop-color="#050505"/></linearGradient>
       <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ffe044"/><stop offset="1" stop-color="#f2b900"/></linearGradient>
-      <radialGradient id="light"><stop stop-color="#ffffff" stop-opacity=".72"/><stop offset=".18" stop-color="#ffe889" stop-opacity=".28"/><stop offset="1" stop-color="#000000" stop-opacity="0"/></radialGradient>
-      <pattern id="dots" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#ffffff" opacity=".055"/></pattern>
+      <radialGradient id="light"><stop stop-color="#ffffff" stop-opacity=".72"/><stop offset=".18" stop-color="#ffe889" stop-opacity=".25"/><stop offset="1" stop-color="#000000" stop-opacity="0"/></radialGradient>
+      <pattern id="dots" width="18" height="18" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#ffffff" opacity=".05"/></pattern>
     </defs>
-    <rect width="1080" height="${height}" fill="url(#bg)"/>
-    <rect width="1080" height="${height}" fill="url(#dots)"/>
-    <circle cx="110" cy="65" r="230" fill="url(#light)"/><circle cx="970" cy="65" r="230" fill="url(#light)"/>
-    <path d="M0 405 L280 325 L245 420 L0 505 Z" fill="#f4c400" opacity=".9"/><path d="M1080 365 L850 315 L885 430 L1080 490 Z" fill="#f4c400" opacity=".92"/>
-    <g transform="translate(540 145)">
-      <rect x="-82" y="-58" width="164" height="116" rx="26" fill="url(#gold)"/>
-      <text x="0" y="14" text-anchor="middle" fill="#080808" font-size="46" font-weight="1000">S&amp;S</text>
-    </g>
-    <text x="540" y="245" text-anchor="middle" fill="#ffffff" font-size="66" font-weight="1000">${escapeXml(title)}</text>
-    <text x="540" y="292" text-anchor="middle" fill="#ffd21f" font-size="25" font-weight="900" letter-spacing="3">KAZANAN SAHADA BELLİ OLUR</text>
-    <text x="540" y="420" text-anchor="middle" fill="#ffffff" font-size="82" font-weight="1000">GECENİN <tspan fill="#ffd21f">MAÇLARI</tspan></text>
-    <rect x="258" y="450" width="564" height="58" rx="18" fill="url(#gold)"/>
-    <text x="540" y="488" text-anchor="middle" fill="#090909" font-size="24" font-weight="1000">${escapeXml(dateText)}</text>
+    <rect width="1080" height="1920" fill="url(#bg)"/>
+    <rect width="1080" height="1920" fill="url(#dots)"/>
+    <circle cx="105" cy="125" r="270" fill="url(#light)"/><circle cx="975" cy="125" r="270" fill="url(#light)"/>
+    <path d="M0 470 L245 405 L225 505 L0 575 Z" fill="#f4c400" opacity=".95"/>
+    <path d="M1080 470 L835 405 L855 505 L1080 575 Z" fill="#f4c400" opacity=".95"/>
+
+    <rect x="440" y="64" width="200" height="142" rx="36" fill="url(#gold)"/>
+    <text x="540" y="155" text-anchor="middle" fill="#080808" font-family="Arial, sans-serif" font-size="58" font-weight="1000">S&amp;S</text>
+    <text x="540" y="286" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-size="62" font-weight="1000">${escapeXml(title)}</text>
+    <text x="540" y="337" text-anchor="middle" fill="#ffd21f" font-family="Arial, sans-serif" font-size="25" font-weight="900" letter-spacing="4">KAZANAN SAHADA BELLİ OLUR</text>
+    <text x="540" y="485" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-size="60" font-weight="1000" letter-spacing="-1">GECENİN <tspan fill="#ffd21f">MAÇLARI</tspan></text>
+    <rect x="250" y="525" width="580" height="72" rx="22" fill="url(#gold)"/>
+    <text x="540" y="572" text-anchor="middle" fill="#090909" font-family="Arial, sans-serif" font-size="28" font-weight="1000">${escapeXml(dateText)}</text>
+
     ${rowSvg}
-    <rect x="72" y="${footerY}" width="936" height="108" rx="24" fill="#12171e" stroke="#f4c400" stroke-width="2"/>
-    <text x="120" y="${footerY + 45}" fill="#ffd21f" font-size="22" font-weight="1000">📍 MAÇLARIN ADRESİ</text>
-    <text x="120" y="${footerY + 83}" fill="#ffffff" font-size="31" font-weight="900">${escapeXml(venue)}</text>
-    <text x="955" y="${footerY + 45}" text-anchor="end" fill="#ffd21f" font-size="25" font-weight="1000">S&amp;S CUP</text>
-    <text x="955" y="${footerY + 83}" text-anchor="end" fill="#ffffff" font-size="20" font-style="italic" font-weight="800">HEYECAN SAHADA!</text>
-    <text x="540" y="${height - 25}" text-anchor="middle" fill="#7f8997" font-size="16" font-weight="800">S&amp;S CUP • RESMİ MAÇ GÜNÜ PROGRAMI</text>
+
+    <rect x="60" y="${venueY}" width="960" height="132" rx="25" fill="#12171e" stroke="#f4c400" stroke-width="3"/>
+    <circle cx="105" cy="${venueY + 40}" r="12" fill="#ffd21f"/><path d="M105 ${venueY + 49} l-12 26 h24z" fill="#ffd21f"/>
+    <text x="140" y="${venueY + 37}" fill="#ffd21f" font-family="Arial, sans-serif" font-size="19" font-weight="1000">YER / TESİS</text>
+    <text x="140" y="${venueY + 73}" fill="#ffffff" font-family="Arial, sans-serif" font-size="25" font-weight="900">${escapeXml(venuePrimary)}</text>
+    <text x="140" y="${venueY + 108}" fill="#ffd21f" font-family="Arial, sans-serif" font-size="28" font-weight="1000">${escapeXml(venueSecondary)}</text>
+
+    <text x="540" y="1668" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-size="42" font-weight="1000">SAHADA MÜCADELE, <tspan fill="#ffd21f">KUPA BİZİMLE!</tspan></text>
+    <line x1="100" y1="1715" x2="980" y2="1715" stroke="#f4c400" stroke-opacity=".55"/>
+    <text x="100" y="1772" fill="#ffd21f" font-family="Arial, sans-serif" font-size="22" font-weight="1000">CANLI TAKİP</text>
+    <text x="100" y="1807" fill="#ffffff" font-family="Arial, sans-serif" font-size="21" font-weight="800">ss-cup-manager.vercel.app</text>
+    <text x="540" y="1772" text-anchor="middle" fill="#ffd21f" font-family="Arial, sans-serif" font-size="22" font-weight="1000">INSTAGRAM</text>
+    <text x="540" y="1807" text-anchor="middle" fill="#ffffff" font-family="Arial, sans-serif" font-size="21" font-weight="800">sscup</text>
+    <text x="980" y="1772" text-anchor="end" fill="#ffd21f" font-family="Arial, sans-serif" font-size="22" font-weight="1000">WHATSAPP</text>
+    <text x="980" y="1807" text-anchor="end" fill="#ffffff" font-family="Arial, sans-serif" font-size="21" font-weight="800">0532 664 46 48</text>
+    <text x="540" y="1870" text-anchor="middle" fill="#737d8a" font-family="Arial, sans-serif" font-size="17" font-weight="800">S&amp;S CUP • RESMİ MAÇ GÜNÜ PROGRAMI</text>
   </svg>`;
 }
 
@@ -177,20 +214,24 @@ export default function DailySchedule({ fixtures = [], settings = {} }) {
   }, [fixtures, selectedVisibleKey]);
 
   const tournamentName = settings.tournamentName || settings.title || "S&S CUP";
-  const venue = settings.venue || "GOL PARK HALI SAHA TESİSLERİ • SAHA 1";
+  const venuePrimary = "KARACABEY BELEDİYE SPOR TESİSLERİ";
+  const enteredVenue = String(settings.venue || "").trim();
+  const venueSecondary = enteredVenue || "GOLPARK";
+  const venue = `${venuePrimary} • ${venueSecondary}`;
   const dateText = formatLongDate(selectedDate);
-  const posterHeight = getPosterHeight(dayMatches.length);
+  const posterHeight = 1920;
+  const posterSvg = useMemo(() => buildPosterSvg({ title: tournamentName, dateText, venuePrimary, venueSecondary, matches: dayMatches }), [tournamentName, dateText, venuePrimary, venueSecondary, dayMatches]);
+  const posterSrc = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(posterSvg)}`;
 
   const createPosterPng = () => new Promise((resolve, reject) => {
-    const svg = buildPosterSvg({ title: tournamentName, dateText, venue, matches: dayMatches });
-    const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
+    const blob = new Blob([posterSvg], { type: "image/svg+xml;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const image = new Image();
     image.onload = () => {
       try {
         const canvas = document.createElement("canvas");
         canvas.width = 1080;
-        canvas.height = posterHeight;
+        canvas.height = 1920;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(image, 0, 0);
         URL.revokeObjectURL(url);
@@ -272,19 +313,8 @@ export default function DailySchedule({ fixtures = [], settings = {} }) {
         </div>
       </div>
 
-      <div className={`night-poster-preview match-count-${Math.max(1, dayMatches.length)}`} style={{ aspectRatio: `1080 / ${posterHeight}` }}>
-        <div className="night-lights left"/><div className="night-lights right"/>
-        <div className="night-logo">S&S</div>
-        <div className="night-title-small">{tournamentName}</div>
-        <div className="night-slogan">KAZANAN SAHADA BELLİ OLUR</div>
-        <h1>GECENİN <b>MAÇLARI</b></h1>
-        <div className="night-date">📅 {dateText}</div>
-        <div className="night-poster-list">
-          {dayMatches.map((match, index) => (
-            <div className="night-poster-match" key={match?.id || index}><div className="night-poster-time"><strong>{match?.time || "--:--"}</strong><small>{match?.field || "SAHA 1"}</small></div><div className="night-poster-teams"><strong>{match?.home || "TAKIM"}</strong><span>VS</span><strong>{match?.away || "TAKIM"}</strong></div></div>
-          ))}
-        </div>
-        <div className="night-poster-footer"><div><span>📍</span><p><small>MAÇLARIN ADRESİ</small><strong>{venue}</strong></p></div><b>HEYECAN<br/><i>SAHADA!</i></b></div>
+      <div className="night-poster-preview night-poster-preview-exact">
+        <img className="night-poster-exact-image" src={posterSrc} alt={`${tournamentName} gecenin maçları Instagram Story önizlemesi`} />
       </div>
 
       <section className="night-private-matches">
