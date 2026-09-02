@@ -140,6 +140,10 @@ export default function CompletedMatches({
       JSON.stringify(match) !== JSON.stringify(fixtures[index])
     );
 
+    // Kart/gol/silme önce snapshot'a gider. fixtures tablosundaki skor güncellemesini
+    // beklerken polling eski event listesini geri getiremez.
+    await syncAppStateWithRetry("fixtures_snapshot", updatedFixtures);
+
     await Promise.all(changed.map(async (match) => {
       if (match?.isKnockout === true) {
         try {
@@ -177,10 +181,6 @@ export default function CompletedMatches({
         await syncLeagueFixtureWithRetry(match);
       }
     }));
-
-    // Her ekran aynı kalıcı maç kaynağına yazar. Tamamlanmış maçta sonradan
-    // eklenen/düzeltilen kart, gol, asist ve değişiklik de çıkışta kaybolmaz.
-    await syncAppStateWithRetry("fixtures_snapshot", updatedFixtures);
 
     window.dispatchEvent(
       new CustomEvent("sscup-fixtures-updated", { detail: updatedFixtures })

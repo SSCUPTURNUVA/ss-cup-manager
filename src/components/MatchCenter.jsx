@@ -624,6 +624,10 @@ export default function MatchCenter({
       setFixtures(persistedFixtures);
     }
 
+    // Merkezi setter zaten kuyruğa alır; burada da maç olayı için gönderimi
+    // çekirdek fixtures yazılarından önce başlat.
+    const snapshotPromise = syncAppStateWithRetry("fixtures_snapshot", persistedFixtures);
+
     localStorage.setItem(
       "sscup-fixtures-v3",
       JSON.stringify(persistedFixtures)
@@ -659,7 +663,7 @@ export default function MatchCenter({
 
     // Canlı takip için tek gerçek zamanlı kaynak: tam fikstür snapshot'ı.
     // Gol/kart/değişiklik/faz/sayaç burada birlikte taşınır.
-    await syncAppStateWithRetry("fixtures_snapshot", persistedFixtures);
+    await snapshotPromise;
 
     window.dispatchEvent(
       new CustomEvent("sscup-fixtures-updated", {

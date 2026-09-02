@@ -1,7 +1,7 @@
 import { supabase } from "./supabase";
 import PublicTournament from "./components/PublicTournament";
 import DailySchedule from "./components/DailySchedule";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import MatchCenter from "./components/MatchCenter";
 import TeamManager from "./components/TeamManager";
@@ -446,9 +446,42 @@ export default function App() {
   const FIXTURE_CACHE_KEY = "sscup-fixtures-v3";
   // Public cihaz eski localStorage maçlarını bir an bile göstermesin.
   // Canlı takip verisini yalnız buluttan alır; yerel cache sadece yönetim içindir.
-  const [fixtures, setFixtures] = useState(() =>
+  const [fixtures, setFixturesState] = useState(() =>
     isPublicRoute ? [] : sortFixturesBySchedule(readStorage(FIXTURE_CACHE_KEY, []))
   );
+  const fixturesRef = useRef(fixtures);
+
+  // TEK MERKEZİ YEREL YAZMA KAPISI:
+  // Çocuk ekranlardan gelen HER fixture ekle/sil/düzenle burada yakalanır.
+  // Telefon ve EXE aynı işlevi kullanır; değişen maç zaman damgası alır,
+  // snapshot daha React render'ı beklemeden write-ahead kuyruğa girer ve buluta yollanır.
+  const setFixtures = useCallback((update) => {
+    const current = fixturesRef.current || [];
+    const proposed = typeof update === "function" ? update(current) : update;
+    if (!Array.isArray(proposed)) return;
+
+    if (isPublicRoute || !fixtureBootstrapReady) {
+      fixturesRef.current = proposed;
+      setFixturesState(proposed);
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const currentByKey = new Map(current.map((m, i) => [String(m?.id ?? m?.knockoutKey ?? i), m]));
+    const stamped = proposed.map((match, index) => {
+      const key = String(match?.id ?? match?.knockoutKey ?? index);
+      const previous = currentByKey.get(key);
+      if (JSON.stringify(previous) === JSON.stringify(match)) return match;
+      return { ...match, runtimeUpdatedAt: now };
+    });
+
+    fixturesRef.current = stamped;
+    localStorage.setItem(FIXTURE_CACHE_KEY, JSON.stringify(stamped));
+    queueAppStateSync("fixtures_snapshot", stamped);
+    // Kuyruğa yazıldıktan hemen sonra gönder. Başka ekranın async işlemini bekleme.
+    syncAppStateWithRetry("fixtures_snapshot", stamped);
+    setFixturesState(stamped);
+  }, [fixtureBootstrapReady, isPublicRoute]);
 
   const [goalScorers, setGoalScorers] = useState([]);
 
@@ -471,6 +504,7 @@ export default function App() {
   }, [drawOrder, isPublicRoute]);
 
   useEffect(() => {
+    fixturesRef.current = fixtures;
     localStorage.setItem(FIXTURE_CACHE_KEY, JSON.stringify(fixtures));
   }, [fixtures]);
 
@@ -600,7 +634,7 @@ export default function App() {
       if (error) {
         console.error("Fikstür yükleme hatası:", error);
         // İnternet yoksa yalnızca bu sürümün kendi güvenli cache'ini kullan. Eski key'lere dönme.
-        if (!cancelled) setFixtures(sortFixturesBySchedule(readStorage(FIXTURE_CACHE_KEY, [])));
+        if (!cancelled) setFixturesState(sortFixturesBySchedule(readStorage(FIXTURE_CACHE_KEY, [])));
         return;
       }
       if (!data) return;
@@ -636,10 +670,11 @@ export default function App() {
       const pendingSnapshot = readPendingAppStateSync()?.fixtures_snapshot;
       const cloudSnapshotTime = Date.parse(snapshotRow?.updated_at || "") || 0;
       const pendingSnapshotTime = Date.parse(pendingSnapshot?.savedAt || "") || 0;
-      const snapshotValue = pendingSnapshotTime > cloudSnapshotTime && Array.isArray(pendingSnapshot?.value)
+      const hasPendingSnapshot = Array.isArray(pendingSnapshot?.value);
+      const snapshotValue = hasPendingSnapshot
         ? pendingSnapshot.value
         : (!snapshotError && Array.isArray(snapshotRow?.value) ? snapshotRow.value : []);
-      const snapshotUpdatedAt = pendingSnapshotTime > cloudSnapshotTime
+      const snapshotUpdatedAt = hasPendingSnapshot
         ? pendingSnapshot?.savedAt
         : snapshotRow?.updated_at;
 
@@ -667,7 +702,8 @@ export default function App() {
       }
       const sorted = sortFixturesBySchedule(cloudFixtures);
       if (!cancelled) {
-        setFixtures(sorted);
+        fixturesRef.current = sorted;
+        setFixturesState(sorted);
         localStorage.setItem(FIXTURE_CACHE_KEY, JSON.stringify(sorted));
       }
     }
@@ -731,13 +767,13 @@ export default function App() {
 
         const rows = Array.isArray(fixtureResult.data) ? fixtureResult.data : [];
         const cloudSnapshot = Array.isArray(snapshotResult.data?.value) ? snapshotResult.data.value : [];
-        const snapshot = pendingTime > cloudTime && Array.isArray(pendingSnapshot?.value)
+        const snapshot = Array.isArray(pendingSnapshot?.value)
           ? pendingSnapshot.value
           : cloudSnapshot;
         const rowById = new Map(rows.map((row) => [String(row?.id), row]));
         const snapById = new Map(snapshot.map((match) => [String(match?.id), match]));
 
-        setFixtures((current) => {
+        setFixturesState((current) => {
           const base = current.length > 0 ? current : rows.map((item) => ({
             id: item.id, home: item.home, away: item.away, date: item.date, time: item.time,
             field: item.pitch, week: item.week, isKnockout: item.is_knockout === true,

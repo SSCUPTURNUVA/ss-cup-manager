@@ -46,8 +46,10 @@ function mergeFixtureSnapshots(cloudValue, localValue, cloudRowUpdatedAt = "", l
     if (!c) return l;
     if (!l) return c;
 
-    const ct = Math.max(toTime(c?.runtimeUpdatedAt), cloudRowTs);
-    const lt = Math.max(toTime(l?.runtimeUpdatedAt), localRowTs);
+    // Satırın updated_at değeri bütün maçları "yeni" yapmamalı.
+    // Önce maçın kendi runtimeUpdatedAt değeri kullanılır; yalnız yoksa satır zamanı fallback olur.
+    const ct = toTime(c?.runtimeUpdatedAt) || cloudRowTs;
+    const lt = toTime(l?.runtimeUpdatedAt) || localRowTs;
 
     // KRİTİK: event listelerini UNION yapma. Yeni snapshot otoritedir.
     // Böylece kart/gol/değişiklik silinince eski cihaz onu yeniden diriltemez.
@@ -80,6 +82,16 @@ async function prepareAppStateValue(id, value, savedAt) {
   }
 }
 
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+let fixtureSnapshotWriteChain = Promise.resolve();
+
 export function readPendingAppStateSync() {
   try {
     const parsed = JSON.parse(localStorage.getItem(PENDING_APP_STATE_SYNC_KEY) || "{}");
@@ -109,7 +121,7 @@ export function clearQueuedAppStateSync(id) {
   else localStorage.setItem(PENDING_APP_STATE_SYNC_KEY, JSON.stringify(pending));
 }
 
-export async function syncAppStateWithRetry(id, value) {
+async function syncAppStateWithRetryInner(id, value) {
   if (!id) return true;
 
   const savedAt = new Date().toISOString();
@@ -140,8 +152,8 @@ export async function syncAppStateWithRetry(id, value) {
     if (!verifyRow) throw new Error(`app_state/${id} geri okunamadı; kayıt kuyrukta korunuyor.`);
 
     if (String(id) === "fixtures_snapshot" && Array.isArray(mergedValue)) {
-      const wantedJson = JSON.stringify(mergedValue);
-      const gotJson = JSON.stringify(Array.isArray(verifyRow.value) ? verifyRow.value : []);
+      const wantedJson = stableStringify(mergedValue);
+      const gotJson = stableStringify(Array.isArray(verifyRow.value) ? verifyRow.value : []);
       if (gotJson !== wantedJson) throw new Error("fixtures_snapshot sunucuda farklı; yerel kayıt korunuyor.");
     }
 
@@ -151,6 +163,17 @@ export async function syncAppStateWithRetry(id, value) {
     console.error(`app_state/${id} bulut eşitlemesi beklemeye alındı:`, error);
     return false;
   }
+}
+
+export function syncAppStateWithRetry(id, value) {
+  if (String(id) !== "fixtures_snapshot") {
+    return syncAppStateWithRetryInner(id, value);
+  }
+  // Aynı cihazda arka arkaya gol/kart/silme işlemleri ağda ters sırada tamamlanamaz.
+  fixtureSnapshotWriteChain = fixtureSnapshotWriteChain
+    .catch(() => false)
+    .then(() => syncAppStateWithRetryInner(id, value));
+  return fixtureSnapshotWriteChain;
 }
 
 export async function flushPendingAppStateSync() {
@@ -172,8 +195,8 @@ export async function flushPendingAppStateSync() {
         if (!verifyError && verifyRow) {
           if (String(entry.id) !== "fixtures_snapshot") clearQueuedAppStateSync(entry.id);
           else {
-            const wanted = JSON.stringify(Array.isArray(mergedValue) ? mergedValue : []);
-            const got = JSON.stringify(Array.isArray(verifyRow.value) ? verifyRow.value : []);
+            const wanted = stableStringify(Array.isArray(mergedValue) ? mergedValue : []);
+            const got = stableStringify(Array.isArray(verifyRow.value) ? verifyRow.value : []);
             if (got === wanted) clearQueuedAppStateSync(entry.id);
           }
         }
