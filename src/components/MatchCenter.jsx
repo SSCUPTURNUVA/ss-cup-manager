@@ -467,15 +467,120 @@ export default function MatchCenter({
     localStorage.removeItem("sscup-match-center-active");
   }, [stalePreparedSelection, activeMatchCenterKey]);
 
+  // Maç Merkezi için TEK otorite aktif seçim anahtarıdır.
+  // Buluttan/fixture'dan gecikmiş live=true gelmesi, anahtar silindikten sonra
+  // geri alınan maçı tekrar Maç Merkezi'ne sokmamalı.
   const liveMatchIndex = fixtures.findIndex((match, index) => {
     if (isReopenedResetMatch(match)) return false;
-    return (
-      (match.live === true && ["first_half", "halftime", "second_half", "penalty"].includes(match.matchPhase || "waiting")) ||
-      (!stalePreparedSelection && activeMatchCenterKey && getMatchCenterKey(match, index) === activeMatchCenterKey)
+    return Boolean(
+      !stalePreparedSelection &&
+      activeMatchCenterKey &&
+      getMatchCenterKey(match, index) === activeMatchCenterKey
     );
   });
 
   const liveMatch = liveMatchIndex >= 0 ? fixtures[liveMatchIndex] : null;
+
+  // Geri alınmış maç için son güvenlik: eski halftime/live/runtime kaydı hiçbir şekilde
+  // Maç Merkezi ekranında kalmasın. CompletedMatches reset işaretini yerelde ve bulutta
+  // yazar; burası Maç Merkezi açıldığında o işareti okuyup aktif seçimi ve runtime'ı
+  // zorla temizler. Yeniden Maç Merkezi'ne alınırken reset işareti zaten kaldırılır.
+  useEffect(() => {
+    let cancelled = false;
+
+    const applyReopenReset = async () => {
+      let cloudReset = null;
+      try {
+        const { data } = await supabase
+          .from("app_state")
+          .select("value")
+          .eq("id", "fixture_reopen_reset")
+          .maybeSingle();
+        cloudReset = data?.value && typeof data.value === "object" ? data.value : null;
+      } catch {
+        cloudReset = null;
+      }
+      if (cancelled) return;
+
+      let localSignature = null;
+      try {
+        localSignature = JSON.parse(localStorage.getItem("sscup-match-center-reopened-reset-signature") || "null");
+      } catch {
+        localSignature = null;
+      }
+      const localId = localStorage.getItem("sscup-match-center-reopened-reset") || "";
+      const reset = cloudReset?.matchId || localId || localSignature
+        ? {
+            matchId: String(cloudReset?.matchId || localId || localSignature?.id || ""),
+            home: String(cloudReset?.home || localSignature?.home || ""),
+            away: String(cloudReset?.away || localSignature?.away || ""),
+            date: String(cloudReset?.date || localSignature?.date || ""),
+            time: String(cloudReset?.time || localSignature?.time || ""),
+          }
+        : null;
+      if (!reset) return;
+
+      const matchesReset = (match) => {
+        if (!match) return false;
+        if (reset.matchId && String(match?.id ?? "") === reset.matchId) return true;
+        if (!reset.home || !reset.away) return false;
+        return (
+          String(match?.home || "") === reset.home &&
+          String(match?.away || "") === reset.away &&
+          (!reset.date || String(match?.date || "") === reset.date) &&
+          (!reset.time || String(match?.time || "") === reset.time)
+        );
+      };
+
+      const activeKey = localStorage.getItem("sscup-match-center-active") || "";
+      const activeFixture = activeKey
+        ? fixtures.find((match, index) => getMatchCenterKey(match, index) === activeKey)
+        : null;
+      if (activeFixture && matchesReset(activeFixture)) {
+        localStorage.removeItem("sscup-match-center-active");
+      }
+
+      let changed = false;
+      const cleaned = fixtures.map((match) => {
+        if (!matchesReset(match)) return match;
+        const alreadyClean =
+          match?.played !== true &&
+          match?.live !== true &&
+          match?.timerRunning !== true &&
+          (match?.matchPhase || "waiting") === "waiting" &&
+          Number(match?.elapsedSeconds || 0) === 0 &&
+          Number(match?.homeScore || 0) === 0 &&
+          Number(match?.awayScore || 0) === 0 &&
+          (!Array.isArray(match?.events) || match.events.length === 0);
+        if (alreadyClean) return match;
+        changed = true;
+        return {
+          ...match,
+          homeScore: 0,
+          awayScore: 0,
+          homePen: "",
+          awayPen: "",
+          events: [],
+          goals: [],
+          played: false,
+          live: false,
+          timerRunning: false,
+          timerStartedAt: null,
+          elapsedSeconds: 0,
+          matchPhase: "waiting",
+        };
+      });
+
+      if (changed && !cancelled) {
+        setFixtures(cleaned);
+        localStorage.setItem("sscup-fixtures", JSON.stringify(cleaned));
+        window.dispatchEvent(new CustomEvent("sscup-fixtures-updated", { detail: cleaned }));
+      }
+    };
+
+    applyReopenReset();
+    return () => { cancelled = true; };
+  }, [fixtures, setFixtures]);
 
   const playedMatches = fixtures.filter(
     (match) => match.played === true
