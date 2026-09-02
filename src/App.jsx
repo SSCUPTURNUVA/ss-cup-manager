@@ -465,11 +465,36 @@ export default function App() {
           }
         }
 
+        // Bilinçli geri alma bulutta da tutulur. Yönetim başka cihazda / tarayıcıda açılsa bile
+        // eski runtime/snapshot bu maçı yeniden devre arasına veya canlıya taşıyamaz.
+        let cloudReopenReset = null;
+        try {
+          const { data: reopenResetRow } = await supabase
+            .from("app_state")
+            .select("value")
+            .eq("id", "fixture_reopen_reset")
+            .maybeSingle();
+          cloudReopenReset = reopenResetRow?.value && typeof reopenResetRow.value === "object"
+            ? reopenResetRow.value
+            : null;
+        } catch {
+          cloudReopenReset = null;
+        }
+        const matchesCloudReopenReset = (row) => {
+          if (!row || !cloudReopenReset) return false;
+          const resetId = String(cloudReopenReset?.matchId || "");
+          if (resetId && String(row?.id ?? "") === resetId) return true;
+          const home = String(cloudReopenReset?.home || "");
+          const away = String(cloudReopenReset?.away || "");
+          return Boolean(home && away && String(row?.home || "") === home && String(row?.away || "") === away);
+        };
+
         // fixtures yazısı gecikse bile maçın son runtime durumunu ayrı bulut aynasından geri yükle.
         const { data: runtimeRow, error: runtimeError } = await supabase.from("app_state").select("value").eq("id", "fixture_runtime").maybeSingle();
         if (!runtimeError && runtimeRow?.value && typeof runtimeRow.value === "object" && !Array.isArray(runtimeRow.value)) {
           const runtimeMap = runtimeRow.value;
           data = data.map((row) => {
+            if (matchesCloudReopenReset(row)) return row;
             const runtime = runtimeMap[String(row?.id)];
             if (!runtime || String(runtime?.id ?? "") !== String(row?.id ?? "")) return row;
             const rowPhase = row?.match_phase || (row?.played === true ? "completed" : "waiting");
@@ -493,6 +518,7 @@ export default function App() {
         if (!completedError && completedRow?.value && typeof completedRow.value === "object" && !Array.isArray(completedRow.value)) {
           const completedMap = completedRow.value;
           data = data.map((row) => {
+            if (matchesCloudReopenReset(row)) return row;
             const completed = completedMap[String(row?.id)];
             if (!completed ||
                 String(completed?.id ?? "") !== String(row?.id ?? "") ||
@@ -530,6 +556,7 @@ export default function App() {
               .map((match) => [String(match.id), match])
           );
           data = data.map((row) => {
+            if (matchesCloudReopenReset(row)) return row;
             const snap = snapshotMap[String(row?.id)];
             if (!snap || String(snap?.id ?? "") !== String(row?.id ?? "") || snap?.home !== row?.home || snap?.away !== row?.away) return row;
             const rowPhase = row?.match_phase || (row?.played === true ? "completed" : "waiting");
@@ -653,12 +680,6 @@ export default function App() {
                   home_score: 0,
                   away_score: 0,
                   played: false,
-                  live: false,
-                  timer_running: false,
-                  timer_started_at: null,
-                  elapsed_seconds: 0,
-                  match_phase: "waiting",
-                  events: [],
                 })
                 .eq("id", item.id)
             )
@@ -711,12 +732,21 @@ export default function App() {
 
         // Bilinçli "Maçı Yeniden Aç" işlemi normalde geriye doğru bir durum geçişidir.
         // Eski runtime/completed kayıtları daha ileri fazda görünse bile bu reset yerelde kazanır.
-        const reopenedResetId = localStorage.getItem("sscup-match-center-reopened-reset") || "";
+        const reopenedResetId = localStorage.getItem("sscup-match-center-reopened-reset") || String(cloudReopenReset?.matchId || "");
         let reopenedResetSignature = null;
         try {
           reopenedResetSignature = JSON.parse(localStorage.getItem("sscup-match-center-reopened-reset-signature") || "null");
         } catch {
           reopenedResetSignature = null;
+        }
+        if (!reopenedResetSignature && cloudReopenReset) {
+          reopenedResetSignature = {
+            id: String(cloudReopenReset?.matchId || ""),
+            home: String(cloudReopenReset?.home || ""),
+            away: String(cloudReopenReset?.away || ""),
+            date: String(cloudReopenReset?.date || ""),
+            time: String(cloudReopenReset?.time || ""),
+          };
         }
         const matchesReopenReset = (match) => {
           if (reopenedResetId && String(match?.id ?? "") === reopenedResetId) return true;

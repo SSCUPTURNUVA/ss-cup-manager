@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { supabase } from "../supabase";
+import { clearQueuedFixtureSync } from "../utils/pendingFixtureSync";
 
 const EVENT_LABELS = {
   scorer_record: "⚽ Golcü Kaydı",
@@ -349,17 +350,15 @@ export default function CompletedMatches({
         updated_at: new Date().toISOString(),
       });
 
+      // fixtures tablosuna yalnız gerçek kolonları yaz. Canlı runtime app_state içinde tutuluyor.
       const resetPayload = {
         home_score: 0,
         away_score: 0,
-        events: [],
         played: false,
-        live: false,
-        timer_running: false,
-        timer_started_at: null,
-        elapsed_seconds: 0,
-        match_phase: "waiting",
       };
+
+      // Önce eski başarısız PATCH kuyruğunu temizle; yoksa eski halftime skoru tekrar denenir.
+      clearQueuedFixtureSync(match.id);
 
       await supabase.from("fixtures").update(resetPayload).eq("id", match.id);
 
