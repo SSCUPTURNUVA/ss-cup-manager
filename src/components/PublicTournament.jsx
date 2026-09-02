@@ -132,6 +132,12 @@ function calculateStandings(teams, fixtures) {
 function deriveScorers(fixtures) {
   const totals = {};
   (fixtures || []).forEach((match) => {
+    const phase = match?.matchPhase || match?.match_phase || "waiting";
+    const countsForStats =
+      match?.played === true ||
+      (match?.live === true && ["first_half", "halftime", "second_half", "penalty"].includes(phase));
+    if (!countsForStats) return;
+
     getEvents(match)
       .filter((event) => GOAL_EVENT_TYPES.has(event.type))
       .forEach((event) => {

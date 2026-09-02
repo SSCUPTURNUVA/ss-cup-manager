@@ -275,6 +275,9 @@ export default function MatchCenter({
   }
 
   function getVisibleElapsedSeconds(match) {
+    // Hazırlık ekranında eski cihazdan kalan sayaç hiçbir zaman gösterilmez.
+    if ((match?.matchPhase || "waiting") === "waiting") return 0;
+
     const savedSeconds = Math.max(
       0,
       safeNumber(match?.elapsedSeconds)
@@ -678,6 +681,12 @@ export default function MatchCenter({
     const totals = {};
 
     updatedFixtures.forEach((match) => {
+      const phase = match?.matchPhase || "waiting";
+      const countsForStats =
+        match?.played === true ||
+        (match?.live === true && ["first_half", "halftime", "second_half", "penalty"].includes(phase));
+      if (!countsForStats) return;
+
       const events = getMatchEvents(match).filter(
         (event) =>
           EVENT_TYPES[event.type]?.countsGoal === true
@@ -1001,25 +1010,29 @@ export default function MatchCenter({
       localStorage.setItem("sscup-match-center-active", getMatchCenterKey(nextMatch, nextIndex));
     }
 
-    const updatedFixtures = fixtures.map((match) => ({
-      ...match,
-      // Hazırlık aşaması CANLI değildir. CANLI yalnız 1. Devre Başlat ile açılır.
-      live: false,
-      timerRunning: false,
-      timerStartedAt: null,
-      elapsedSeconds: match === nextMatch ? 0 : match.elapsedSeconds ?? 0,
-      matchPhase: match === nextMatch ? "waiting" : match.matchPhase,
+    const updatedFixtures = fixtures.map((match, index) => {
+      const isPreparedMatch = index === nextIndex;
+      return {
+        ...match,
+        // Başlatılacak maç HER ZAMAN temiz bir maç oturumu olarak hazırlanır.
+        // Eski telefon/test skorları, timer veya olayları bu maça taşınamaz.
+        live: false,
+        timerRunning: false,
+        timerStartedAt: null,
+        elapsedSeconds: isPreparedMatch ? 0 : match.elapsedSeconds ?? 0,
+        matchPhase: isPreparedMatch ? "waiting" : match.matchPhase,
 
-      ...(match === nextMatch && {
-        homeScore: 0,
-        awayScore: 0,
-        homePen: "",
-        awayPen: "",
-        events: [],
-        goals: [],
-        played: false,
-      }),
-    }));
+        ...(isPreparedMatch && {
+          homeScore: 0,
+          awayScore: 0,
+          homePen: "",
+          awayPen: "",
+          events: [],
+          goals: [],
+          played: false,
+        }),
+      };
+    });
 
     if (typeof setFixtures === "function") setFixtures(updatedFixtures);
     localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));

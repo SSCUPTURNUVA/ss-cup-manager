@@ -465,6 +465,82 @@ export default function App() {
             ? activeFixtureRow.value.ids.map((id) => String(id))
             : [];
 
+          // 02.09.2026 güvenli saha temizliği:
+          // FİKSTÜR/TARİH/SAAT/TAKIM/OYUNCU korunur; yalnız eski test maç state'i temizlenir.
+          // Buluttaki işaret sayesinde bu işlem tüm cihazlarda SADECE BİR KEZ çalışır.
+          const CLEANUP_ID = "fixture_runtime_cleanup_20260902_v2";
+          try {
+            const { data: cleanupRow } = await supabase
+              .from("app_state")
+              .select("value")
+              .eq("id", CLEANUP_ID)
+              .maybeSingle();
+
+            if (cleanupRow?.value?.done !== true && !isPublicRoute) {
+              const idsToReset = activeIds.length > 0
+                ? activeIds
+                : (Array.isArray(data) ? data.map((row) => String(row?.id ?? "")).filter(Boolean) : []);
+              const resetIdSet = new Set(idsToReset);
+
+              for (const id of idsToReset) {
+                const { error: resetError } = await supabase
+                  .from("fixtures")
+                  .update({
+                    played: false,
+                    home_score: 0,
+                    away_score: 0,
+                    live: false,
+                    timer_running: false,
+                    timer_started_at: null,
+                    elapsed_seconds: 0,
+                    match_phase: "waiting",
+                    events: [],
+                  })
+                  .eq("id", id);
+                if (resetError) throw resetError;
+              }
+
+              const { error: scorerCleanupError } = await supabase
+                .from("goal_scorers")
+                .delete()
+                .neq("id", 0);
+              if (scorerCleanupError) console.warn("Eski gol krallığı temizlenemedi:", scorerCleanupError);
+
+              await supabase.from("app_state").upsert({
+                id: "match_lineups",
+                value: {},
+                updated_at: new Date().toISOString(),
+              });
+
+              // Eski cihazın bekleyen yazma kuyruğu temiz veriyi yeniden kirletemesin.
+              [
+                "sscup-goals", "sscup-goal-scorers", "sscup-match-goals",
+                "sscup-match-events", "sscup-active-match", "sscup-live-match",
+                "sscup-match-lineups", "sscup-match-center-active",
+                "sscup-pending-fixture-sync", "sscup-pending-app-state-sync"
+              ].forEach((key) => localStorage.removeItem(key));
+
+              data = (Array.isArray(data) ? data : []).map((row) =>
+                resetIdSet.has(String(row?.id ?? ""))
+                  ? {
+                      ...row, played: false, home_score: 0, away_score: 0, live: false,
+                      timer_running: false, timer_started_at: null, elapsed_seconds: 0,
+                      match_phase: "waiting", events: [],
+                    }
+                  : row
+              );
+
+              const { error: markerError } = await supabase.from("app_state").upsert({
+                id: CLEANUP_ID,
+                value: { done: true, completedAt: new Date().toISOString() },
+                updated_at: new Date().toISOString(),
+              });
+              if (markerError) throw markerError;
+            }
+          } catch (cleanupError) {
+            console.error("Fikstürü koruyan tek seferlik maç temizliği hatası:", cleanupError);
+          }
+
           if (activeIds.length > 0) {
             const activeIdSet = new Set(activeIds);
             data = data.filter((row) => activeIdSet.has(String(row?.id)));
@@ -562,27 +638,34 @@ export default function App() {
           );
         }
 
-        const supabaseFixtures = data.map((item) => ({
-          id: item.id,
-          home: item.home,
-          away: item.away,
-          date: item.date,
-          time: item.time,
-          field: item.pitch,
-          week: item.week,
-          played: item.played,
-          homeScore: item.home_score,
-          awayScore: item.away_score,
-          live: item.live,
-          timerRunning: item.timer_running,
-          timerStartedAt: item.timer_started_at,
-          elapsedSeconds: item.elapsed_seconds,
-          matchPhase: item.match_phase || "waiting",
-          isKnockout: item.is_knockout === true,
-          knockoutKey: item.knockout_key || "",
-          stageLabel: item.stage || "",
-          events: Array.isArray(item.events) ? item.events : [],
-        }));
+        const supabaseFixtures = data.map((item) => {
+          const phase = item.match_phase || "waiting";
+          const isCleanWaitingMatch = item.played !== true && item.live !== true && phase === "waiting";
+
+          return {
+            id: item.id,
+            home: item.home,
+            away: item.away,
+            date: item.date,
+            time: item.time,
+            field: item.pitch,
+            week: item.week,
+            played: item.played === true,
+            // BAŞLAMAMIŞ maçın runtime verisi asla eski cihaz/cache kaydından taşınmaz.
+            // Fikstür kimliği ve programı korunur; yalnız maç içi durum temiz başlar.
+            homeScore: isCleanWaitingMatch ? 0 : item.home_score,
+            awayScore: isCleanWaitingMatch ? 0 : item.away_score,
+            live: isCleanWaitingMatch ? false : item.live === true,
+            timerRunning: isCleanWaitingMatch ? false : item.timer_running === true,
+            timerStartedAt: isCleanWaitingMatch ? null : item.timer_started_at,
+            elapsedSeconds: isCleanWaitingMatch ? 0 : item.elapsed_seconds,
+            matchPhase: isCleanWaitingMatch ? "waiting" : phase,
+            isKnockout: item.is_knockout === true,
+            knockoutKey: item.knockout_key || "",
+            stageLabel: item.stage || "",
+            events: isCleanWaitingMatch ? [] : (Array.isArray(item.events) ? item.events : []),
+          };
+        });
 
         // Normalde Supabase güncel turnuvanın ana kaynağıdır. ANCAK bir maç için
         // pending kayıt hâlâ duruyorsa, bu PC'deki yerel maç verisi buluttan daha yenidir.
@@ -598,7 +681,12 @@ export default function App() {
           const key = String(cloudMatch?.id ?? "");
           const pending = pendingAfterFlush?.[key];
           const local = localById.get(key);
-          if (!pending) return cloudMatch;
+
+          // Waiting + oynanmamış maçta pending/local runtime verisini ASLA koruma.
+          // Bu kayıtlar eski telefon/test oturumundan gelebilir ve 5-3 gibi skorları geri taşıyabilir.
+          const phase = cloudMatch?.matchPhase || "waiting";
+          const cleanWaiting = cloudMatch?.played !== true && cloudMatch?.live !== true && phase === "waiting";
+          if (cleanWaiting || !pending) return cloudMatch;
 
           if (local) {
             return {
@@ -651,7 +739,7 @@ export default function App() {
     }
 
     loadFixturesFromSupabase();
-  }, []);
+  }, [isPublicRoute]);
 
   // Uygulama hangi sayfada olursa olsun internet geri geldiğinde bekleyen
   // maç ve app_state kayıtlarını tamamla. Yönetim ekranının açık kalmasına bağlı değildir.

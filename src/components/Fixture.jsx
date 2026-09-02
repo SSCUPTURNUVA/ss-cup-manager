@@ -183,6 +183,12 @@ export default function Fixture({
         if (mergedItem.played !== true && (item.matchPhase || "waiting") === "waiting") {
           return {
             ...mergedItem,
+            // Başlamamış maçta eski localStorage skor/olay/timer verisi taşınmaz.
+            // Fikstür (id, takım, tarih, saat, saha, hafta) aynen korunur.
+            homeScore: 0,
+            awayScore: 0,
+            events: [],
+            goals: [],
             live: false,
             matchPhase: "waiting",
             timerRunning: false,
