@@ -7,6 +7,7 @@ import {
 import { supabase } from "../supabase";
 import { compareFixturesBySchedule, sortFixturesBySchedule } from "../utils/fixtureOrder";
 import { syncLeagueFixtureWithRetry } from "../utils/pendingFixtureSync";
+import { syncAppStateWithRetry } from "../utils/pendingAppStateSync";
 
 const TURKISH_DAYS = [
   "Pazar",
@@ -1166,6 +1167,8 @@ export default function Fixture({
         return;
       }
     }
+
+    await syncAppStateWithRetry("fixtures_snapshot", updatedFixtures);
 
     const updatedMatchGoals = {
       ...matchGoals,

@@ -292,6 +292,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
   const refreshSequence = useRef(0);
   const refreshInFlight = useRef(false);
+  const refreshQueued = useRef(false);
 
   const refreshTeams = useCallback(async () => {
     const { data, error } = await supabase
@@ -307,8 +308,12 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const refresh = useCallback(async () => {
     // Telefonda ağ 1 saniyeden yavaşsa üst üste refresh başlatmak eski kodda
     // her cevabı iptal ediyordu. Tek istek bitsin, sonra yenisi başlasın.
-    if (refreshInFlight.current) return;
+    if (refreshInFlight.current) {
+      refreshQueued.current = true;
+      return;
+    }
     refreshInFlight.current = true;
+    refreshQueued.current = false;
     const sequence = ++refreshSequence.current;
 
     try {
@@ -418,6 +423,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       console.error("Canlı takip yenileme hatası:", error);
     } finally {
       refreshInFlight.current = false;
+      if (refreshQueued.current) {
+        refreshQueued.current = false;
+        window.setTimeout(() => refresh(), 0);
+      }
     }
   }, []);
 
@@ -460,7 +469,9 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.settings" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.fixtures_snapshot" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.public_match_center" }, refresh)
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") refresh();
+      });
 
     return () => {
       refreshSequence.current += 1;
@@ -622,6 +633,9 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const lastGoal = liveEvents.find((event) => GOAL_EVENT_TYPES.has(event.type));
   const minute = getMinute(liveMatch, now, displaySettings.halfDurationMinutes || 30);
   const playedCount = displayFixtures.filter((match) => match?.played === true).length;
+  const totalGoals = displayFixtures
+    .filter((match) => match?.played === true)
+    .reduce((sum, match) => sum + safeNumber(match?.homeScore) + safeNumber(match?.awayScore), 0);
   const tournamentName = displaySettings.tournamentName || displaySettings.title || "S&S CUP";
 
   // Final tamamlandığında şampiyonu doğrudan final skorundan/penaltısından bul.
@@ -695,7 +709,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           <article><span>👥</span><div><strong>{displayTeams.length}</strong><b>TAKIM</b><small>Mücadele ediyor</small></div></article>
           <article><span>⚽</span><div><strong>{playedCount}</strong><b>OYNANAN MAÇ</b><small>Toplam</small></div></article>
           <article><span>🕘</span><div><strong>{upcoming.length}</strong><b>BEKLEYEN MAÇ</b><small>Yaklaşan</small></div></article>
-          <article><span>👑</span><div><strong>{topScorer?.goals || 0}</strong><b>LİDER GOL</b><small>{topScorer?.playerName || topScorer?.name || "Gol Kralı"}</small></div></article>
+          <article><span>⚽</span><div><strong>{totalGoals}</strong><b>TOPLAM GOL</b><small>Oynanan maçlar</small></div></article>
         </section>
 
         <nav className="public-tabbar">

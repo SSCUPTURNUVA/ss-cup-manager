@@ -40,12 +40,13 @@ export async function syncAppStateWithRetry(id, value) {
   if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
 
   try {
-    const { error } = await supabase.from("app_state").upsert({
+    const { data, error } = await supabase.from("app_state").upsert({
       id: String(id),
       value,
       updated_at: new Date().toISOString(),
-    });
+    }).select("id,updated_at").maybeSingle();
     if (error) throw error;
+    if (!data?.id) throw new Error(`app_state/${id} bulutta doğrulanamadı; kayıt kuyrukta korunuyor.`);
     clearQueuedAppStateSync(id);
     return true;
   } catch (error) {
@@ -61,12 +62,12 @@ export async function flushPendingAppStateSync() {
   for (const entry of Object.values(pending)) {
     if (!entry?.id) continue;
     try {
-      const { error } = await supabase.from("app_state").upsert({
+      const { data, error } = await supabase.from("app_state").upsert({
         id: String(entry.id),
         value: entry.value,
         updated_at: entry.savedAt || new Date().toISOString(),
-      });
-      if (!error) clearQueuedAppStateSync(entry.id);
+      }).select("id,updated_at").maybeSingle();
+      if (!error && data?.id) clearQueuedAppStateSync(entry.id);
     } catch (error) {
       console.warn(`Bekleyen app_state/${entry.id} eşitlemesi tekrar denenecek:`, error);
     }
