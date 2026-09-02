@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { supabase } from "../supabase";
+import { syncAppStateWithRetry } from "../utils/pendingAppStateSync";
 export default function TeamManager({
   teams,
   setTeams,
@@ -214,6 +215,7 @@ export default function TeamManager({
         squads[newName] = squads[oldName];
         delete squads[oldName];
         localStorage.setItem("sscup-squads", JSON.stringify(squads));
+        await syncAppStateWithRetry("squads", squads);
       }
     } catch (error) {
       console.error("Kadro takım adı güncelleme hatası:", error);
@@ -300,6 +302,7 @@ export default function TeamManager({
           "sscup-squads",
           JSON.stringify({})
         );
+        await syncAppStateWithRetry("squads", {});
       } else {
         delete squads[teamToDelete];
 
@@ -307,6 +310,7 @@ export default function TeamManager({
           "sscup-squads",
           JSON.stringify(squads)
         );
+        await syncAppStateWithRetry("squads", squads);
       }
     } catch {
       localStorage.setItem(

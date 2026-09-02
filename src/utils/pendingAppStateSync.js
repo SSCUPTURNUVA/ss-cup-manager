@@ -2,6 +2,81 @@ import { supabase } from "../supabase";
 
 export const PENDING_APP_STATE_SYNC_KEY = "sscup-pending-app-state-sync-v2";
 
+
+function eventKey(event, index = 0) {
+  return String(
+    event?.id ||
+    event?.actionId ||
+    `${event?.type || event?.eventType || "event"}|${event?.team || event?.teamName || ""}|${event?.playerId || event?.playerName || event?.name || ""}|${event?.minute ?? ""}|${index}`
+  );
+}
+
+function mergeEvents(cloudEvents, localEvents) {
+  const merged = [];
+  const seen = new Set();
+  [...(Array.isArray(cloudEvents) ? cloudEvents : []), ...(Array.isArray(localEvents) ? localEvents : [])]
+    .forEach((event, index) => {
+      const key = eventKey(event, index);
+      if (seen.has(key)) return;
+      seen.add(key);
+      merged.push(event);
+    });
+  return merged;
+}
+
+function matchKey(match, index = 0) {
+  return String(match?.id ?? match?.knockoutKey ?? `${match?.home || ""}|${match?.away || ""}|${match?.date || ""}|${match?.time || ""}|${index}`);
+}
+
+function mergeFixtureSnapshots(cloudValue, localValue, cloudRowUpdatedAt = "", localSavedAt = "") {
+  const cloud = Array.isArray(cloudValue) ? cloudValue : [];
+  const local = Array.isArray(localValue) ? localValue : [];
+  if (!cloud.length) return local;
+  if (!local.length) return cloud;
+
+  const cloudMap = new Map(cloud.map((m, i) => [matchKey(m, i), m]));
+  const localMap = new Map(local.map((m, i) => [matchKey(m, i), m]));
+  const keys = [...new Set([...cloudMap.keys(), ...localMap.keys()])];
+  const cloudFallback = Date.parse(cloudRowUpdatedAt || "") || 0;
+  const localFallback = Date.parse(localSavedAt || "") || 0;
+
+  return keys.map((key) => {
+    const c = cloudMap.get(key);
+    const l = localMap.get(key);
+    if (!c) return l;
+    if (!l) return c;
+
+    const ct = Date.parse(c?.runtimeUpdatedAt || c?.cloudUpdatedAt || "") || cloudFallback;
+    const lt = Date.parse(l?.runtimeUpdatedAt || l?.cloudUpdatedAt || "") || localFallback;
+    const newer = lt >= ct ? l : c;
+    const older = lt >= ct ? c : l;
+
+    return {
+      ...older,
+      ...newer,
+      events: mergeEvents(c?.events, l?.events),
+      goals: mergeEvents(c?.goals, l?.goals),
+      runtimeUpdatedAt: newer?.runtimeUpdatedAt || older?.runtimeUpdatedAt || new Date(Math.max(ct, lt, Date.now())).toISOString(),
+    };
+  });
+}
+
+async function prepareAppStateValue(id, value, savedAt) {
+  if (String(id) !== "fixtures_snapshot") return value;
+  try {
+    const { data, error } = await supabase
+      .from("app_state")
+      .select("value,updated_at")
+      .eq("id", "fixtures_snapshot")
+      .maybeSingle();
+    if (error) throw error;
+    return mergeFixtureSnapshots(data?.value, value, data?.updated_at, savedAt);
+  } catch (error) {
+    console.warn("fixtures_snapshot birleştirme okunamadı; yerel kayıt korunuyor:", error);
+    return value;
+  }
+}
+
 export function readPendingAppStateSync() {
   try {
     const parsed = JSON.parse(localStorage.getItem(PENDING_APP_STATE_SYNC_KEY) || "{}");
@@ -34,15 +109,18 @@ export function clearQueuedAppStateSync(id) {
 export async function syncAppStateWithRetry(id, value) {
   if (!id) return true;
 
-  // Önce yerel kuyruk: uygulama bu await sırasında kapanırsa bile veri kaybolmaz.
+  const savedAt = new Date().toISOString();
   queueAppStateSync(id, value);
 
   if (typeof navigator !== "undefined" && navigator.onLine === false) return false;
 
   try {
+    const mergedValue = await prepareAppStateValue(id, value, savedAt);
+    // Birleştirilmiş veri de kuyruğa alınır; tam bu anda kapanırsa event kaybolmaz.
+    queueAppStateSync(id, mergedValue);
     const { data, error } = await supabase.from("app_state").upsert({
       id: String(id),
-      value,
+      value: mergedValue,
       updated_at: new Date().toISOString(),
     }).select("id,updated_at").maybeSingle();
     if (error) throw error;
@@ -62,10 +140,11 @@ export async function flushPendingAppStateSync() {
   for (const entry of Object.values(pending)) {
     if (!entry?.id) continue;
     try {
+      const mergedValue = await prepareAppStateValue(entry.id, entry.value, entry.savedAt);
       const { data, error } = await supabase.from("app_state").upsert({
         id: String(entry.id),
-        value: entry.value,
-        updated_at: entry.savedAt || new Date().toISOString(),
+        value: mergedValue,
+        updated_at: new Date().toISOString(),
       }).select("id,updated_at").maybeSingle();
       if (!error && data?.id) clearQueuedAppStateSync(entry.id);
     } catch (error) {

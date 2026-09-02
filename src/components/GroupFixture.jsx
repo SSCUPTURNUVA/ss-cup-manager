@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "../supabase";
+import { syncAppStateWithRetry } from "../utils/pendingAppStateSync";
 
 function readStorage(key, fallback) {
   try {
@@ -67,6 +69,8 @@ export default function GroupFixture() {
   const [fixtures, setFixtures] = useState(() =>
     readStorage("sscup-group-fixtures", [])
   );
+  const cloudReadyRef = useRef(false);
+  const applyingCloudRef = useRef(false);
 
   useEffect(() => {
     const refresh = () => setGroups(readStorage("sscup-groups", []));
@@ -75,8 +79,40 @@ export default function GroupFixture() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    async function loadCloud() {
+      const { data, error } = await supabase.from("app_state").select("value").eq("id", "group_fixtures").maybeSingle();
+      if (cancelled) return;
+      if (!error && Array.isArray(data?.value)) {
+        applyingCloudRef.current = true;
+        setFixtures(data.value);
+        localStorage.setItem("sscup-group-fixtures", JSON.stringify(data.value));
+        window.dispatchEvent(new Event("sscup-group-fixtures-updated"));
+        window.setTimeout(() => { applyingCloudRef.current = false; cloudReadyRef.current = true; }, 0);
+      } else {
+        cloudReadyRef.current = true;
+        if (fixtures.length) await syncAppStateWithRetry("group_fixtures", fixtures);
+      }
+    }
+    loadCloud();
+    const channel = supabase.channel(`group-fixtures-${Math.random().toString(36).slice(2)}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.group_fixtures" }, (payload) => {
+        const value = payload?.new?.value;
+        if (!Array.isArray(value)) return;
+        applyingCloudRef.current = true;
+        setFixtures(value);
+        localStorage.setItem("sscup-group-fixtures", JSON.stringify(value));
+        window.dispatchEvent(new Event("sscup-group-fixtures-updated"));
+        window.setTimeout(() => { applyingCloudRef.current = false; cloudReadyRef.current = true; }, 0);
+      }).subscribe();
+    return () => { cancelled = true; supabase.removeChannel(channel); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
     localStorage.setItem("sscup-group-fixtures", JSON.stringify(fixtures));
     window.dispatchEvent(new Event("sscup-group-fixtures-updated"));
+    if (cloudReadyRef.current && !applyingCloudRef.current) syncAppStateWithRetry("group_fixtures", fixtures);
   }, [fixtures]);
 
   const groupedFixtures = useMemo(() => {
@@ -140,6 +176,7 @@ export default function GroupFixture() {
     if (!window.confirm("Grup fikstürünün tamamı silinsin mi?")) return;
     setFixtures([]);
     localStorage.removeItem("sscup-group-fixtures");
+    syncAppStateWithRetry("group_fixtures", []);
   }
 
   return (

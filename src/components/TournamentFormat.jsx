@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../supabase";
+import { syncAppStateWithRetry } from "../utils/pendingAppStateSync";
 
 const FORMAT_OPTIONS = [
   {
@@ -83,6 +85,41 @@ export default function TournamentFormat({
   }, [tournamentFormat]);
 
   useEffect(() => {
+    let cancelled = false;
+    async function loadCloudGroups() {
+      const { data, error } = await supabase
+        .from("app_state")
+        .select("id,value")
+        .in("id", ["groups", "group_count"]);
+      if (cancelled || error) return;
+      for (const row of data || []) {
+        if (row.id === "groups" && Array.isArray(row.value)) {
+          setGroups(row.value);
+          localStorage.setItem("sscup-groups", JSON.stringify(row.value));
+        }
+        if (row.id === "group_count" && Number(row.value) > 0) {
+          setGroupCount(Number(row.value));
+          localStorage.setItem("sscup-group-count", JSON.stringify(Number(row.value)));
+        }
+      }
+    }
+    loadCloudGroups();
+    const channel = supabase
+      .channel(`groups-sync-${Math.random().toString(36).slice(2)}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state" }, (payload) => {
+        const id = payload?.new?.id;
+        const value = payload?.new?.value;
+        if (id === "groups" && Array.isArray(value)) {
+          setGroups(value); localStorage.setItem("sscup-groups", JSON.stringify(value));
+        } else if (id === "group_count" && Number(value) > 0) {
+          setGroupCount(Number(value)); localStorage.setItem("sscup-group-count", JSON.stringify(Number(value)));
+        }
+      })
+      .subscribe();
+    return () => { cancelled = true; supabase.removeChannel(channel); };
+  }, []);
+
+  useEffect(() => {
     if (!groupOptions.length) return;
     if (!groupOptions.includes(groupCount)) {
       setGroupCount(groupOptions.includes(4) ? 4 : groupOptions[0]);
@@ -124,6 +161,8 @@ export default function TournamentFormat({
     setGroups(nextGroups);
     localStorage.setItem("sscup-groups", JSON.stringify(nextGroups));
     localStorage.setItem("sscup-group-count", JSON.stringify(groupCount));
+    syncAppStateWithRetry("groups", nextGroups);
+    syncAppStateWithRetry("group_count", groupCount);
     alert(`${groupCount} grup başarıyla oluşturuldu.`);
   }
 
@@ -131,6 +170,7 @@ export default function TournamentFormat({
     if (!window.confirm("Oluşturulan gruplar silinsin mi?")) return;
     setGroups([]);
     localStorage.removeItem("sscup-groups");
+    syncAppStateWithRetry("groups", []);
   }
 
   return (

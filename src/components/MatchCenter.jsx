@@ -612,20 +612,32 @@ export default function MatchCenter({
   }
 
   async function persistFixtures(updatedFixtures) {
+    const now = new Date().toISOString();
+    const persistedFixtures = updatedFixtures.map((match, index) => {
+      const previous = fixtures[index];
+      return JSON.stringify(previous) !== JSON.stringify(match)
+        ? { ...match, runtimeUpdatedAt: now }
+        : match;
+    });
+
     if (typeof setFixtures === "function") {
-      setFixtures(updatedFixtures);
+      setFixtures(persistedFixtures);
     }
 
     localStorage.setItem(
+      "sscup-fixtures-v3",
+      JSON.stringify(persistedFixtures)
+    );
+    localStorage.setItem(
       "sscup-fixtures",
-      JSON.stringify(updatedFixtures)
+      JSON.stringify(persistedFixtures)
     );
 
     try {
       // KRİTİK: Sadece `live:true` olan maçı değil, değişen her lig maçını
       // anında kalıcı kuyruğa yaz. Böylece uygulama/ekran kapanırsa yapılan
       // son işlem bir sonraki açılışta buluta gönderilmeye devam eder.
-      const changedMatches = updatedFixtures.filter((match, index) => {
+      const changedMatches = persistedFixtures.filter((match, index) => {
         const previous = fixtures[index];
         return JSON.stringify(previous) !== JSON.stringify(match);
       });
@@ -647,7 +659,7 @@ export default function MatchCenter({
 
     // Canlı takip için tek gerçek zamanlı kaynak: tam fikstür snapshot'ı.
     // Gol/kart/değişiklik/faz/sayaç burada birlikte taşınır.
-    await syncAppStateWithRetry("fixtures_snapshot", updatedFixtures);
+    await syncAppStateWithRetry("fixtures_snapshot", persistedFixtures);
 
     window.dispatchEvent(
       new CustomEvent("sscup-fixtures-updated", {

@@ -534,6 +534,7 @@ export default function Fixture({
     const currentMatch = fixtures[index];
 
 
+    const runtimeUpdatedAt = new Date().toISOString();
     const updatedFixtures =
       fixtures.map(
         (fixture, fixtureIndex) => {
@@ -1082,18 +1083,15 @@ export default function Fixture({
                 timerStartedAt: finishMatch
                   ? null
                   : fixture.timerStartedAt,
+                runtimeUpdatedAt,
               }
             : fixture
       );
 
     setFixtures(updatedFixtures);
 
-    localStorage.setItem(
-      "sscup-fixtures",
-      JSON.stringify(
-        updatedFixtures
-      )
-    );
+    localStorage.setItem("sscup-fixtures-v3", JSON.stringify(updatedFixtures));
+    localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));
 
     // Lig maçları fixtures tablosuna, eleme maçları app_state tablosuna kaydedilir.
     if (match.isKnockout === true) {

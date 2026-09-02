@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { syncLeagueFixtureWithRetry } from "../utils/pendingFixtureSync";
+import { syncAppStateWithRetry } from "../utils/pendingAppStateSync";
 import { supabase } from "../supabase";
 
 const EVENT_LABELS = {
@@ -176,6 +177,10 @@ export default function CompletedMatches({
         await syncLeagueFixtureWithRetry(match);
       }
     }));
+
+    // Her ekran aynı kalıcı maç kaynağına yazar. Tamamlanmış maçta sonradan
+    // eklenen/düzeltilen kart, gol, asist ve değişiklik de çıkışta kaybolmaz.
+    await syncAppStateWithRetry("fixtures_snapshot", updatedFixtures);
 
     window.dispatchEvent(
       new CustomEvent("sscup-fixtures-updated", { detail: updatedFixtures })

@@ -1,7 +1,7 @@
 import { supabase } from "./supabase";
 import PublicTournament from "./components/PublicTournament";
 import DailySchedule from "./components/DailySchedule";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import MatchCenter from "./components/MatchCenter";
 import TeamManager from "./components/TeamManager";
@@ -23,8 +23,8 @@ import TeamContacts from "./components/TeamContacts";
 import DisciplineBoard from "./components/DisciplineBoard";
 import BackupManager from "./components/BackupManager";
 import { sortFixturesBySchedule } from "./utils/fixtureOrder";
-import { flushPendingFixtureSync } from "./utils/pendingFixtureSync";
-import { flushPendingAppStateSync, readPendingAppStateSync } from "./utils/pendingAppStateSync";
+import { flushPendingFixtureSync, syncLeagueFixtureWithRetry } from "./utils/pendingFixtureSync";
+import { flushPendingAppStateSync, queueAppStateSync, readPendingAppStateSync, syncAppStateWithRetry } from "./utils/pendingAppStateSync";
 
 const mobileMenuItems = [
   { id: "home", icon: "🏠", label: "Ana Sayfa" },
@@ -440,6 +440,8 @@ export default function App() {
   const [drawOrder, setDrawOrder] = useState(() =>
     readStorage("sscup-draw-order", [])
   );
+  const sharedStateReadyRef = useRef(false);
+  const applyingSharedCloudRef = useRef(false);
 
   const FIXTURE_CACHE_KEY = "sscup-fixtures-v3";
   // Public cihaz eski localStorage maçlarını bir an bile göstermesin.
@@ -452,7 +454,10 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem("sscup-format", JSON.stringify(tournamentFormat));
-  }, [tournamentFormat]);
+    if (!isPublicRoute && sharedStateReadyRef.current && !applyingSharedCloudRef.current) {
+      syncAppStateWithRetry("tournament_format", tournamentFormat);
+    }
+  }, [tournamentFormat, isPublicRoute]);
 
   useEffect(() => {
     localStorage.setItem("sscup-teams", JSON.stringify(teams));
@@ -460,11 +465,128 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem("sscup-draw-order", JSON.stringify(drawOrder));
-  }, [drawOrder]);
+    if (!isPublicRoute && sharedStateReadyRef.current && !applyingSharedCloudRef.current) {
+      syncAppStateWithRetry("draw_order", drawOrder);
+    }
+  }, [drawOrder, isPublicRoute]);
 
   useEffect(() => {
     localStorage.setItem(FIXTURE_CACHE_KEY, JSON.stringify(fixtures));
   }, [fixtures]);
+
+  // ORTAK YÖNETİM DURUMU: ayar/format/kura gibi maç dışı müdahaleler de
+  // telefon <-> EXE arasında aynı bulut kaynağından canlı eşitlenir.
+  useEffect(() => {
+    if (isPublicRoute) return undefined;
+    let cancelled = false;
+    let inFlight = false;
+
+    const applyRows = (rows = []) => {
+      if (cancelled) return;
+      applyingSharedCloudRef.current = true;
+      for (const row of rows) {
+        if (row?.id === "settings" && row.value && typeof row.value === "object" && !Array.isArray(row.value)) {
+          setSettings((current) => ({ ...current, ...row.value }));
+          localStorage.setItem("sscup-settings", JSON.stringify(row.value));
+          window.dispatchEvent(new CustomEvent("sscup-settings-updated", { detail: row.value }));
+        } else if (row?.id === "tournament_format" && typeof row.value === "string") {
+          setTournamentFormat(row.value);
+          localStorage.setItem("sscup-format", JSON.stringify(row.value));
+        } else if (row?.id === "draw_order" && Array.isArray(row.value)) {
+          setDrawOrder(row.value);
+          localStorage.setItem("sscup-draw-order", JSON.stringify(row.value));
+        }
+      }
+      window.setTimeout(() => {
+        applyingSharedCloudRef.current = false;
+        sharedStateReadyRef.current = true;
+      }, 0);
+    };
+
+    const refreshShared = async () => {
+      if (inFlight || cancelled) return;
+      inFlight = true;
+      try {
+        const { data, error } = await supabase.from("app_state")
+          .select("id,value,updated_at")
+          .in("id", ["settings", "tournament_format", "draw_order"]);
+        if (error) throw error;
+        applyRows(data || []);
+        const ids = new Set((data || []).map((row) => row.id));
+        sharedStateReadyRef.current = true;
+        // Bulutta henüz bu satırlar yoksa mevcut güvenli yerel değeri ilk kez taşı.
+        if (!ids.has("tournament_format")) syncAppStateWithRetry("tournament_format", tournamentFormat);
+        if (!ids.has("draw_order")) syncAppStateWithRetry("draw_order", drawOrder);
+      } catch (error) {
+        console.warn("Ortak yönetim verisi eşitleme beklemede:", error);
+        sharedStateReadyRef.current = true;
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    refreshShared();
+    const timer = window.setInterval(refreshShared, 1500);
+    const channel = supabase.channel(`shared-admin-${Math.random().toString(36).slice(2)}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state" }, (payload) => {
+        if (["settings", "tournament_format", "draw_order"].includes(payload?.new?.id)) refreshShared();
+      }).subscribe();
+    const onFocus = () => refreshShared();
+    const onVisible = () => { if (document.visibilityState === "visible") refreshShared(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true; window.clearInterval(timer); window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible); supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPublicRoute]);
+
+  // MERKEZİ KALICILIK KATMANI:
+  // Uygulamanın hangi ekranı setFixtures çağırırsa çağırsın, daha ekran değişmeden
+  // bütün maç durumu write-ahead kuyruğuna alınır. Böylece Tamamlanan Maçlar,
+  // Maç Merkezi, Fikstür, Ana Sayfa veya başka bir yönetim ekranı ayrı ayrı
+  // snapshot yazmayı unutsa bile veri çıkışta kaybolmaz.
+  useLayoutEffect(() => {
+    if (isPublicRoute || !fixtureBootstrapReady) return;
+    queueAppStateSync("fixtures_snapshot", fixtures);
+  }, [fixtures, fixtureBootstrapReady, isPublicRoute]);
+
+  const lastCentralPersistRef = useRef("");
+  const lastCorePersistRef = useRef(new Map());
+  useEffect(() => {
+    if (isPublicRoute || !fixtureBootstrapReady) return undefined;
+
+    const signature = JSON.stringify(fixtures);
+    if (signature === lastCentralPersistRef.current) return undefined;
+    lastCentralPersistRef.current = signature;
+
+    // Snapshot tüm event/kart/gol/değişiklik/timer/kadro-runtime bilgisinin
+    // tek kalıcı kaynağıdır. İnternet kesilirse sync fonksiyonu kuyruğu korur.
+    syncAppStateWithRetry("fixtures_snapshot", fixtures);
+
+    // Skor/oynandı gibi fixtures tablosundaki çekirdek alanları da merkezi olarak
+    // eşitle. İlk bulut yüklemesini geri yazma; sonrasında yalnız gerçekten değişen
+    // maç satırını gönder.
+    const nextCore = new Map();
+    fixtures.forEach((match) => {
+      if (!match || match.isKnockout === true || match.id == null) return;
+      const key = String(match.id);
+      const coreSignature = JSON.stringify({
+        homeScore: Number(match.homeScore ?? 0),
+        awayScore: Number(match.awayScore ?? 0),
+        played: match.played === true,
+      });
+      nextCore.set(key, coreSignature);
+      const previous = lastCorePersistRef.current.get(key);
+      if (lastCorePersistRef.current.size > 0 && previous !== coreSignature) {
+        syncLeagueFixtureWithRetry(match);
+      }
+    });
+    lastCorePersistRef.current = nextCore;
+
+    return undefined;
+  }, [fixtures, fixtureBootstrapReady, isPublicRoute]);
 
   useEffect(() => {
     let cancelled = false;
@@ -573,6 +695,112 @@ export default function App() {
     return () => {
       window.removeEventListener("online", flushAll);
       window.clearInterval(retryTimer);
+    };
+  }, [fixtureBootstrapReady, isPublicRoute]);
+
+  // YÖNETİM CİHAZLARI ARASI CANLI EŞİTLEME:
+  // Telefonda girilen gol/kart/değişiklik PC EXE'de; PC'de girilen de telefonda
+  // ekran yenilemeden görünür. Yerelde buluta gitmeyi bekleyen daha yeni kayıt varsa
+  // buluttaki eski snapshot onu ezemez.
+  useEffect(() => {
+    if (isPublicRoute || !fixtureBootstrapReady) return undefined;
+
+    let disposed = false;
+    let inFlight = false;
+    let queued = false;
+
+    const refreshManagementFixtures = async () => {
+      if (disposed) return;
+      if (inFlight) { queued = true; return; }
+      inFlight = true;
+      try {
+        const [fixtureResult, snapshotResult] = await Promise.all([
+          supabase.from("fixtures").select("*").order("id"),
+          supabase.from("app_state").select("value,updated_at").eq("id", "fixtures_snapshot").maybeSingle(),
+        ]);
+
+        if (fixtureResult.error) throw fixtureResult.error;
+        if (snapshotResult.error) throw snapshotResult.error;
+
+        const pendingSnapshot = readPendingAppStateSync()?.fixtures_snapshot;
+        const pendingTime = Date.parse(pendingSnapshot?.savedAt || "") || 0;
+        const cloudTime = Date.parse(snapshotResult.data?.updated_at || "") || 0;
+        // Bu cihazda henüz buluta çıkmamış daha yeni işlem varsa onu ekrandan silme.
+        if (pendingTime > cloudTime) return;
+
+        const rows = Array.isArray(fixtureResult.data) ? fixtureResult.data : [];
+        const snapshot = Array.isArray(snapshotResult.data?.value) ? snapshotResult.data.value : [];
+        const rowById = new Map(rows.map((row) => [String(row?.id), row]));
+        const snapById = new Map(snapshot.map((match) => [String(match?.id), match]));
+
+        setFixtures((current) => {
+          const base = current.length > 0 ? current : rows.map((item) => ({
+            id: item.id, home: item.home, away: item.away, date: item.date, time: item.time,
+            field: item.pitch, week: item.week, isKnockout: item.is_knockout === true,
+            knockoutKey: item.knockout_key || "", stageLabel: item.stage || "",
+          }));
+
+          const merged = sortFixturesBySchedule(base.map((match) => {
+            const row = rowById.get(String(match?.id));
+            const runtime = snapById.get(String(match?.id));
+            if (!row && !runtime) return match;
+            const played = row ? row.played === true : match.played === true;
+            return {
+              ...match,
+              ...(runtime || {}),
+              ...(row ? {
+                home: row.home ?? match.home,
+                away: row.away ?? match.away,
+                date: row.date ?? match.date,
+                time: row.time ?? match.time,
+                field: row.pitch ?? match.field,
+                week: row.week ?? match.week,
+                homeScore: Number(row.home_score ?? runtime?.homeScore ?? match.homeScore ?? 0),
+                awayScore: Number(row.away_score ?? runtime?.awayScore ?? match.awayScore ?? 0),
+                played,
+              } : {}),
+              live: played ? false : runtime?.live === true,
+              timerRunning: played ? false : runtime?.timerRunning === true,
+              timerStartedAt: played ? null : (runtime?.timerStartedAt ?? null),
+              matchPhase: played ? "completed" : (runtime?.matchPhase || match.matchPhase || "waiting"),
+              events: Array.isArray(runtime?.events) ? runtime.events : (Array.isArray(match.events) ? match.events : []),
+              goals: Array.isArray(runtime?.goals) ? runtime.goals : (Array.isArray(match.goals) ? match.goals : []),
+              runtimeUpdatedAt: runtime?.runtimeUpdatedAt || match.runtimeUpdatedAt || "",
+              cloudUpdatedAt: snapshotResult.data?.updated_at || match.cloudUpdatedAt || "",
+            };
+          }));
+
+          if (JSON.stringify(merged) === JSON.stringify(current)) return current;
+          localStorage.setItem(FIXTURE_CACHE_KEY, JSON.stringify(merged));
+          return merged;
+        });
+      } catch (error) {
+        console.warn("Yönetim canlı eşitleme beklemede:", error);
+      } finally {
+        inFlight = false;
+        if (queued && !disposed) { queued = false; window.setTimeout(refreshManagementFixtures, 0); }
+      }
+    };
+
+    refreshManagementFixtures();
+    const timer = window.setInterval(refreshManagementFixtures, 1200);
+    const channel = supabase
+      .channel(`management-fixtures-${Date.now()}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "fixtures" }, refreshManagementFixtures)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.fixtures_snapshot" }, refreshManagementFixtures)
+      .subscribe();
+
+    const onFocus = () => refreshManagementFixtures();
+    const onVisible = () => { if (document.visibilityState === "visible") refreshManagementFixtures(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+      supabase.removeChannel(channel);
     };
   }, [fixtureBootstrapReady, isPublicRoute]);
 

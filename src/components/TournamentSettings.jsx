@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { supabase } from "../supabase";
 import { syncAppStateWithRetry } from "../utils/pendingAppStateSync";
 
 const DEFAULT_SETTINGS = {
@@ -34,8 +35,61 @@ function readSettings() {
 export default function TournamentSettings() {
   const [settings, setSettings] = useState(readSettings);
   const [newSponsor, setNewSponsor] = useState("");
+  const cloudReadyRef = useRef(false);
+  const applyingCloudRef = useRef(false);
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function loadCloudSettings() {
+      const { data, error } = await supabase
+        .from("app_state")
+        .select("value,updated_at")
+        .eq("id", "settings")
+        .maybeSingle();
+      if (cancelled) return;
+      if (error) {
+        console.warn("Ayarlar buluttan okunamadı; yerel kayıt korunuyor:", error);
+        cloudReadyRef.current = true;
+        return;
+      }
+      const value = data?.value;
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        applyingCloudRef.current = true;
+        const merged = { ...DEFAULT_SETTINGS, ...value };
+        setSettings(merged);
+        localStorage.setItem("sscup-settings", JSON.stringify(merged));
+        window.dispatchEvent(new CustomEvent("sscup-settings-updated", { detail: merged }));
+        window.setTimeout(() => {
+          applyingCloudRef.current = false;
+          cloudReadyRef.current = true;
+        }, 0);
+      } else {
+        cloudReadyRef.current = true;
+        await syncAppStateWithRetry("settings", settings);
+      }
+    }
+
+    loadCloudSettings();
+    const channel = supabase
+      .channel(`settings-sync-${Math.random().toString(36).slice(2)}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.settings" }, (payload) => {
+        const value = payload?.new?.value;
+        if (!value || typeof value !== "object" || Array.isArray(value)) return;
+        applyingCloudRef.current = true;
+        const merged = { ...DEFAULT_SETTINGS, ...value };
+        setSettings(merged);
+        localStorage.setItem("sscup-settings", JSON.stringify(merged));
+        window.dispatchEvent(new CustomEvent("sscup-settings-updated", { detail: merged }));
+        window.setTimeout(() => { applyingCloudRef.current = false; cloudReadyRef.current = true; }, 0);
+      })
+      .subscribe();
+    return () => { cancelled = true; supabase.removeChannel(channel); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!cloudReadyRef.current || applyingCloudRef.current) return;
     // Ayar değiştiği anda önce yerelde kalıcılaştır, ardından buluta yaz.
     // İnternet yoksa pendingAppStateSync kuyruğu bağlantı gelince tamamlar.
     localStorage.setItem("sscup-settings", JSON.stringify(settings));
