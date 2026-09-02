@@ -143,6 +143,11 @@ function normalizePublicFixtureCandidate(match) {
   };
 }
 
+function cloudTime(value) {
+  const time = Date.parse(value || "");
+  return Number.isFinite(time) ? time : 0;
+}
+
 function isMoreAdvancedFixture(candidate, incoming) {
   if (!candidate) return false;
   if (!incoming) return true;
@@ -153,7 +158,14 @@ function isMoreAdvancedFixture(candidate, incoming) {
   const incomingPhase = incoming?.played === true ? "completed" : (incoming?.matchPhase || "waiting");
   const candidateRank = matchPhaseRank(candidatePhase);
   const incomingRank = matchPhaseRank(incomingPhase);
-  if (candidateRank > incomingRank) return true;
+  if (candidateRank > incomingRank) {
+    const candidateTime = cloudTime(candidate?.cloudUpdatedAt || candidate?.updatedAt);
+    const incomingTime = cloudTime(incoming?.cloudUpdatedAt || incoming?.updatedAt);
+    // Yönetimde bilinçli "maçı yeniden aç" işlemi daha yeni bir waiting kaydı üretirse
+    // eski completed/live görüntüsü bunu kilitlemesin.
+    if (incomingTime > candidateTime && incomingTime > 0) return false;
+    return true;
+  }
 
   const candidateEvents = Array.isArray(candidate?.events) ? candidate.events.length : 0;
   const incomingEvents = Array.isArray(incoming?.events) ? incoming.events.length : 0;
@@ -406,6 +418,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     let completedMap = {};
     let snapshotMap = {};
     let snapshotFixtures = [];
+    let snapshotUpdatedAt = "";
     if (runtimeResult.status === "fulfilled") {
       const { data: runtimeRow, error: runtimeError } = runtimeResult.value;
       if (!runtimeError && runtimeRow?.value && typeof runtimeRow.value === "object" && !Array.isArray(runtimeRow.value)) runtimeMap = runtimeRow.value;
@@ -420,6 +433,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       const { data: snapshotRow, error: snapshotError } = snapshotResult.value;
       const list = !snapshotError && Array.isArray(snapshotRow?.value?.fixtures) ? snapshotRow.value.fixtures : [];
       snapshotFixtures = list;
+      snapshotUpdatedAt = snapshotRow?.value?.updatedAt || snapshotRow?.updated_at || "";
       snapshotMap = Object.fromEntries(
         list
           .filter((match) => match?.id !== null && match?.id !== undefined && match?.id !== "")
@@ -437,9 +451,12 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       }
     }
 
-    if (fixturesResult.status === "fulfilled") {
-      const { data, error } = fixturesResult.value;
-      if (!error && Array.isArray(data)) {
+    const fixtureRows = fixturesResult.status === "fulfilled" && !fixturesResult.value?.error && Array.isArray(fixturesResult.value?.data)
+      ? fixturesResult.value.data
+      : [];
+
+    if (snapshotFixtures.length > 0 || fixtureRows.length > 0) {
+      const data = fixtureRows;
         // Yönetim snapshot'ı mevcutsa PUBLIC için esas fikstür budur.
         // Önceki kod snapshot'ı yalnız fixtures tablosunda zaten bulunan satırların üstüne
         // bindiriyordu. Supabase fixtures cevabında güncel maç eksikse public ilk doğru
@@ -463,7 +480,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
               elapsed_seconds: Number(match.elapsedSeconds ?? 0),
               match_phase: match.played === true ? "completed" : (match.matchPhase || "waiting"),
               events: Array.isArray(match.events) ? match.events : [],
-              updated_at: match.updatedAt || snapshotRow?.value?.updatedAt || snapshotRow?.updated_at || "",
+              updated_at: match.updatedAt || snapshotUpdatedAt || "",
             }))
           : data;
 
@@ -554,7 +571,6 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           return merged;
         }));
         setRemoteFixtures((previous) => keepVisibleMatchState(mappedFixtures, previous, fixtures));
-      }
     }
 
     if (teamsResult.status === "fulfilled") {

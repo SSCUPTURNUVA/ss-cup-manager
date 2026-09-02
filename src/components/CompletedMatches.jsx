@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { supabase } from "../supabase";
 
 const EVENT_LABELS = {
   scorer_record: "⚽ Golcü Kaydı",
@@ -272,24 +273,49 @@ export default function CompletedMatches({
     rebuildScorers(updatedFixtures);
   }
 
-  function reopenMatch() {
+  async function reopenMatch() {
     const match = fixtures[openedIndex];
     if (!match) return;
-    if (!window.confirm(`${match.home} - ${match.away} maçı yeniden açılsın mı?`)) {
-      return;
-    }
-    const updatedFixtures = fixtures.map((fixture, index) =>
-      index === openedIndex
-        ? {
-            ...fixture,
-            played: false,
-            live: false,
-            timerRunning: false,
-            timerStartedAt: null,
-          }
-        : fixture
-    );
+    if (!window.confirm(`${match.home} - ${match.away} maçı yeniden açılsın mı?`)) return;
+
+    const reopened = {
+      ...match,
+      played: false,
+      live: false,
+      timerRunning: false,
+      timerStartedAt: null,
+      elapsedSeconds: 0,
+      matchPhase: "waiting",
+    };
+    const updatedFixtures = fixtures.map((fixture, index) => index === openedIndex ? reopened : fixture);
     persist(updatedFixtures);
+
+    try {
+      await supabase.from("fixtures").update({
+        played: false,
+        live: false,
+        timer_running: false,
+        timer_started_at: null,
+        elapsed_seconds: 0,
+        match_phase: "waiting",
+      }).eq("id", match.id);
+
+      for (const stateId of ["fixture_runtime", "completed_fixture_results"]) {
+        const { data } = await supabase.from("app_state").select("value").eq("id", stateId).maybeSingle();
+        const value = data?.value && typeof data.value === "object" && !Array.isArray(data.value) ? { ...data.value } : {};
+        delete value[String(match.id)];
+        await supabase.from("app_state").upsert({ id: stateId, value, updated_at: new Date().toISOString() });
+      }
+
+      await supabase.from("app_state").upsert({
+        id: "fixtures_snapshot",
+        value: { fixtures: updatedFixtures.filter((m) => m?.isKnockout !== true), updatedAt: new Date().toISOString() },
+        updated_at: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error("Maç yeniden açma bulut eşitleme hatası:", error);
+    }
+
     setOpenedIndex(null);
     resetDraft();
   }
