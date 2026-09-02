@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabase";
 import "./PublicTournament.css";
 import { normalizeFixtureDate, fixtureTimeMinutes, sortFixturesBySchedule } from "../utils/fixtureOrder";
+import { MATCH_EVENT_PREFIX, applyMatchEventRowsToFixtures, fetchMatchEventRows } from "../utils/matchEventSync";
 
 const GOAL_EVENT_TYPES = new Set(["goal", "penalty_goal", "penalty_shootout_goal", "scorer_record"]);
 
@@ -320,12 +321,13 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     const sequence = ++refreshSequence.current;
 
     try {
-      const [fixturesResult, teamsResult, appStateResult] = await Promise.all([
+      const [fixturesResult, teamsResult, appStateResult, eventRows] = await Promise.all([
         supabase.from("fixtures").select("*").order("id"),
         supabase.from("teams").select("id,name").order("id"),
         supabase.from("app_state")
           .select("id,value,updated_at")
           .in("id", ["squads", "knockout", "active_fixture_ids", "settings", "fixtures_snapshot", "public_match_center"]),
+        fetchMatchEventRows(),
       ]);
 
       if (sequence !== refreshSequence.current) return;
@@ -372,7 +374,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         });
       }
 
-      if (Array.isArray(mappedFixtures)) setRemoteFixtures(mappedFixtures);
+      if (Array.isArray(mappedFixtures)) {
+        mappedFixtures = applyMatchEventRowsToFixtures(mappedFixtures, eventRows);
+        setRemoteFixtures(mappedFixtures);
+      }
 
       if (!teamsResult.error && Array.isArray(teamsResult.data)) {
         setRemoteTeams(teamsResult.data.map((row) => row?.name).filter(Boolean));
@@ -411,6 +416,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         field: m.field || m.pitch || "Saha 1",
         cloudUpdatedAt: m.updated_at || m.updatedAt || cloudUpdatedAt,
       }));
+      stagedKnockout = applyMatchEventRowsToFixtures(stagedKnockout, eventRows);
       setRemoteKnockout(stagedKnockout);
 
       setLastSync(new Date());
@@ -472,6 +478,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.settings" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.fixtures_snapshot" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.public_match_center" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state" }, (payload) => {
+        const id = String(payload?.new?.id || payload?.old?.id || "");
+        if (id.startsWith(MATCH_EVENT_PREFIX)) refresh();
+      })
       .subscribe((status) => {
         if (status === "SUBSCRIBED") refresh();
       });

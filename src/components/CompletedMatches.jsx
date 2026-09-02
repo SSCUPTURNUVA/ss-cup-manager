@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
 import { syncLeagueFixtureWithRetry } from "../utils/pendingFixtureSync";
-import { syncAppStateWithRetry } from "../utils/pendingAppStateSync";
 import { supabase } from "../supabase";
 
 const EVENT_LABELS = {
@@ -138,15 +137,10 @@ export default function CompletedMatches({
 
   async function persist(updatedFixtures) {
     setFixtures(updatedFixtures);
-    localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));
 
     const changed = updatedFixtures.filter((match, index) =>
       JSON.stringify(match) !== JSON.stringify(fixtures[index])
     );
-
-    // Kart/gol/silme önce snapshot'a gider. fixtures tablosundaki skor güncellemesini
-    // beklerken polling eski event listesini geri getiremez.
-    await syncAppStateWithRetry("fixtures_snapshot", updatedFixtures);
 
     await Promise.all(changed.map(async (match) => {
       if (match?.isKnockout === true) {

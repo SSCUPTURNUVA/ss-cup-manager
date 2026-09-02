@@ -3,26 +3,6 @@ import { supabase } from "../supabase";
 export const PENDING_APP_STATE_SYNC_KEY = "sscup-pending-app-state-sync-v2";
 
 
-function eventKey(event, index = 0) {
-  return String(
-    event?.id ||
-    event?.actionId ||
-    `${event?.type || event?.eventType || "event"}|${event?.team || event?.teamName || ""}|${event?.playerId || event?.playerName || event?.name || ""}|${event?.minute ?? ""}|${index}`
-  );
-}
-
-function mergeEvents(cloudEvents, localEvents) {
-  const merged = [];
-  const seen = new Set();
-  [...(Array.isArray(cloudEvents) ? cloudEvents : []), ...(Array.isArray(localEvents) ? localEvents : [])]
-    .forEach((event, index) => {
-      const key = eventKey(event, index);
-      if (seen.has(key)) return;
-      seen.add(key);
-      merged.push(event);
-    });
-  return merged;
-}
 
 function matchKey(match, index = 0) {
   return String(match?.id ?? match?.knockoutKey ?? `${match?.home || ""}|${match?.away || ""}|${match?.date || ""}|${match?.time || ""}|${index}`);
@@ -135,6 +115,16 @@ export function clearQueuedAppStateSync(id) {
   else localStorage.setItem(PENDING_APP_STATE_SYNC_KEY, JSON.stringify(pending));
 }
 
+function clearQueuedAppStateSyncIfCurrent(id, expectedValue) {
+  const pending = readPendingAppStateSync();
+  const key = String(id);
+  const current = pending[key];
+  if (!current) return;
+  // Eski bir ağ isteği, arkasından kuyruğa giren daha yeni işlemi silemez.
+  if (stableStringify(current.value) !== stableStringify(expectedValue)) return;
+  clearQueuedAppStateSync(key);
+}
+
 async function syncAppStateWithRetryInner(id, value) {
   if (!id) return true;
 
@@ -171,7 +161,7 @@ async function syncAppStateWithRetryInner(id, value) {
       if (gotJson !== wantedJson) throw new Error("fixtures_snapshot sunucuda farklı; yerel kayıt korunuyor.");
     }
 
-    clearQueuedAppStateSync(id);
+    clearQueuedAppStateSyncIfCurrent(id, mergedValue);
     return true;
   } catch (error) {
     console.error(`app_state/${id} bulut eşitlemesi beklemeye alındı:`, error);
@@ -207,11 +197,12 @@ export async function flushPendingAppStateSync() {
         const { data: verifyRow, error: verifyError } = await supabase
           .from("app_state").select("value").eq("id", String(entry.id)).maybeSingle();
         if (!verifyError && verifyRow) {
-          if (String(entry.id) !== "fixtures_snapshot") clearQueuedAppStateSync(entry.id);
-          else {
+          if (String(entry.id) !== "fixtures_snapshot") {
+            clearQueuedAppStateSyncIfCurrent(entry.id, mergedValue);
+          } else {
             const wanted = stableStringify(Array.isArray(mergedValue) ? mergedValue : []);
             const got = stableStringify(Array.isArray(verifyRow.value) ? verifyRow.value : []);
-            if (got === wanted) clearQueuedAppStateSync(entry.id);
+            if (got === wanted) clearQueuedAppStateSyncIfCurrent(entry.id, mergedValue);
           }
         }
       }

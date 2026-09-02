@@ -1,7 +1,7 @@
 import { supabase } from "./supabase";
 import PublicTournament from "./components/PublicTournament";
 import DailySchedule from "./components/DailySchedule";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import MatchCenter from "./components/MatchCenter";
 import TeamManager from "./components/TeamManager";
@@ -23,8 +23,9 @@ import TeamContacts from "./components/TeamContacts";
 import DisciplineBoard from "./components/DisciplineBoard";
 import BackupManager from "./components/BackupManager";
 import { sortFixturesBySchedule } from "./utils/fixtureOrder";
+import { MATCH_EVENT_PREFIX, applyMatchEventRowsToFixtures, fetchMatchEventRows, syncMatchEventChanges } from "./utils/matchEventSync";
 import { flushPendingFixtureSync, syncLeagueFixtureWithRetry } from "./utils/pendingFixtureSync";
-import { flushPendingAppStateSync, queueAppStateSync, readPendingAppStateSync, syncAppStateWithRetry } from "./utils/pendingAppStateSync";
+import { flushPendingAppStateSync, readPendingAppStateSync, syncAppStateWithRetry } from "./utils/pendingAppStateSync";
 
 const mobileMenuItems = [
   { id: "home", icon: "🏠", label: "Ana Sayfa" },
@@ -480,9 +481,12 @@ export default function App() {
 
     fixturesRef.current = stamped;
     localStorage.setItem(FIXTURE_CACHE_KEY, JSON.stringify(stamped));
-    queueAppStateSync("fixtures_snapshot", stamped);
-    // Kuyruğa yazıldıktan hemen sonra gönder. Başka ekranın async işlemini bekleme.
-    syncAppStateWithRetry("fixtures_snapshot", stamped);
+    localStorage.setItem("sscup-fixtures", JSON.stringify(stamped));
+    // Maç olayları snapshot'tan bağımsız, event-id bazlı kalıcı kayda önce yazılır.
+    // Böylece eski fixtures_snapshot bir kartı/golü yeniden diriltemez.
+    syncMatchEventChanges(current, stamped)
+      .catch((error) => console.error("Maç olayı kalıcı senkron hatası:", error))
+      .finally(() => syncAppStateWithRetry("fixtures_snapshot", stamped));
     setFixturesState(stamped);
   }, [fixtureBootstrapReady, isPublicRoute]);
 
@@ -509,6 +513,7 @@ export default function App() {
   useEffect(() => {
     fixturesRef.current = fixtures;
     localStorage.setItem(FIXTURE_CACHE_KEY, JSON.stringify(fixtures));
+    localStorage.setItem("sscup-fixtures", JSON.stringify(fixtures));
   }, [fixtures]);
 
   // ORTAK YÖNETİM DURUMU: ayar/format/kura gibi maç dışı müdahaleler de
@@ -579,15 +584,6 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPublicRoute]);
 
-  // MERKEZİ KALICILIK KATMANI:
-  // Uygulamanın hangi ekranı setFixtures çağırırsa çağırsın, daha ekran değişmeden
-  // bütün maç durumu write-ahead kuyruğuna alınır. Böylece Tamamlanan Maçlar,
-  // Maç Merkezi, Fikstür, Ana Sayfa veya başka bir yönetim ekranı ayrı ayrı
-  // snapshot yazmayı unutsa bile veri çıkışta kaybolmaz.
-  useLayoutEffect(() => {
-    if (isPublicRoute || !fixtureBootstrapReady) return;
-    queueAppStateSync("fixtures_snapshot", fixtures);
-  }, [fixtures, fixtureBootstrapReady, isPublicRoute]);
 
   const lastCentralPersistRef = useRef("");
   const lastCorePersistRef = useRef(new Map());
@@ -598,11 +594,8 @@ export default function App() {
     if (signature === lastCentralPersistRef.current) return undefined;
     lastCentralPersistRef.current = signature;
 
-    // Snapshot tüm event/kart/gol/değişiklik/timer/kadro-runtime bilgisinin
-    // tek kalıcı kaynağıdır. İnternet kesilirse sync fonksiyonu kuyruğu korur.
-    syncAppStateWithRetry("fixtures_snapshot", fixtures);
-
-    // Skor/oynandı gibi fixtures tablosundaki çekirdek alanları da merkezi olarak
+    // Snapshot yazımı yalnız setFixtures merkezi kapısından yapılır.
+    // Bu effect sadece fixtures tablosundaki skor/oynandı çekirdek alanlarını
     // eşitle. İlk bulut yüklemesini geri yazma; sonrasında yalnız gerçekten değişen
     // maç satırını gönder.
     const nextCore = new Map();
@@ -742,7 +735,7 @@ export default function App() {
     };
   }, [fixtureBootstrapReady, isPublicRoute]);
 
-  // YÖNETİM CİHAZLARI ARASI CANLI EŞİTLEME:
+  // YÖNETİM CİHAZLARI ARASI CANLI EŞİTLEME (REALTIME-ONLY):
   // Telefonda girilen gol/kart/değişiklik PC EXE'de; PC'de girilen de telefonda
   // ekran yenilemeden görünür. Yerelde buluta gitmeyi bekleyen daha yeni kayıt varsa
   // buluttaki eski snapshot onu ezemez.
@@ -758,17 +751,16 @@ export default function App() {
       if (inFlight) { queued = true; return; }
       inFlight = true;
       try {
-        const [fixtureResult, snapshotResult] = await Promise.all([
+        const [fixtureResult, snapshotResult, eventRows] = await Promise.all([
           supabase.from("fixtures").select("*").order("id"),
           supabase.from("app_state").select("value,updated_at").eq("id", "fixtures_snapshot").maybeSingle(),
+          fetchMatchEventRows(),
         ]);
 
         if (fixtureResult.error) throw fixtureResult.error;
         if (snapshotResult.error) throw snapshotResult.error;
 
         const pendingSnapshot = readPendingAppStateSync()?.fixtures_snapshot;
-        const pendingTime = Date.parse(pendingSnapshot?.savedAt || "") || 0;
-        const cloudTime = Date.parse(snapshotResult.data?.updated_at || "") || 0;
         // Bu cihazda henüz buluta çıkmamış daha yeni işlem varsa buluttaki eski veri
         // ekrandan SİLEMEZ. Refresh'i tamamen iptal etmek yerine aşağıda pending
         // snapshot maç bazında öncelikli kaynak olarak kullanılır.
@@ -788,7 +780,7 @@ export default function App() {
             knockoutKey: item.knockout_key || "", stageLabel: item.stage || "",
           }));
 
-          const merged = sortFixturesBySchedule(base.map((match) => {
+          let merged = sortFixturesBySchedule(base.map((match) => {
             const row = rowById.get(String(match?.id));
             const runtime = snapById.get(String(match?.id));
             if (!row && !runtime) return match;
@@ -836,6 +828,8 @@ export default function App() {
             };
           }));
 
+          merged = applyMatchEventRowsToFixtures(merged, eventRows);
+
           if (JSON.stringify(merged) === JSON.stringify(current)) return current;
           localStorage.setItem(FIXTURE_CACHE_KEY, JSON.stringify(merged));
           return merged;
@@ -849,11 +843,14 @@ export default function App() {
     };
 
     refreshManagementFixtures();
-    const timer = window.setInterval(refreshManagementFixtures, 1200);
     const channel = supabase
       .channel(`management-fixtures-${Date.now()}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "fixtures" }, refreshManagementFixtures)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.fixtures_snapshot" }, refreshManagementFixtures)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state" }, (payload) => {
+        const id = String(payload?.new?.id || payload?.old?.id || "");
+        if (id.startsWith(MATCH_EVENT_PREFIX)) refreshManagementFixtures();
+      })
       .subscribe();
 
     const onFocus = () => refreshManagementFixtures();
@@ -863,7 +860,6 @@ export default function App() {
 
     return () => {
       disposed = true;
-      window.clearInterval(timer);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisible);
       supabase.removeChannel(channel);
