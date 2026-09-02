@@ -126,6 +126,66 @@ function mergeRuntimeMonotonic(base, runtime) {
   };
 }
 
+function normalizePublicFixtureCandidate(match) {
+  if (!match) return null;
+  if (Object.prototype.hasOwnProperty.call(match, "home_score") || Object.prototype.hasOwnProperty.call(match, "match_phase")) {
+    return mapCloudFixture(match);
+  }
+  return {
+    ...match,
+    played: match.played === true || match.matchPhase === "completed",
+    live: match.played === true || match.matchPhase === "completed" ? false : match.live === true,
+    timerRunning: match.played === true || match.matchPhase === "completed" ? false : match.timerRunning === true,
+    matchPhase: match.played === true ? "completed" : (match.matchPhase || "waiting"),
+    events: Array.isArray(match.events) ? match.events : [],
+    homeScore: Number(match.homeScore ?? 0),
+    awayScore: Number(match.awayScore ?? 0),
+  };
+}
+
+function isMoreAdvancedFixture(candidate, incoming) {
+  if (!candidate) return false;
+  if (!incoming) return true;
+  if (String(candidate?.home || "") !== String(incoming?.home || "") ||
+      String(candidate?.away || "") !== String(incoming?.away || "")) return false;
+
+  const candidatePhase = candidate?.played === true ? "completed" : (candidate?.matchPhase || "waiting");
+  const incomingPhase = incoming?.played === true ? "completed" : (incoming?.matchPhase || "waiting");
+  const candidateRank = matchPhaseRank(candidatePhase);
+  const incomingRank = matchPhaseRank(incomingPhase);
+  if (candidateRank > incomingRank) return true;
+
+  const candidateEvents = Array.isArray(candidate?.events) ? candidate.events.length : 0;
+  const incomingEvents = Array.isArray(incoming?.events) ? incoming.events.length : 0;
+  if (candidateRank === incomingRank && candidateEvents > incomingEvents) return true;
+
+  // Aynı fazda publicte görünen gerçek skorun 0-0/waiting cevabıyla silinmesini engelle.
+  if (candidateRank > 0 && incomingRank === candidateRank) {
+    const candidateScore = Number(candidate?.homeScore ?? 0) + Number(candidate?.awayScore ?? 0);
+    const incomingScore = Number(incoming?.homeScore ?? 0) + Number(incoming?.awayScore ?? 0);
+    if (candidateScore > incomingScore && incomingScore === 0) return true;
+  }
+  return false;
+}
+
+function keepVisibleMatchState(incomingFixtures, previousFixtures, initialFixtures) {
+  const incoming = Array.isArray(incomingFixtures) ? incomingFixtures : [];
+  const result = new Map(incoming.map((match) => [String(match?.id), match]));
+  const protectedSources = [
+    ...(Array.isArray(previousFixtures) ? previousFixtures : []),
+    ...(Array.isArray(initialFixtures) ? initialFixtures : []),
+  ];
+
+  for (const raw of protectedSources) {
+    const candidate = normalizePublicFixtureCandidate(raw);
+    if (!candidate?.id) continue;
+    const key = String(candidate.id);
+    const current = result.get(key);
+    if (isMoreAdvancedFixture(candidate, current)) result.set(key, candidate);
+  }
+  return sortFixturesBySchedule([...result.values()]);
+}
+
 function calculateStandings(teams, fixtures) {
   const table = {};
   (teams || []).forEach((team) => {
@@ -488,7 +548,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           }
           return merged;
         }));
-        setRemoteFixtures(mappedFixtures);
+        setRemoteFixtures((previous) => keepVisibleMatchState(mappedFixtures, previous, fixtures));
       }
     }
 
