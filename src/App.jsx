@@ -23,8 +23,7 @@ import TeamContacts from "./components/TeamContacts";
 import DisciplineBoard from "./components/DisciplineBoard";
 import BackupManager from "./components/BackupManager";
 import { sortFixturesBySchedule } from "./utils/fixtureOrder";
-import { flushPendingFixtureSync, readPendingFixtureSync } from "./utils/pendingFixtureSync";
-import { flushPendingAppStateSync } from "./utils/pendingAppStateSync";
+import { flushPendingFixtureSync } from "./utils/pendingFixtureSync";
 
 const mobileMenuItems = [
   { id: "home", icon: "🏠", label: "Ana Sayfa" },
@@ -186,91 +185,6 @@ function calculateStandings(teams, fixtures) {
 
       return a.team.localeCompare(b.team, "tr");
     });
-}
-
-
-const GOAL_EVENT_TYPES = new Set(["goal", "penalty_goal", "penalty_shootout_goal", "scorer_record"]);
-
-function getFixtureEvents(match) {
-  const events = Array.isArray(match?.events) ? match.events : [];
-  const goals = Array.isArray(match?.goals) ? match.goals : [];
-  const eventIds = new Set(events.map((event) => event?.id).filter(Boolean));
-  const legacyGoals = goals
-    .filter((goal) => !eventIds.has(goal?.id))
-    .map((goal) => ({ ...goal, type: goal?.type || "goal" }));
-  return [...events, ...legacyGoals];
-}
-
-function runtimeStrength(match) {
-  if (!match) return -1;
-  const events = getFixtureEvents(match);
-  const phase = match?.matchPhase || match?.match_phase || "waiting";
-  const homeScore = Number(match?.homeScore ?? match?.home_score ?? 0) || 0;
-  const awayScore = Number(match?.awayScore ?? match?.away_score ?? 0) || 0;
-  const elapsed = Number(match?.elapsedSeconds ?? match?.elapsed_seconds ?? 0) || 0;
-  let score = events.length * 1000;
-  if (match?.played === true || phase === "completed") score += 500;
-  if (match?.live === true || ["first_half", "halftime", "second_half", "penalty"].includes(phase)) score += 200;
-  score += Math.max(0, homeScore + awayScore) * 10;
-  if (elapsed > 0) score += 1;
-  return score;
-}
-
-function sameFixtureIdentity(a, b) {
-  if (!a || !b) return false;
-  if (a.id !== undefined && a.id !== null && b.id !== undefined && b.id !== null) {
-    if (String(a.id) !== String(b.id)) return false;
-  }
-  return String(a.home || "") === String(b.home || "") && String(a.away || "") === String(b.away || "");
-}
-
-function mergeRuntimeSafely(cloudMatch, candidate) {
-  if (!sameFixtureIdentity(cloudMatch, candidate)) return cloudMatch;
-  if (runtimeStrength(candidate) <= runtimeStrength(cloudMatch)) return cloudMatch;
-  return {
-    ...cloudMatch,
-    homeScore: Number(candidate.homeScore ?? candidate.home_score ?? cloudMatch.homeScore ?? 0),
-    awayScore: Number(candidate.awayScore ?? candidate.away_score ?? cloudMatch.awayScore ?? 0),
-    played: candidate.played === true || candidate.matchPhase === "completed" || candidate.match_phase === "completed",
-    live: candidate.live === true,
-    timerRunning: candidate.timerRunning === true || candidate.timer_running === true,
-    timerStartedAt: candidate.timerStartedAt ?? candidate.timer_started_at ?? null,
-    elapsedSeconds: Number(candidate.elapsedSeconds ?? candidate.elapsed_seconds ?? 0),
-    matchPhase: candidate.matchPhase || candidate.match_phase || cloudMatch.matchPhase || "waiting",
-    events: getFixtureEvents(candidate),
-  };
-}
-
-function deriveGoalScorers(fixtures) {
-  const totals = {};
-  (fixtures || []).forEach((match) => {
-    const phase = match?.matchPhase || "waiting";
-    const counts = match?.played === true || (match?.live === true && ["first_half", "halftime", "second_half", "penalty"].includes(phase));
-    if (!counts) return;
-    getFixtureEvents(match)
-      .filter((event) => GOAL_EVENT_TYPES.has(event?.type || "goal"))
-      .forEach((event) => {
-        const playerId = event?.playerId || event?.id || event?.playerName || event?.name || event?.player;
-        const name = event?.playerName || event?.name || event?.player || "Oyuncu";
-        const team = event?.team || event?.teamName || "";
-        if (!playerId || !team) return;
-        const key = `${team}-${playerId}`;
-        if (!totals[key]) {
-          totals[key] = {
-            id: key,
-            playerId,
-            name,
-            playerName: name,
-            team,
-            teamName: team,
-            shirtNumber: event?.shirtNumber || event?.number || "",
-            goals: 0,
-          };
-        }
-        totals[key].goals += 1;
-      });
-  });
-  return Object.values(totals).sort((a, b) => b.goals - a.goals || String(a.name).localeCompare(String(b.name), "tr"));
 }
 
 const MOBILE_ADMIN_ACCESS_TOKEN = "SSCUP-YONETIM-2026-7pQ4mN9xK2vR8sT5";
@@ -494,7 +408,9 @@ export default function App() {
     sortFixturesBySchedule(readStorage("sscup-fixtures", []))
   );
 
-  const [goalScorers, setGoalScorers] = useState([]);
+  const [goalScorers, setGoalScorers] = useState(() =>
+    readStorage("sscup-goals", [])
+  );
 
   useEffect(() => {
     localStorage.setItem("sscup-format", JSON.stringify(tournamentFormat));
@@ -514,13 +430,6 @@ export default function App() {
 
   useEffect(() => {
     async function loadFixturesFromSupabase() {
-      // Açılışın EN BAŞINDA yerel sağlam kopyayı al. Bulut birkaç saniye gerideyse
-      // başarısız kalan pending kayıtları eski bulut verisinin ezmesine izin vermeyeceğiz.
-      const localBeforeCloud = readStorage("sscup-fixtures", []);
-
-      // Önce saha kenarında yerelde bekleyen son işlemleri buluta gönder.
-      await Promise.all([flushPendingFixtureSync(), flushPendingAppStateSync()]);
-
       let { data, error } = await supabase
         .from("fixtures")
         .select("*")
@@ -547,9 +456,6 @@ export default function App() {
           const activeIds = Array.isArray(activeFixtureRow?.value?.ids)
             ? activeFixtureRow.value.ids.map((id) => String(id))
             : [];
-
-          // Otomatik runtime temizliği KALDIRILDI.
-          // Uygulama açılışında hiçbir maç/skor/event verisi otomatik silinmez.
 
           if (activeIds.length > 0) {
             const activeIdSet = new Set(activeIds);
@@ -602,8 +508,63 @@ export default function App() {
           }
         }
 
-        // AÇILIŞTA OTOMATİK VERİ DEĞİŞİKLİĞİ YOK.
-        // Skor, gol, kart, timer, maç durumu ve eventler bulutta nasılsa aynen okunur.
+        // Eski sürümden bulutta CANLI kalmış hazırlık/test maçlarını temizle.
+        // waiting/null zaten canlı değildir. Ayrıca tarihi henüz gelmemiş bir maçın
+        // first_half vb. durumda kalması da eski test kaydıdır; gerçek maç olamaz.
+        const now = new Date();
+        const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+        const staleWaitingRows = (Array.isArray(data) ? data : []).filter((item) => {
+          const phase = item?.match_phase || "waiting";
+          if (item?.played === true || phase !== "waiting") return false;
+          const events = Array.isArray(item?.events) ? item.events : [];
+          return (
+            Number(item?.home_score || 0) !== 0 ||
+            Number(item?.away_score || 0) !== 0 ||
+            item?.live === true ||
+            item?.timer_running === true ||
+            item?.timer_started_at != null ||
+            Number(item?.elapsed_seconds || 0) !== 0 ||
+            events.length > 0
+          );
+        });
+
+        if (staleWaitingRows.length > 0) {
+          await Promise.all(
+            staleWaitingRows.map((item) =>
+              supabase
+                .from("fixtures")
+                .update({
+                  home_score: 0,
+                  away_score: 0,
+                  played: false,
+                  live: false,
+                  timer_running: false,
+                  timer_started_at: null,
+                  elapsed_seconds: 0,
+                  match_phase: "waiting",
+                  events: [],
+                })
+                .eq("id", item.id)
+            )
+          );
+
+          data = data.map((item) =>
+            staleWaitingRows.some((stale) => stale.id === item.id)
+              ? {
+                  ...item,
+                  home_score: 0,
+                  away_score: 0,
+                  played: false,
+                  live: false,
+                  timer_running: false,
+                  timer_started_at: null,
+                  elapsed_seconds: 0,
+                  match_phase: "waiting",
+                  events: [],
+                }
+              : item
+          );
+        }
 
         const supabaseFixtures = data.map((item) => ({
           id: item.id,
@@ -613,64 +574,41 @@ export default function App() {
           time: item.time,
           field: item.pitch,
           week: item.week,
-          played: item.played === true,
-          homeScore: Number(item.home_score ?? 0),
-          awayScore: Number(item.away_score ?? 0),
-          live: item.live === true,
-          timerRunning: item.timer_running === true,
-          timerStartedAt: item.timer_started_at ?? null,
-          elapsedSeconds: Number(item.elapsed_seconds ?? 0),
+          played: item.played,
+          homeScore: item.home_score,
+          awayScore: item.away_score,
+          live: item.live,
+          timerRunning: item.timer_running,
+          timerStartedAt: item.timer_started_at,
+          elapsedSeconds: item.elapsed_seconds,
           matchPhase: item.match_phase || "waiting",
           isKnockout: item.is_knockout === true,
           knockoutKey: item.knockout_key || "",
           stageLabel: item.stage || "",
           events: Array.isArray(item.events) ? item.events : [],
-          cloudUpdatedAt: item.updated_at || "",
         }));
 
-        // TEK KAYNAK + KORUMALI AÇILIŞ:
-        // App.jsx bulutu okur; aynı güncel fikstür ID'sine ait yerel/snapshot kopya
-        // daha doluysa gerçek saha verisini eski 0-0 bulut satırıyla ezmez.
-        const { data: snapshotRow } = await supabase
-          .from("app_state")
-          .select("value")
-          .eq("id", "fixtures_snapshot")
-          .maybeSingle();
-        const snapshotFixtures = Array.isArray(snapshotRow?.value?.fixtures)
-          ? snapshotRow.value.fixtures
-          : [];
-        const snapshotById = new Map(snapshotFixtures.map((m) => [String(m?.id ?? ""), m]));
-        const localById = new Map(
-          (Array.isArray(localBeforeCloud) ? localBeforeCloud : [])
-            .filter((m) => m?.id !== undefined && m?.id !== null)
-            .map((m) => [String(m.id), m])
-        );
+        // Supabase lig fikstürü tek doğru kaynaktır. Eski localStorage skor/
+        // oynandı bilgisi yeni turnuvaya taşınmasın. Eleme tarafı kendi
+        // app_state kaydından yönetildiği için burada yerel eleme de eklenmez.
+        const sortedSupabaseFixtures = sortFixturesBySchedule(supabaseFixtures);
 
-        const recoveredFixtures = supabaseFixtures.map((cloudMatch) => {
-          const key = String(cloudMatch?.id ?? "");
-          let best = cloudMatch;
-          best = mergeRuntimeSafely(best, snapshotById.get(key));
-          best = mergeRuntimeSafely(best, localById.get(key));
-          return best;
+        // Maç Merkezi'ne alınmış ama BAŞLATILMADAN geri çekilmiş eski seçimi tamamen unut.
+        // Gerçekten devam eden bir maç varsa anahtarı koruruz; yoksa Maç Merkezi her açılışta
+        // fikstürün tarih+saat sırasındaki ilk oynanmamış maçından başlar.
+        const actuallyRunningMatch = sortedSupabaseFixtures.find((match) => {
+          const phase = match?.matchPhase || "waiting";
+          return (
+            match?.played !== true &&
+            match?.live === true &&
+            ["first_half", "halftime", "second_half", "penalty"].includes(phase)
+          );
         });
 
-        const sortedSupabaseFixtures = sortFixturesBySchedule(recoveredFixtures);
-
-        // Eğer yerel/snapshot kopya buluttan daha dolu çıktıysa onu yeniden buluta yaz.
-        // Bu işlem veri silmez; yalnız kurtarılan gerçek maç runtime'ını kalıcı hale getirir.
-        recoveredFixtures.forEach((match, index) => {
-          const cloudMatch = supabaseFixtures[index];
-          if (runtimeStrength(match) > runtimeStrength(cloudMatch) && match?.isKnockout !== true) {
-            syncLeagueFixtureWithRetry(match);
-          }
-        });
-
-        // Maç Merkezi seçimi de aç/kapat sonrası korunur. Sadece artık var olmayan
-        // veya bitmiş bir maça işaret ediyorsa temizlenir.
-        const savedActiveKey = localStorage.getItem("sscup-match-center-active") || "";
-        if (savedActiveKey) {
-          const savedMatch = sortedSupabaseFixtures.find((m) => String(m?.id ?? "") === String(savedActiveKey));
-          if (!savedMatch || savedMatch.played === true) localStorage.removeItem("sscup-match-center-active");
+        if (!actuallyRunningMatch) {
+          localStorage.removeItem("sscup-match-center-active");
+        } else {
+          localStorage.setItem("sscup-match-center-active", String(actuallyRunningMatch.id));
         }
 
         setFixtures(sortedSupabaseFixtures);
@@ -679,31 +617,21 @@ export default function App() {
     }
 
     loadFixturesFromSupabase();
-  }, [isPublicRoute]);
-
-  // Uygulama hangi sayfada olursa olsun internet geri geldiğinde bekleyen
-  // maç ve app_state kayıtlarını tamamla. Yönetim ekranının açık kalmasına bağlı değildir.
-  useEffect(() => {
-    const flushAll = () => {
-      flushPendingFixtureSync();
-      flushPendingAppStateSync();
-    };
-    window.addEventListener("online", flushAll);
-    const retryTimer = window.setInterval(flushAll, 10000);
-    return () => {
-      window.removeEventListener("online", flushAll);
-      window.clearInterval(retryTimer);
-    };
   }, []);
 
   useEffect(() => {
-    // Gol krallığı ayrı ve bağımsız bir "hayalet" kayıt değildir.
-    // Her zaman maç eventlerinden yeniden hesaplanır; skor/event silinmeden bu liste de kaybolmaz.
-    const derived = deriveGoalScorers(fixtures);
-    setGoalScorers(derived);
-    localStorage.setItem("sscup-goals", JSON.stringify(derived));
-    localStorage.setItem("sscup-goal-scorers", JSON.stringify(derived));
-  }, [fixtures]);
+    const refreshGoalScorers = () => {
+      setGoalScorers(readStorage("sscup-goals", []));
+    };
+
+    window.addEventListener("storage", refreshGoalScorers);
+    const interval = window.setInterval(refreshGoalScorers, 1000);
+
+    return () => {
+      window.removeEventListener("storage", refreshGoalScorers);
+      window.clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     const refreshSettings = () => {

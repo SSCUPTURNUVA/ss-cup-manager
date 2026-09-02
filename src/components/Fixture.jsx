@@ -23,31 +23,9 @@ export default function Fixture({
   setFixtures,
 }) {
   const [fixtureTab, setFixtureTab] = useState("upcoming");
-  const [scores, setScores] = useState(() => {
-    try {
-      const saved =
-        localStorage.getItem("sscup-scores");
+  const [scores, setScores] = useState({});
+  const [matchGoals, setMatchGoals] = useState({});
 
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
-
-  const [matchGoals, setMatchGoals] =
-    useState(() => {
-      try {
-        const saved = localStorage.getItem(
-          "sscup-match-goals"
-        );
-
-        return saved
-          ? JSON.parse(saved)
-          : {};
-      } catch {
-        return {};
-      }
-    });
 
 
   function getCurrentElapsed(match) {
@@ -101,10 +79,57 @@ export default function Fixture({
     )}`;
   }
 
-  // Fikstürün buluttan yüklenmesi yalnız App.jsx tarafından yapılır.
-  // Bu bileşenin ayrıca Supabase okuyup state yazması açılışta yarış durumuna
-  // neden oluyordu: gerçek yerel skor bir an görünüp ardından eski bulut 0-0
-  // değeriyle ezilebiliyordu. Fixture artık yalnız mevcut props verisini kullanır.
+  // Fikstürü yalnız App.jsx yükler. Fixture bileşeni ikinci kez Supabase/localStorage
+  // birleştirmez; böylece eski skorların geri dönme yolu kapanır.
+  useEffect(() => {
+    setScores((current) => {
+      const next = { ...current };
+      fixtures.forEach((match, index) => {
+        const phase = match?.matchPhase || "waiting";
+        const hasRuntime = match?.played === true || match?.live === true || phase !== "waiting";
+        if (!hasRuntime) {
+          next[index] = { home: "", away: "" };
+        } else if (!next[index]) {
+          next[index] = {
+            home: String(match?.homeScore ?? 0),
+            away: String(match?.awayScore ?? 0),
+          };
+        }
+      });
+      return next;
+    });
+  }, [fixtures]);
+
+
+  useEffect(() => {
+    if (fixtures.length !== 0) {
+      return;
+    }
+
+    setScores({});
+    setMatchGoals({});
+
+    localStorage.removeItem(
+      "sscup-scores"
+    );
+
+    localStorage.removeItem(
+      "sscup-match-goals"
+    );
+
+    localStorage.removeItem(
+      "sscup-goals"
+    );
+
+    window.dispatchEvent(
+      new CustomEvent(
+        "sscup-goals-updated",
+        {
+          detail: [],
+        }
+      )
+    );
+  }, [fixtures.length]);
 
   const groupedFixtures = useMemo(() => {
     const groups = {};
@@ -870,13 +895,24 @@ export default function Fixture({
       if (fixtureIndex === index) {
         return {
           ...fixture,
-          // Maç Merkezi'ne almak da geri çıkarmak da fikstür sırasını değiştirmez.
-          // Geri çekilen maç normal bekleyen maç durumuna tamamen döner.
+          // Maç Merkezi'ne YENİ alınan başlamamış maç her zaman temiz 0-0 başlar.
+          // Fikstür kimliği/tarih/saat/takımlar aynen korunur.
           live: false,
           matchPhase: "waiting",
           elapsedSeconds: 0,
           timerRunning: false,
           timerStartedAt: null,
+          ...(shouldSelect
+            ? {
+                homeScore: 0,
+                awayScore: 0,
+                homePen: "",
+                awayPen: "",
+                events: [],
+                goals: [],
+                played: false,
+              }
+            : {}),
         };
       }
 
@@ -901,6 +937,13 @@ export default function Fixture({
 
     setFixtures(updatedFixtures);
     localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));
+
+    if (shouldSelect) {
+      setScores((current) => ({ ...current, [index]: { home: "", away: "" } }));
+      setMatchGoals((current) => ({ ...current, [index]: { home: [], away: [] } }));
+      localStorage.removeItem("sscup-scores");
+      localStorage.removeItem("sscup-match-goals");
+    }
 
     // Maç Merkezi hazırlığı bulutta CANLI sayılmasın. İnternet kısa süre kesilirse
     // bu bekleyen durum kuyruğa alınır ve bağlantı gelince otomatik tamamlanır.
