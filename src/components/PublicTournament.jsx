@@ -340,6 +340,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     let runtimeMap = {};
     let completedMap = {};
     let snapshotMap = {};
+    let snapshotFixtures = [];
     if (runtimeResult.status === "fulfilled") {
       const { data: runtimeRow, error: runtimeError } = runtimeResult.value;
       if (!runtimeError && runtimeRow?.value && typeof runtimeRow.value === "object" && !Array.isArray(runtimeRow.value)) runtimeMap = runtimeRow.value;
@@ -353,6 +354,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     if (snapshotResult.status === "fulfilled") {
       const { data: snapshotRow, error: snapshotError } = snapshotResult.value;
       const list = !snapshotError && Array.isArray(snapshotRow?.value?.fixtures) ? snapshotRow.value.fixtures : [];
+      snapshotFixtures = list;
       snapshotMap = Object.fromEntries(
         list
           .filter((match) => match?.id !== null && match?.id !== undefined && match?.id !== "")
@@ -373,6 +375,33 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     if (fixturesResult.status === "fulfilled") {
       const { data, error } = fixturesResult.value;
       if (!error && Array.isArray(data)) {
+        // Yönetim snapshot'ı mevcutsa PUBLIC için esas fikstür budur.
+        // Önceki kod snapshot'ı yalnız fixtures tablosunda zaten bulunan satırların üstüne
+        // bindiriyordu. Supabase fixtures cevabında güncel maç eksikse public ilk doğru
+        // görüntüden sonra remoteFixtures ile o maçı tamamen siliyordu.
+        const sourceRows = snapshotFixtures.length > 0
+          ? snapshotFixtures.map((match) => ({
+              id: match.id,
+              home: match.home || "",
+              away: match.away || "",
+              date: match.date || null,
+              time: match.time || null,
+              pitch: match.field || match.pitch || null,
+              field: match.field || match.pitch || null,
+              week: match.week ?? null,
+              home_score: Number(match.homeScore ?? 0),
+              away_score: Number(match.awayScore ?? 0),
+              played: match.played === true || match.matchPhase === "completed",
+              live: match.live === true,
+              timer_running: match.timerRunning === true,
+              timer_started_at: match.timerStartedAt ?? null,
+              elapsed_seconds: Number(match.elapsedSeconds ?? 0),
+              match_phase: match.played === true ? "completed" : (match.matchPhase || "waiting"),
+              events: Array.isArray(match.events) ? match.events : [],
+              updated_at: match.updatedAt || snapshotRow?.value?.updatedAt || snapshotRow?.updated_at || "",
+            }))
+          : data;
+
         // active_fixture_ids Maç Merkezi seçimi değildir; DrawManager mevcut turnuvanın
         // TÜM lig fikstür ID'lerini buraya yazar. Supabase DELETE/RLS eski satırları
         // bıraksa bile canlı takip yalnız güncel turnuvanın maçlarını göstermelidir.
@@ -381,12 +410,16 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         // Boş dizi "aktif fikstür yok" anlamına gelmez; filtre uygularsak canlı ekran
         // bir yenilemede bütün maçları silip sonraki yenilemede tekrar gösterir.
         // Yalnız gerçekten en az bir aktif ID varsa filtrele.
-        const activeIdSet = Array.isArray(currentActiveIds) && currentActiveIds.length > 0
-          ? new Set(currentActiveIds.map((id) => String(id)))
-          : null;
+        // Snapshot zaten yönetimdeki güncel turnuvanın tamamıdır; snapshot kullanılırken
+        // active_fixture_ids ile tekrar filtrelemek doğru maçı yeniden saklayabilir.
+        const activeIdSet = snapshotFixtures.length > 0
+          ? null
+          : (Array.isArray(currentActiveIds) && currentActiveIds.length > 0
+              ? new Set(currentActiveIds.map((id) => String(id)))
+              : null);
 
         const currentRows = activeIdSet
-          ? data.filter((row) => {
+          ? sourceRows.filter((row) => {
               const key = String(row?.id);
               if (activeIdSet.has(key)) return true;
 
@@ -411,7 +444,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
                 String(runtime?.id ?? "") === key &&
                 (runtime?.played === true || runtime?.matchPhase === "completed"));
             })
-          : data;
+          : sourceRows;
 
         mappedFixtures = sortFixturesBySchedule(currentRows.map((row) => {
           let merged = mapCloudFixture(row);
