@@ -367,6 +367,7 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes }) {
 export default function PublicTournament({ teams = [], fixtures = [], standings = [], goalScorers = [], settings = {} }) {
   const [activeTab, setActiveTab] = useState("overview");
   const [remoteFixtures, setRemoteFixtures] = useState(null);
+  const [publicMatchCenterId, setPublicMatchCenterId] = useState("");
   const [remoteTeams, setRemoteTeams] = useState(null);
   const [remoteSquads, setRemoteSquads] = useState(null);
   const [remoteKnockout, setRemoteKnockout] = useState([]);
@@ -393,12 +394,13 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current;
 
-    const [fixturesResult, teamsResult, squadsResult, knockoutResult, activeFixtureResult, runtimeResult, completedResult, snapshotResult] = await Promise.allSettled([
+    const [fixturesResult, teamsResult, squadsResult, knockoutResult, activeFixtureResult, publicCenterResult, runtimeResult, completedResult, snapshotResult] = await Promise.allSettled([
       supabase.from("fixtures").select("*").order("id"),
       supabase.from("teams").select("id,name").order("id"),
       supabase.from("app_state").select("value,updated_at").eq("id", "squads").maybeSingle(),
       supabase.from("app_state").select("value,updated_at").eq("id", "knockout").maybeSingle(),
       supabase.from("app_state").select("value,updated_at").eq("id", "active_fixture_ids").maybeSingle(),
+      supabase.from("app_state").select("value,updated_at").eq("id", "public_match_center").maybeSingle(),
       supabase.from("app_state").select("value,updated_at").eq("id", "fixture_runtime").maybeSingle(),
       supabase.from("app_state").select("value,updated_at").eq("id", "completed_fixture_results").maybeSingle(),
       supabase.from("app_state").select("value,updated_at").eq("id", "fixtures_snapshot").maybeSingle(),
@@ -414,6 +416,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     let mappedFixtures = null;
     let stagedKnockout = null;
     let currentActiveIds = activeFixtureIdsRef.current;
+    if (publicCenterResult.status === "fulfilled") {
+      const { data: centerRow, error: centerError } = publicCenterResult.value;
+      if (!centerError) setPublicMatchCenterId(String(centerRow?.value?.matchId || ""));
+    }
     let runtimeMap = {};
     let completedMap = {};
     let snapshotMap = {};
@@ -650,6 +656,53 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     };
   }, [refreshTeams]);
 
+  // SAHA GÜVENLİ MODU:
+  // Yönetim her maç işleminde fixtures_snapshot'ı yazar. Public ekran bunu bağımsız
+  // olarak kısa aralıkla okur. Böylece fixtures/runtime/realtime zincirlerinden biri
+  // gecikse bile kullanıcı F5 yapmak zorunda kalmaz.
+  useEffect(() => {
+    let disposed = false;
+
+    const pullFixtureSnapshot = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("app_state")
+          .select("value,updated_at")
+          .eq("id", "fixtures_snapshot")
+          .maybeSingle();
+
+        if (disposed || error || !Array.isArray(data?.value?.fixtures)) return;
+
+        const updatedAt = data?.value?.updatedAt || data?.updated_at || "";
+        const mapped = sortFixturesBySchedule(
+          data.value.fixtures
+            .filter((match) => match?.isKnockout !== true && match?.id !== null && match?.id !== undefined && match?.id !== "")
+            .map((match) => normalizePublicFixtureCandidate({
+              ...match,
+              updatedAt: match?.updatedAt || updatedAt,
+              cloudUpdatedAt: match?.cloudUpdatedAt || updatedAt,
+            }))
+            .filter(Boolean)
+        );
+
+        if (!disposed) {
+          setRemoteFixtures((previous) => keepVisibleMatchState(mapped, previous, fixtures));
+          setLastSync(new Date());
+        }
+      } catch (error) {
+        console.warn("Public snapshot yenileme hatası:", error);
+      }
+    };
+
+    pullFixtureSnapshot();
+    const snapshotPoll = window.setInterval(pullFixtureSnapshot, 1200);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(snapshotPoll);
+    };
+  }, [fixtures]);
+
   useEffect(() => {
     refresh();
     const poll = window.setInterval(refresh, 3000);
@@ -671,6 +724,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.squads" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.active_fixture_ids" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.public_match_center" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.fixture_runtime" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.completed_fixture_results" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.fixtures_snapshot" }, refresh)
@@ -779,6 +833,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       return `${b.date || ""} ${b.time || ""}`.localeCompare(`${a.date || ""} ${a.time || ""}`);
     });
   const liveMatch = liveMatches[0] || null;
+  const preparedMatch = !liveMatch && publicMatchCenterId
+    ? displayFixtures.find((match) => String(match?.id ?? "") === publicMatchCenterId && match?.played !== true) || null
+    : null;
+  const featuredMatch = liveMatch || preparedMatch;
   const upcoming = displayFixtures.filter(
     (match) => match?.played !== true && match?.live !== true
   );
@@ -885,13 +943,13 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           </section>
         )}
 
-        {liveMatch && (
-          <section className="public-live-scoreboard public-clickable" onClick={() => setSelectedMatch(liveMatch)}>
-            <div className="public-scoreboard-topline"><div className="public-live-pill"><i /> CANLI</div><div className="public-match-status">{minute || "CANLI"}</div><div className="public-stage-label">{stageText(liveMatch)}</div></div>
+        {featuredMatch && (
+          <section className="public-live-scoreboard public-clickable" onClick={() => setSelectedMatch(featuredMatch)}>
+            <div className="public-scoreboard-topline"><div className="public-live-pill"><i /> {liveMatch ? "CANLI" : "MAÇ MERKEZİ"}</div><div className="public-match-status">{liveMatch ? (minute || "CANLI") : "BAŞLAMAYI BEKLİYOR"}</div><div className="public-stage-label">{stageText(featuredMatch)}</div></div>
             <div className="public-score-grid">
-              <div className="public-score-team home"><span>EV SAHİBİ</span><strong>{liveMatch.home}</strong></div>
-              <div className="public-score-center"><div className="public-score-numbers"><b>{scoreText(liveMatch.homeScore)}</b><em>:</em><b>{scoreText(liveMatch.awayScore)}</b></div><small>{liveMatch.time || ""} {liveMatch.field ? `• ${liveMatch.field}` : ""}</small></div>
-              <div className="public-score-team away"><span>DEPLASMAN</span><strong>{liveMatch.away}</strong></div>
+              <div className="public-score-team home"><span>EV SAHİBİ</span><strong>{featuredMatch.home}</strong></div>
+              <div className="public-score-center"><div className="public-score-numbers"><b>{scoreText(featuredMatch.homeScore)}</b><em>:</em><b>{scoreText(featuredMatch.awayScore)}</b></div><small>{featuredMatch.time || ""} {featuredMatch.field ? `• ${featuredMatch.field}` : ""}</small></div>
+              <div className="public-score-team away"><span>DEPLASMAN</span><strong>{featuredMatch.away}</strong></div>
             </div>
             {lastGoal && <div className="public-last-goal"><span>⚽</span><div><b>SON GOL</b><strong>{lastGoal.player}</strong><small>{lastGoal.team}{lastGoal.minute !== "" ? ` • ${lastGoal.minute}'` : ""}</small></div></div>}
             <div className="public-tap-hint">Maç olaylarını görmek için tıkla ›</div>

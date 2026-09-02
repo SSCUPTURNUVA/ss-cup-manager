@@ -336,6 +336,12 @@ export default function CompletedMatches({
       }
 
       await supabase.from("app_state").upsert({
+        id: "public_match_center",
+        value: { matchId: "", home: "", away: "", updatedAt: new Date().toISOString() },
+        updated_at: new Date().toISOString(),
+      });
+
+      await supabase.from("app_state").upsert({
         id: "fixtures_snapshot",
         value: { fixtures: updatedFixtures.filter((m) => m?.isKnockout !== true), updatedAt: new Date().toISOString() },
         updated_at: new Date().toISOString(),

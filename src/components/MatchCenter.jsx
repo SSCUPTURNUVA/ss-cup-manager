@@ -23,6 +23,16 @@ function getMatchCenterKey(match, index = 0) {
   return String(match?.id ?? `${match?.home || ""}|${match?.away || ""}|${match?.week || ""}|${index}`);
 }
 
+async function syncPublicMatchCenter(match) {
+  try {
+    const value = match
+      ? { matchId: String(match.id), home: match.home || "", away: match.away || "", updatedAt: new Date().toISOString() }
+      : { matchId: "", home: "", away: "", updatedAt: new Date().toISOString() };
+    const { error } = await supabase.from("app_state").upsert({ id: "public_match_center", value, updated_at: new Date().toISOString() });
+    if (error) throw error;
+  } catch (error) { console.error("Public Maç Merkezi durumu kaydedilemedi:", error); }
+}
+
 async function syncCompletedFixtureArchive(match) {
   const phase = match?.matchPhase || "waiting";
   if (!match || match?.isKnockout === true || (match?.played !== true && phase !== "completed") || match?.id === null || match?.id === undefined || match?.id === "") return true;
@@ -1122,6 +1132,7 @@ export default function MatchCenter({
     localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));
 
     const preparedMatch = updatedFixtures[nextIndex];
+    await syncPublicMatchCenter(preparedMatch);
     if (preparedMatch?.isKnockout === true) {
       await syncKnockoutStateToCloud(preparedMatch);
     } else if (preparedMatch) {
@@ -1376,6 +1387,7 @@ export default function MatchCenter({
     if (!confirmed) return;
 
     localStorage.removeItem("sscup-match-center-active");
+    await syncPublicMatchCenter(null);
 
     const finishPatch = {
       played: true,
