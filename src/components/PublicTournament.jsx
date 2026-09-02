@@ -374,7 +374,25 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           : null;
 
         const currentRows = activeIdSet
-          ? data.filter((row) => activeIdSet.has(String(row?.id)))
+          ? data.filter((row) => {
+              const key = String(row?.id);
+              if (activeIdSet.has(key)) return true;
+
+              // Tamamlanan maç aktif fikstür ID listesinden yanlışlıkla düşse bile
+              // public ekrandan ASLA kaybolamaz. Önceki kod bu filtreyi arşiv merge'inden
+              // önce uyguladığı için bitmiş maç ilk görüntüden sonra siliniyordu.
+              const completed = completedMap[key];
+              if (completed &&
+                  String(completed?.id ?? "") === key &&
+                  completed?.home === row?.home &&
+                  completed?.away === row?.away) return true;
+
+              // Arşiv yazısı bir an gecikirse completed runtime da aynı korumayı sağlar.
+              const runtime = runtimeMap[key];
+              return Boolean(runtime &&
+                String(runtime?.id ?? "") === key &&
+                (runtime?.played === true || runtime?.matchPhase === "completed"));
+            })
           : data;
 
         mappedFixtures = sortFixturesBySchedule(currentRows.map((row) => {
