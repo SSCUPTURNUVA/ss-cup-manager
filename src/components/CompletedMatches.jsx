@@ -280,6 +280,14 @@ export default function CompletedMatches({
 
     const reopened = {
       ...match,
+      // "Maçı yeniden aç" eski maçın devamı değil, temiz bir yeniden oynatma başlatır.
+      // Eski skor/olay kalırsa Maç Merkezi aynı maça devam ediyormuş gibi görünür.
+      homeScore: 0,
+      awayScore: 0,
+      homePen: "",
+      awayPen: "",
+      events: [],
+      goals: [],
       played: false,
       live: false,
       timerRunning: false,
@@ -294,7 +302,14 @@ export default function CompletedMatches({
     // yeniden aktifmiş gibi açabiliyor.
     const activeMatchCenterKey = localStorage.getItem("sscup-match-center-active") || "";
     const reopenedKey = String(match?.id ?? `${match?.home || ""}|${match?.away || ""}|${match?.week || ""}|${openedIndex}`);
-    if (activeMatchCenterKey === reopenedKey) {
+    const anotherRunningMatch = fixtures.some((fixture, index) => {
+      if (index === openedIndex || fixture?.played === true || fixture?.live !== true) return false;
+      return ["first_half", "halftime", "second_half", "penalty"].includes(fixture?.matchPhase || "waiting");
+    });
+
+    // Eski sürümler aktif anahtarı farklı biçimde bırakmış olabilir. Başka gerçekten
+    // oynayan maç yoksa yeniden açmada aktif seçim tamamen temizlenir.
+    if (activeMatchCenterKey === reopenedKey || !anotherRunningMatch) {
       localStorage.removeItem("sscup-match-center-active");
     }
 
@@ -302,6 +317,9 @@ export default function CompletedMatches({
 
     try {
       await supabase.from("fixtures").update({
+        home_score: 0,
+        away_score: 0,
+        events: [],
         played: false,
         live: false,
         timer_running: false,
