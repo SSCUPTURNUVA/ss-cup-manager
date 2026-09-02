@@ -430,7 +430,7 @@ export default function App() {
       // ÖNCE cihazda bekleyen son maç işlemini buluta göndermeyi dene.
       // Böylece Ctrl+C / tarayıcı kapanması sonrası eski bulut verisi, daha yeni
       // yerel canlı/bitmiş maç kaydını açılışta ezemez.
-      await flushPendingFixtureSync();
+      if (!isPublicRoute) await flushPendingFixtureSync();
 
       let { data, error } = await supabase
         .from("fixtures")
@@ -488,7 +488,7 @@ export default function App() {
         // saha kaydıdır. Yalnız pending kuyruğunu uygularız; genel localStorage
         // skorlarını asla merge etmeyiz (eski test skorlarının geri dönmesini engeller).
         const pendingFixtureSync = readPendingFixtureSync();
-        if (pendingFixtureSync && Object.keys(pendingFixtureSync).length > 0) {
+        if (!isPublicRoute && pendingFixtureSync && Object.keys(pendingFixtureSync).length > 0) {
           data = data.map((row) => {
             const pending = pendingFixtureSync[String(row?.id)];
             const payload = pending?.payload;
