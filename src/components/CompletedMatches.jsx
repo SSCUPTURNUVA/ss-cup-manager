@@ -295,7 +295,24 @@ export default function CompletedMatches({
       elapsedSeconds: 0,
       matchPhase: "waiting",
     };
-    const updatedFixtures = fixtures.map((fixture, index) => index === openedIndex ? reopened : fixture);
+    const sameFixture = (fixture, index) => {
+      if (index === openedIndex) return true;
+      if (String(fixture?.id ?? "") && String(fixture?.id ?? "") === String(match?.id ?? "")) return true;
+      return (
+        String(fixture?.home || "") === String(match?.home || "") &&
+        String(fixture?.away || "") === String(match?.away || "") &&
+        String(fixture?.date || "") === String(match?.date || "") &&
+        String(fixture?.time || "") === String(match?.time || "")
+      );
+    };
+
+    // Aynı maçın eski/çift fixture kopyası kaldıysa onu da birlikte sıfırla.
+    // Tek bir stale kopyanın live=true kalması Maç Merkezi'nin maçı tekrar açmasına yetiyordu.
+    const updatedFixtures = fixtures.map((fixture, index) =>
+      sameFixture(fixture, index)
+        ? { ...fixture, ...reopened, id: fixture?.id ?? reopened.id }
+        : fixture
+    );
 
     // Bilinçli geri alma işareti: gecikmiş eski runtime/completed/live yazıları bu maçı
     // yeniden Maç Merkezi'ne sokamasın. Yeniden Maç Merkezi'ne alınırken kaldırılır.
@@ -305,18 +322,11 @@ export default function CompletedMatches({
     // Bu maç Maç Merkezi'nde aktif/seçili kaldıysa geri alma sırasında mutlaka temizle.
     // Aksi halde played=false/waiting olsa bile MatchCenter localStorage anahtarından maçı
     // yeniden aktifmiş gibi açabiliyor.
-    const activeMatchCenterKey = localStorage.getItem("sscup-match-center-active") || "";
-    const reopenedKey = String(match?.id ?? `${match?.home || ""}|${match?.away || ""}|${match?.week || ""}|${openedIndex}`);
-    const anotherRunningMatch = fixtures.some((fixture, index) => {
-      if (index === openedIndex || fixture?.played === true || fixture?.live !== true) return false;
-      return ["first_half", "halftime", "second_half", "penalty"].includes(fixture?.matchPhase || "waiting");
-    });
-
-    // Eski sürümler aktif anahtarı farklı biçimde bırakmış olabilir. Başka gerçekten
-    // oynayan maç yoksa yeniden açmada aktif seçim tamamen temizlenir.
-    if (activeMatchCenterKey === reopenedKey || !anotherRunningMatch) {
-      localStorage.removeItem("sscup-match-center-active");
-    }
+    // Yeniden açma, Maç Merkezi seçimini koşulsuz kapatır. Eski sürümlerde anahtar
+    // id / index / takım çifti biçimlerinde kalabildiği için eşleştirmeye güvenmiyoruz.
+    localStorage.removeItem("sscup-match-center-active");
+    localStorage.removeItem("sscup-match-center-selected");
+    localStorage.removeItem("sscup-live-match");
 
     persist(updatedFixtures);
 
@@ -329,7 +339,7 @@ export default function CompletedMatches({
         updated_at: new Date().toISOString(),
       });
 
-      await supabase.from("fixtures").update({
+      const resetPayload = {
         home_score: 0,
         away_score: 0,
         events: [],
@@ -339,7 +349,20 @@ export default function CompletedMatches({
         timer_started_at: null,
         elapsed_seconds: 0,
         match_phase: "waiting",
-      }).eq("id", match.id);
+      };
+
+      await supabase.from("fixtures").update(resetPayload).eq("id", match.id);
+
+      // Eski bir duplicate fixture satırı aynı maçı live tutuyorsa onu da söndür.
+      // Tarih/saat mevcutsa eşleşmeyi daralt; yoksa takım çifti yeterlidir.
+      let duplicateReset = supabase
+        .from("fixtures")
+        .update(resetPayload)
+        .eq("home", match.home)
+        .eq("away", match.away);
+      if (match.date) duplicateReset = duplicateReset.eq("date", match.date);
+      if (match.time) duplicateReset = duplicateReset.eq("time", match.time);
+      await duplicateReset;
 
       for (const stateId of ["fixture_runtime", "completed_fixture_results"]) {
         const { data } = await supabase.from("app_state").select("value").eq("id", stateId).maybeSingle();
