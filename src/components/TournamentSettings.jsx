@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { syncAppStateWithRetry } from "../utils/pendingAppStateSync";
 
 const DEFAULT_SETTINGS = {
   tournamentName: "S&S CUP",
@@ -35,10 +36,11 @@ export default function TournamentSettings() {
   const [newSponsor, setNewSponsor] = useState("");
 
   useEffect(() => {
-    localStorage.setItem(
-      "sscup-settings",
-      JSON.stringify(settings)
-    );
+    // Ayar değiştiği anda önce yerelde kalıcılaştır, ardından buluta yaz.
+    // İnternet yoksa pendingAppStateSync kuyruğu bağlantı gelince tamamlar.
+    localStorage.setItem("sscup-settings", JSON.stringify(settings));
+    localStorage.setItem("sscup-settings-updated-at", new Date().toISOString());
+    syncAppStateWithRetry("settings", settings);
 
     window.dispatchEvent(
       new CustomEvent("sscup-settings-updated", {
@@ -98,11 +100,10 @@ export default function TournamentSettings() {
     setNewSponsor("");
   }
 
-  function saveSettings() {
-    localStorage.setItem(
-      "sscup-settings",
-      JSON.stringify(settings)
-    );
+  async function saveSettings() {
+    localStorage.setItem("sscup-settings", JSON.stringify(settings));
+    localStorage.setItem("sscup-settings-updated-at", new Date().toISOString());
+    const cloudSaved = await syncAppStateWithRetry("settings", settings);
 
     window.dispatchEvent(
       new CustomEvent("sscup-settings-updated", {
@@ -110,7 +111,9 @@ export default function TournamentSettings() {
       })
     );
 
-    alert("Turnuva ayarları kaydedildi.");
+    alert(cloudSaved
+      ? "Turnuva ayarları kaydedildi."
+      : "Ayarlar PC'ye kaydedildi. İnternet gelince buluta otomatik gönderilecek.");
   }
 
   return (

@@ -37,6 +37,8 @@ function normalizeEvent(event, index) {
     team: event?.team || event?.teamName || "",
     minute: event?.minute ?? event?.matchMinute ?? event?.time ?? event?.elapsedMinute ?? "",
     shirtNumber: event?.shirtNumber || event?.number || event?.jerseyNumber || "",
+    playerOutName: event?.playerOutName || event?.playerName || event?.player || event?.name || "",
+    playerInName: event?.playerInName || event?.secondPlayerName || "",
   };
 }
 
@@ -245,7 +247,20 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes }) {
               <div className="public-modal-event" key={event.id}>
                 <span className="public-modal-event-minute">{event.minute !== "" ? `${event.minute}'` : "•"}</span>
                 <span className="public-modal-event-icon">{event.icon}</span>
-                <div><b>{event.label}</b><strong>{event.player}</strong><small>{event.team}</small></div>
+                <div>
+                  <b>{event.label}</b>
+                  {event.type === "substitution" ? (
+                    <>
+                      <strong>Çıktı: {event.playerOutName || event.player}</strong>
+                      <small>Girdi: {event.playerInName || "Oyuncu"} • {event.team}</small>
+                    </>
+                  ) : (
+                    <>
+                      <strong>{event.player}</strong>
+                      <small>{event.team}</small>
+                    </>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -261,6 +276,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const [remoteTeams, setRemoteTeams] = useState(null);
   const [remoteSquads, setRemoteSquads] = useState(null);
   const [remoteKnockout, setRemoteKnockout] = useState([]);
+  const [remoteSettings, setRemoteSettings] = useState(null);
   const [activeFixtureIds, setActiveFixtureIds] = useState(null);
   const activeFixtureIdsRef = useRef(null);
   const [now, setNow] = useState(Date.now());
@@ -283,12 +299,13 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current;
 
-    const [fixturesResult, teamsResult, squadsResult, knockoutResult, activeFixtureResult] = await Promise.allSettled([
+    const [fixturesResult, teamsResult, squadsResult, knockoutResult, activeFixtureResult, settingsResult] = await Promise.allSettled([
       supabase.from("fixtures").select("*").order("id"),
       supabase.from("teams").select("id,name").order("id"),
       supabase.from("app_state").select("value,updated_at").eq("id", "squads").maybeSingle(),
       supabase.from("app_state").select("value,updated_at").eq("id", "knockout").maybeSingle(),
       supabase.from("app_state").select("value,updated_at").eq("id", "active_fixture_ids").maybeSingle(),
+      supabase.from("app_state").select("value,updated_at").eq("id", "settings").maybeSingle(),
     ]);
 
     // Yavaş kalan eski bir istek, yeni verinin üstüne yazamasın.
@@ -344,6 +361,13 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         } else {
           setRemoteSquads({});
         }
+      }
+    }
+
+    if (settingsResult.status === "fulfilled") {
+      const { data: settingsRow, error: settingsError } = settingsResult.value;
+      if (!settingsError && settingsRow?.value && typeof settingsRow.value === "object" && !Array.isArray(settingsRow.value)) {
+        setRemoteSettings(settingsRow.value);
       }
     }
 
@@ -426,6 +450,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.squads" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.active_fixture_ids" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.settings" }, refresh)
       .subscribe();
 
     return () => {
@@ -451,6 +476,9 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     return () => window.removeEventListener("keydown", handler);
   }, [selectedMatch]);
 
+  const displaySettings = remoteSettings && typeof remoteSettings === "object"
+    ? { ...settings, ...remoteSettings }
+    : settings;
   const displayTeams = Array.isArray(remoteTeams) ? remoteTeams : teams;
   const displaySquads = remoteSquads && typeof remoteSquads === "object"
     ? remoteSquads
@@ -579,9 +607,9 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const topScorer = liveScorers[0];
   const liveEvents = liveMatch ? getEvents(liveMatch).slice().reverse() : [];
   const lastGoal = liveEvents.find((event) => GOAL_EVENT_TYPES.has(event.type));
-  const minute = getMinute(liveMatch, now, settings.halfDurationMinutes || 30);
+  const minute = getMinute(liveMatch, now, displaySettings.halfDurationMinutes || 30);
   const playedCount = displayFixtures.filter((match) => match?.played === true).length;
-  const tournamentName = settings.tournamentName || settings.title || "S&S CUP";
+  const tournamentName = displaySettings.tournamentName || displaySettings.title || "S&S CUP";
 
   // Final tamamlandığında şampiyonu doğrudan final skorundan/penaltısından bul.
   // Böylece app_state içinde ayrıca winner/champion alanı tutulmasına ihtiyaç kalmaz.
@@ -610,9 +638,9 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       <header className="public-live-header">
         <div className="public-brand-block">
           <div className="public-brand-mark">🏆</div>
-          <div><span className="public-kicker">RESMİ CANLI TURNUVA MERKEZİ</span><h1>{tournamentName}</h1><p>{settings.slogan || "Kazanan Sahada Belli Olur"}</p>{settings.mainSponsor && <small style={{ display: "block", marginTop: "5px", fontWeight: 900 }}>🤝 ANA SPONSOR • {settings.mainSponsor}</small>}</div>
+          <div><span className="public-kicker">RESMİ CANLI TURNUVA MERKEZİ</span><h1>{tournamentName}</h1><p>{displaySettings.slogan || "Kazanan Sahada Belli Olur"}</p>{displaySettings.mainSponsor && <small style={{ display: "block", marginTop: "5px", fontWeight: 900 }}>🤝 ANA SPONSOR • {displaySettings.mainSponsor}</small>}</div>
         </div>
-        <div className="public-header-meta"><span>{settings.season || "2026"}</span><span>📍 {settings.venue || "Gol Park"}</span><span className="public-sync-dot">● CANLI VERİ</span></div>
+        <div className="public-header-meta"><span>{displaySettings.season || "2026"}</span><span>📍 {displaySettings.venue || "Gol Park"}</span><span className="public-sync-dot">● CANLI VERİ</span></div>
       </header>
 
       <main className="public-live-shell">
@@ -625,7 +653,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
             <div className="public-champion-content">
               <span className="public-champion-kicker">🏆 S&S CUP ŞAMPİYONU 🏆</span>
               <h2>{championName}</h2>
-              <strong>{settings.season || "2026"} ŞAMPİYONU</strong>
+              <strong>{displaySettings.season || "2026"} ŞAMPİYONU</strong>
               <div className="public-champion-final">
                 <span>FİNAL</span>
                 <b>{finalMatch.home}</b>
@@ -713,7 +741,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
                 <button className="public-fixture-card" key={match.id || index} onClick={() => setSelectedMatch(match)}>
                   <div className="public-fixture-meta"><span>{stageText(match, index)}</span><b>{formatDate(match.date)} • {match.time || "Saat açıklanacak"}</b></div>
                   <div className="public-fixture-teams"><strong>{match.home}</strong><span>VS</span><strong>{match.away}</strong></div>
-                  <div className="public-fixture-place">📍 {match.field || settings.venue || "Gol Park Halı Saha"}<i>Detay ›</i></div>
+                  <div className="public-fixture-place">📍 {match.field || displaySettings.venue || "Gol Park Halı Saha"}<i>Detay ›</i></div>
                 </button>
               ))}</div>
             )}
@@ -803,10 +831,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           </section>
         )}
 
-        <footer className="public-live-footer"><div><b>{tournamentName}</b><span>{settings.slogan || "Kazanan Sahada Belli Olur"}</span></div><small>{lastSync ? `Son veri: ${lastSync.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Canlı veri bağlantısı kuruluyor…"}</small></footer>
+        <footer className="public-live-footer"><div><b>{tournamentName}</b><span>{displaySettings.slogan || "Kazanan Sahada Belli Olur"}</span></div><small>{lastSync ? `Son veri: ${lastSync.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Canlı veri bağlantısı kuruluyor…"}</small></footer>
       </main>
 
-      <MatchDetailModal match={selectedMatch} onClose={() => setSelectedMatch(null)} now={now} halfDurationMinutes={settings.halfDurationMinutes || 30} />
+      <MatchDetailModal match={selectedMatch} onClose={() => setSelectedMatch(null)} now={now} halfDurationMinutes={displaySettings.halfDurationMinutes || 30} />
     </div>
   );
 }

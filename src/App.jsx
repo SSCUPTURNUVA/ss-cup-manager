@@ -23,7 +23,8 @@ import TeamContacts from "./components/TeamContacts";
 import DisciplineBoard from "./components/DisciplineBoard";
 import BackupManager from "./components/BackupManager";
 import { sortFixturesBySchedule } from "./utils/fixtureOrder";
-import { flushPendingFixtureSync } from "./utils/pendingFixtureSync";
+import { flushPendingFixtureSync, readPendingFixtureSync } from "./utils/pendingFixtureSync";
+import { flushPendingAppStateSync } from "./utils/pendingAppStateSync";
 
 const mobileMenuItems = [
   { id: "home", icon: "🏠", label: "Ana Sayfa" },
@@ -430,6 +431,13 @@ export default function App() {
 
   useEffect(() => {
     async function loadFixturesFromSupabase() {
+      // Açılışın EN BAŞINDA yerel sağlam kopyayı al. Bulut birkaç saniye gerideyse
+      // başarısız kalan pending kayıtları eski bulut verisinin ezmesine izin vermeyeceğiz.
+      const localBeforeCloud = readStorage("sscup-fixtures", []);
+
+      // Önce saha kenarında yerelde bekleyen son işlemleri buluta gönder.
+      await Promise.all([flushPendingFixtureSync(), flushPendingAppStateSync()]);
+
       let { data, error } = await supabase
         .from("fixtures")
         .select("*")
@@ -576,10 +584,48 @@ export default function App() {
           events: Array.isArray(item.events) ? item.events : [],
         }));
 
-        // Supabase lig fikstürü tek doğru kaynaktır. Eski localStorage skor/
-        // oynandı bilgisi yeni turnuvaya taşınmasın. Eleme tarafı kendi
-        // app_state kaydından yönetildiği için burada yerel eleme de eklenmez.
-        const sortedSupabaseFixtures = sortFixturesBySchedule(supabaseFixtures);
+        // Normalde Supabase güncel turnuvanın ana kaynağıdır. ANCAK bir maç için
+        // pending kayıt hâlâ duruyorsa, bu PC'deki yerel maç verisi buluttan daha yenidir.
+        // Eski bulut skorunun/golünün/kartının/kademe durumunun bunu ezmesini engelle.
+        const pendingAfterFlush = readPendingFixtureSync();
+        const localById = new Map(
+          (Array.isArray(localBeforeCloud) ? localBeforeCloud : [])
+            .filter((match) => match?.id !== null && match?.id !== undefined && match?.id !== "")
+            .map((match) => [String(match.id), match])
+        );
+
+        const protectedFixtures = supabaseFixtures.map((cloudMatch) => {
+          const key = String(cloudMatch?.id ?? "");
+          const pending = pendingAfterFlush?.[key];
+          const local = localById.get(key);
+          if (!pending) return cloudMatch;
+
+          if (local) {
+            return {
+              ...cloudMatch,
+              ...local,
+              id: cloudMatch.id,
+              home: cloudMatch.home || local.home,
+              away: cloudMatch.away || local.away,
+            };
+          }
+
+          const payload = pending.payload || {};
+          return {
+            ...cloudMatch,
+            homeScore: payload.home_score ?? cloudMatch.homeScore,
+            awayScore: payload.away_score ?? cloudMatch.awayScore,
+            played: payload.played === true,
+            live: payload.live === true,
+            timerRunning: payload.timer_running === true,
+            timerStartedAt: payload.timer_started_at ?? null,
+            elapsedSeconds: payload.elapsed_seconds ?? 0,
+            matchPhase: payload.match_phase || cloudMatch.matchPhase || "waiting",
+            events: Array.isArray(payload.events) ? payload.events : cloudMatch.events,
+          };
+        });
+
+        const sortedSupabaseFixtures = sortFixturesBySchedule(protectedFixtures);
 
         // Maç Merkezi'ne alınmış ama BAŞLATILMADAN geri çekilmiş eski seçimi tamamen unut.
         // Gerçekten devam eden bir maç varsa anahtarı koruruz; yoksa Maç Merkezi her açılışta
@@ -605,6 +651,21 @@ export default function App() {
     }
 
     loadFixturesFromSupabase();
+  }, []);
+
+  // Uygulama hangi sayfada olursa olsun internet geri geldiğinde bekleyen
+  // maç ve app_state kayıtlarını tamamla. Yönetim ekranının açık kalmasına bağlı değildir.
+  useEffect(() => {
+    const flushAll = () => {
+      flushPendingFixtureSync();
+      flushPendingAppStateSync();
+    };
+    window.addEventListener("online", flushAll);
+    const retryTimer = window.setInterval(flushAll, 10000);
+    return () => {
+      window.removeEventListener("online", flushAll);
+      window.clearInterval(retryTimer);
+    };
   }, []);
 
   useEffect(() => {

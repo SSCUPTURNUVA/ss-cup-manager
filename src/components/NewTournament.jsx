@@ -50,6 +50,11 @@ export default function NewTournament({
         value: { ids: [] },
         updated_at: new Date().toISOString(),
       })],
+      ["maç kadroları", () => supabase.from("app_state").upsert({
+        id: "match_lineups",
+        value: {},
+        updated_at: new Date().toISOString(),
+      })],
       ["takımlar", () => supabase.from("teams").delete().neq("id", 0)],
     ];
 
@@ -74,7 +79,10 @@ export default function NewTournament({
       "sscup-group-fixtures","sscup-group-standings","sscup-group-qualified",
       "sscup-quarter","sscup-semi","sscup-final","sscup-third-place",
       "sscup-quarter-pot-one","sscup-quarter-pot-two","sscup-quarter-draw-started",
-      "sscup-match-events","sscup-active-match","sscup-live-match"
+      "sscup-match-events","sscup-active-match","sscup-live-match",
+      "sscup-match-lineups","sscup-match-center-active",
+      "sscup-match-event-side","sscup-match-event-type","sscup-penalty-side",
+      "sscup-pending-fixture-sync","sscup-pending-app-state-sync"
     ];
     keysToRemove.forEach((key) => localStorage.removeItem(key));
   }

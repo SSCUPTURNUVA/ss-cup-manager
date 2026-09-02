@@ -1,11 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../supabase";
 import { sortFixturesBySchedule } from "../utils/fixtureOrder";
-import { flushPendingFixtureSync, syncLeagueFixtureWithRetry } from "../utils/pendingFixtureSync";
+import { flushPendingFixtureSync, queueFixtureSync, syncLeagueFixtureWithRetry } from "../utils/pendingFixtureSync";
+import { syncAppStateWithRetry } from "../utils/pendingAppStateSync";
 
 function safeNumber(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function readUiPreference(key, fallback) {
+  try {
+    const value = localStorage.getItem(key);
+    return value === null ? fallback : value;
+  } catch {
+    return fallback;
+  }
 }
 
 function getTeamName(team) {
@@ -154,14 +164,14 @@ export default function MatchCenter({
 }) {
   const [currentTime, setCurrentTime] = useState(Date.now());
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [eventSide, setEventSide] = useState("home");
-  const [eventType, setEventType] = useState("goal");
+  const [eventSide, setEventSide] = useState(() => readUiPreference("sscup-match-event-side", "home"));
+  const [eventType, setEventType] = useState(() => readUiPreference("sscup-match-event-type", "goal"));
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
   const [secondPlayerId, setSecondPlayerId] = useState("");
   const [matchRules, setMatchRules] = useState(readMatchRules);
 
   // Penaltı Atışları Yönetimi
-  const [penaltySide, setPenaltySide] = useState("home");
+  const [penaltySide, setPenaltySide] = useState(() => readUiPreference("sscup-penalty-side", "home"));
   const [penaltyPlayerId, setPenaltyPlayerId] = useState("");
   const [matchLineups, setMatchLineups] = useState(() => {
     try {
@@ -174,7 +184,25 @@ export default function MatchCenter({
 
   useEffect(() => {
     localStorage.setItem("sscup-match-lineups", JSON.stringify(matchLineups));
+    // Kadro seçimi de yalnız ekran state'inde kalmasın. Yerel kayıt anında yapılır,
+    // bulut yazısı başarısız olursa genel app_state kuyruğu internet gelince tamamlar.
+    if (matchLineups && Object.keys(matchLineups).length > 0) {
+      syncAppStateWithRetry("match_lineups", matchLineups);
+    }
   }, [matchLineups]);
+
+  // Maç Merkezi'ndeki operatör seçimi de sayfadan çıkıp dönünce kaybolmasın.
+  useEffect(() => {
+    localStorage.setItem("sscup-match-event-side", eventSide);
+  }, [eventSide]);
+
+  useEffect(() => {
+    localStorage.setItem("sscup-match-event-type", eventType);
+  }, [eventType]);
+
+  useEffect(() => {
+    localStorage.setItem("sscup-penalty-side", penaltySide);
+  }, [penaltySide]);
 
   useEffect(() => {
     function refreshRules() {
@@ -591,13 +619,25 @@ export default function MatchCenter({
     );
 
     try {
-      const activeMatch = updatedFixtures.find((match) => match.live === true);
+      // KRİTİK: Sadece `live:true` olan maçı değil, değişen her lig maçını
+      // anında kalıcı kuyruğa yaz. Böylece uygulama/ekran kapanırsa yapılan
+      // son işlem bir sonraki açılışta buluta gönderilmeye devam eder.
+      const changedMatches = updatedFixtures.filter((match, index) => {
+        const previous = fixtures[index];
+        return JSON.stringify(previous) !== JSON.stringify(match);
+      });
 
-      if (activeMatch?.isKnockout === true) {
-        await syncKnockoutStateToCloud(activeMatch);
-      } else if (activeMatch) {
-        await syncLeagueFixtureWithRetry(activeMatch);
-      }
+      changedMatches.forEach((match) => {
+        if (match?.isKnockout !== true) queueFixtureSync(match);
+      });
+
+      await Promise.all(changedMatches.map(async (match) => {
+        if (match?.isKnockout === true) {
+          await syncKnockoutStateToCloud(match);
+        } else {
+          await syncLeagueFixtureWithRetry(match);
+        }
+      }));
     } catch (error) {
       console.error("Supabase kayıt hatası:", error);
     }
@@ -1085,16 +1125,22 @@ export default function MatchCenter({
       const validIds = new Set(teamSquad.map((player, index) => playerKey(player, index)));
       const selectedIds = [...lineup.starters, ...lineup.bench];
 
-      if (teamSquad.length < 12) {
-        return `${teamName} takımında en az 12 kayıtlı oyuncu olmalı. Şu an ${teamSquad.length} oyuncu var.`;
+      if (teamSquad.length < 9) {
+        return `${teamName} takımında maç başlayabilmesi için en az 9 kayıtlı oyuncu olmalı. Şu an ${teamSquad.length} oyuncu var.`;
       }
       if (lineup.starters.length !== 7) {
         return `${teamName} için tam 7 AS oyuncu seçilmeden maç başlayamaz.`;
       }
-      if (lineup.bench.length !== 5) {
-        return `${teamName} için tam 5 YEDEK oyuncu seçilmeden maç başlayamaz.`;
+
+      // 9-12 kişilik takım desteği: 7 AS + kalan oyuncular yedek.
+      // 9 kişi = 2 yedek, 10 = 3, 11 = 4, 12+ = en fazla 5 yedek.
+      const requiredBenchCount = Math.min(5, Math.max(2, teamSquad.length - 7));
+      if (lineup.bench.length !== requiredBenchCount) {
+        return `${teamName} için ${requiredBenchCount} YEDEK seçilmelidir. (${teamSquad.length} kayıtlı oyuncu)`;
       }
-      if (new Set(selectedIds).size !== 12 || selectedIds.some((id) => !validIds.has(id))) {
+
+      const requiredMatchDayCount = 7 + requiredBenchCount;
+      if (new Set(selectedIds).size !== requiredMatchDayCount || selectedIds.some((id) => !validIds.has(id))) {
         return `${teamName} maç kadrosunda geçersiz veya tekrarlanan oyuncu var. Kadroyu yeniden seçin.`;
       }
     }
@@ -1112,7 +1158,7 @@ export default function MatchCenter({
       <div style={{ border: "1px solid rgba(255,255,255,.18)", borderRadius: "12px", padding: "12px", minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", alignItems: "center", marginBottom: "10px", flexWrap: "wrap" }}>
           <strong>{teamName}</strong>
-          <span style={{ fontSize: "12px", fontWeight: 900 }}>AS {lineup.starters.length}/7 • YEDEK {lineup.bench.length}/5</span>
+          <span style={{ fontSize: "12px", fontWeight: 900 }}>AS {lineup.starters.length}/7 • YEDEK {lineup.bench.length}/{Math.min(5, Math.max(2, teamSquad.length - 7))}</span>
         </div>
         {teamSquad.length === 0 ? (
           <small>Bu takımın kayıtlı oyuncusu yok.</small>

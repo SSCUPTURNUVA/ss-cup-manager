@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { syncLeagueFixtureWithRetry } from "../utils/pendingFixtureSync";
+import { supabase } from "../supabase";
 
 const EVENT_LABELS = {
   scorer_record: "⚽ Golcü Kaydı",
@@ -8,6 +10,7 @@ const EVENT_LABELS = {
   yellow_card: "🟨 Sarı Kart",
   red_card: "🟥 Kırmızı Kart",
   man_of_match: "⭐ Maçın Adamı",
+  substitution: "🔄 Oyuncu Değişikliği",
 };
 
 function readJson(key, fallback) {
@@ -30,6 +33,8 @@ function normalizeEvent(event, index) {
     shirtNumber: event?.shirtNumber || "",
     team: event?.team || event?.teamName || "",
     minute: event?.minute ?? "",
+    playerOutName: event?.playerOutName || event?.playerName || event?.name || "",
+    playerInName: event?.playerInName || event?.secondPlayerName || "",
   };
 }
 
@@ -145,9 +150,52 @@ export default function CompletedMatches({
     return [...events, ...legacyGoals];
   }
 
-  function persist(updatedFixtures) {
+  async function persist(updatedFixtures) {
     setFixtures(updatedFixtures);
     localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));
+
+    const changed = updatedFixtures.filter((match, index) =>
+      JSON.stringify(match) !== JSON.stringify(fixtures[index])
+    );
+
+    await Promise.all(changed.map(async (match) => {
+      if (match?.isKnockout === true) {
+        try {
+          const { data: row, error } = await supabase
+            .from("app_state")
+            .select("value")
+            .eq("id", "knockout")
+            .maybeSingle();
+          if (error) throw error;
+          const value = row?.value && typeof row.value === "object" ? { ...row.value } : {};
+          const cloudMatch = {
+            ...match,
+            homePenalties: match.homePenalties ?? match.homePen ?? "",
+            awayPenalties: match.awayPenalties ?? match.awayPen ?? "",
+            updated_at: new Date().toISOString(),
+          };
+          const key = String(match.knockoutKey || "");
+          if (key.startsWith("quarter-")) {
+            const i = Number(key.split("-")[1]);
+            const list = Array.isArray(value.quarter) ? [...value.quarter] : [];
+            list[i] = { ...(list[i] || {}), ...cloudMatch };
+            value.quarter = list;
+          } else if (key.startsWith("semi-")) {
+            const i = Number(key.split("-")[1]);
+            const list = Array.isArray(value.semi) ? [...value.semi] : [];
+            list[i] = { ...(list[i] || {}), ...cloudMatch };
+            value.semi = list;
+          } else if (key === "final-0") value.finalMatch = { ...(value.finalMatch || {}), ...cloudMatch };
+          else if (key === "third-place-0") value.thirdPlace = { ...(value.thirdPlace || {}), ...cloudMatch };
+          await supabase.from("app_state").upsert({ id: "knockout", value, updated_at: new Date().toISOString() });
+        } catch (error) {
+          console.error("Tamamlanan eleme maçı buluta kaydedilemedi:", error);
+        }
+      } else {
+        await syncLeagueFixtureWithRetry(match);
+      }
+    }));
+
     window.dispatchEvent(
       new CustomEvent("sscup-fixtures-updated", { detail: updatedFixtures })
     );
@@ -210,7 +258,7 @@ export default function CompletedMatches({
     setDraft({ type: "scorer_record", side: "home", playerId: "", minute: "" });
   }
 
-  function saveEvent() {
+  async function saveEvent() {
     const match = fixtures[openedIndex];
     if (!match) return;
     const teamName = draft.side === "home" ? match.home : match.away;
@@ -244,7 +292,7 @@ export default function CompletedMatches({
       index === openedIndex ? { ...fixture, events: updatedEvents } : fixture
     );
 
-    persist(updatedFixtures);
+    await persist(updatedFixtures);
     rebuildScorers(updatedFixtures);
     resetDraft();
   }
@@ -259,7 +307,7 @@ export default function CompletedMatches({
     });
   }
 
-  function deleteEvent(eventId) {
+  async function deleteEvent(eventId) {
     if (!window.confirm("Bu maç olayı silinsin mi?")) return;
     const match = fixtures[openedIndex];
     const updatedEvents = getEvents(match, openedIndex).filter(
@@ -268,11 +316,11 @@ export default function CompletedMatches({
     const updatedFixtures = fixtures.map((fixture, index) =>
       index === openedIndex ? { ...fixture, events: updatedEvents } : fixture
     );
-    persist(updatedFixtures);
+    await persist(updatedFixtures);
     rebuildScorers(updatedFixtures);
   }
 
-  function reopenMatch() {
+  async function reopenMatch() {
     const match = fixtures[openedIndex];
     if (!match) return;
     if (!window.confirm(`${match.home} - ${match.away} maçı yeniden açılsın mı?`)) {
@@ -289,7 +337,7 @@ export default function CompletedMatches({
           }
         : fixture
     );
-    persist(updatedFixtures);
+    await persist(updatedFixtures);
     setOpenedIndex(null);
     resetDraft();
   }
@@ -334,7 +382,9 @@ export default function CompletedMatches({
                   <div>
                     <strong>{EVENT_LABELS[event.type] || "• Maç Olayı"}</strong>
                     <p>
-                      {event.playerName || event.name} • {event.team}
+                      {event.type === "substitution"
+                        ? `Çıktı: ${event.playerOutName || event.playerName || event.name} • Girdi: ${event.playerInName || "Oyuncu"} • ${event.team}`
+                        : `${event.playerName || event.name} • ${event.team}`}
                       {event.minute !== "" ? ` • ${event.minute}'` : ""}
                     </p>
                   </div>
