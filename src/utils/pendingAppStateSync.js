@@ -37,8 +37,8 @@ function mergeFixtureSnapshots(cloudValue, localValue, cloudRowUpdatedAt = "", l
   const cloudMap = new Map(cloud.map((m, i) => [matchKey(m, i), m]));
   const localMap = new Map(local.map((m, i) => [matchKey(m, i), m]));
   const keys = [...new Set([...cloudMap.keys(), ...localMap.keys()])];
-  const cloudFallback = Date.parse(cloudRowUpdatedAt || "") || 0;
-  const localFallback = Date.parse(localSavedAt || "") || 0;
+  const cloudRowTs = toTime(cloudRowUpdatedAt);
+  const localRowTs = toTime(localSavedAt);
 
   return keys.map((key) => {
     const c = cloudMap.get(key);
@@ -46,17 +46,20 @@ function mergeFixtureSnapshots(cloudValue, localValue, cloudRowUpdatedAt = "", l
     if (!c) return l;
     if (!l) return c;
 
-    const ct = Date.parse(c?.runtimeUpdatedAt || c?.cloudUpdatedAt || "") || cloudFallback;
-    const lt = Date.parse(l?.runtimeUpdatedAt || l?.cloudUpdatedAt || "") || localFallback;
+    const ct = Math.max(toTime(c?.runtimeUpdatedAt), cloudRowTs);
+    const lt = Math.max(toTime(l?.runtimeUpdatedAt), localRowTs);
+
+    // KRİTİK: event listelerini UNION yapma. Yeni snapshot otoritedir.
+    // Böylece kart/gol/değişiklik silinince eski cihaz onu yeniden diriltemez.
+    // Eşit zamanda yerel kullanıcı işlemi kazanır (remove-wins/local-write-wins).
     const newer = lt >= ct ? l : c;
     const older = lt >= ct ? c : l;
-
     return {
       ...older,
       ...newer,
-      events: mergeEvents(c?.events, l?.events),
-      goals: mergeEvents(c?.goals, l?.goals),
-      runtimeUpdatedAt: newer?.runtimeUpdatedAt || older?.runtimeUpdatedAt || new Date(Math.max(ct, lt, Date.now())).toISOString(),
+      events: Array.isArray(newer?.events) ? newer.events : [],
+      goals: Array.isArray(newer?.goals) ? newer.goals : [],
+      runtimeUpdatedAt: newer?.runtimeUpdatedAt || new Date(Math.max(ct, lt, Date.now())).toISOString(),
     };
   });
 }
@@ -137,10 +140,9 @@ export async function syncAppStateWithRetry(id, value) {
     if (!verifyRow) throw new Error(`app_state/${id} geri okunamadı; kayıt kuyrukta korunuyor.`);
 
     if (String(id) === "fixtures_snapshot" && Array.isArray(mergedValue)) {
-      const wantedEvents = mergedValue.reduce((n, m) => n + (Array.isArray(m?.events) ? m.events.length : 0), 0);
-      const got = Array.isArray(verifyRow.value) ? verifyRow.value : [];
-      const gotEvents = got.reduce((n, m) => n + (Array.isArray(m?.events) ? m.events.length : 0), 0);
-      if (gotEvents < wantedEvents) throw new Error("fixtures_snapshot sunucuda eksik; yerel kayıt korunuyor.");
+      const wantedJson = JSON.stringify(mergedValue);
+      const gotJson = JSON.stringify(Array.isArray(verifyRow.value) ? verifyRow.value : []);
+      if (gotJson !== wantedJson) throw new Error("fixtures_snapshot sunucuda farklı; yerel kayıt korunuyor.");
     }
 
     clearQueuedAppStateSync(id);
@@ -170,9 +172,9 @@ export async function flushPendingAppStateSync() {
         if (!verifyError && verifyRow) {
           if (String(entry.id) !== "fixtures_snapshot") clearQueuedAppStateSync(entry.id);
           else {
-            const wanted = Array.isArray(mergedValue) ? mergedValue.reduce((n,m)=>n+(Array.isArray(m?.events)?m.events.length:0),0) : 0;
-            const got = Array.isArray(verifyRow.value) ? verifyRow.value.reduce((n,m)=>n+(Array.isArray(m?.events)?m.events.length:0),0) : -1;
-            if (got >= wanted) clearQueuedAppStateSync(entry.id);
+            const wanted = JSON.stringify(Array.isArray(mergedValue) ? mergedValue : []);
+            const got = JSON.stringify(Array.isArray(verifyRow.value) ? verifyRow.value : []);
+            if (got === wanted) clearQueuedAppStateSync(entry.id);
           }
         }
       }
