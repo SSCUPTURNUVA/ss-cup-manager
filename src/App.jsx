@@ -725,11 +725,15 @@ export default function App() {
         const pendingSnapshot = readPendingAppStateSync()?.fixtures_snapshot;
         const pendingTime = Date.parse(pendingSnapshot?.savedAt || "") || 0;
         const cloudTime = Date.parse(snapshotResult.data?.updated_at || "") || 0;
-        // Bu cihazda henüz buluta çıkmamış daha yeni işlem varsa onu ekrandan silme.
-        if (pendingTime > cloudTime) return;
+        // Bu cihazda henüz buluta çıkmamış daha yeni işlem varsa buluttaki eski veri
+        // ekrandan SİLEMEZ. Refresh'i tamamen iptal etmek yerine aşağıda pending
+        // snapshot maç bazında öncelikli kaynak olarak kullanılır.
 
         const rows = Array.isArray(fixtureResult.data) ? fixtureResult.data : [];
-        const snapshot = Array.isArray(snapshotResult.data?.value) ? snapshotResult.data.value : [];
+        const cloudSnapshot = Array.isArray(snapshotResult.data?.value) ? snapshotResult.data.value : [];
+        const snapshot = pendingTime > cloudTime && Array.isArray(pendingSnapshot?.value)
+          ? pendingSnapshot.value
+          : cloudSnapshot;
         const rowById = new Map(rows.map((row) => [String(row?.id), row]));
         const snapById = new Map(snapshot.map((match) => [String(match?.id), match]));
 

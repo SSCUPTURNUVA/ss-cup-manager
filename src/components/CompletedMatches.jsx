@@ -261,8 +261,11 @@ export default function CompletedMatches({
       ? currentEvents.map((event) => (event.id === editingId ? eventData : event))
       : [...currentEvents, eventData];
 
+    const runtimeUpdatedAt = new Date().toISOString();
     const updatedFixtures = fixtures.map((fixture, index) =>
-      index === openedIndex ? { ...fixture, events: updatedEvents } : fixture
+      index === openedIndex
+        ? { ...fixture, events: updatedEvents, runtimeUpdatedAt }
+        : fixture
     );
 
     await persist(updatedFixtures);
@@ -286,8 +289,11 @@ export default function CompletedMatches({
     const updatedEvents = getEvents(match, openedIndex).filter(
       (event) => event.id !== eventId
     );
+    const runtimeUpdatedAt = new Date().toISOString();
     const updatedFixtures = fixtures.map((fixture, index) =>
-      index === openedIndex ? { ...fixture, events: updatedEvents } : fixture
+      index === openedIndex
+        ? { ...fixture, events: updatedEvents, runtimeUpdatedAt }
+        : fixture
     );
     await persist(updatedFixtures);
     rebuildScorers(updatedFixtures);

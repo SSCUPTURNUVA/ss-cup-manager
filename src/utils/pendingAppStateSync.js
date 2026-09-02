@@ -125,6 +125,24 @@ export async function syncAppStateWithRetry(id, value) {
     }).select("id,updated_at").maybeSingle();
     if (error) throw error;
     if (!data?.id) throw new Error(`app_state/${id} bulutta doğrulanamadı; kayıt kuyrukta korunuyor.`);
+
+    // Telefon/PWA'da yalnız upsert cevabını başarı sayma. Sunucudan tekrar okuyup
+    // gerçekten yazıldığını doğrula; doğrulanmazsa kuyruk ASLA silinmez.
+    const { data: verifyRow, error: verifyError } = await supabase
+      .from("app_state")
+      .select("value,updated_at")
+      .eq("id", String(id))
+      .maybeSingle();
+    if (verifyError) throw verifyError;
+    if (!verifyRow) throw new Error(`app_state/${id} geri okunamadı; kayıt kuyrukta korunuyor.`);
+
+    if (String(id) === "fixtures_snapshot" && Array.isArray(mergedValue)) {
+      const wantedEvents = mergedValue.reduce((n, m) => n + (Array.isArray(m?.events) ? m.events.length : 0), 0);
+      const got = Array.isArray(verifyRow.value) ? verifyRow.value : [];
+      const gotEvents = got.reduce((n, m) => n + (Array.isArray(m?.events) ? m.events.length : 0), 0);
+      if (gotEvents < wantedEvents) throw new Error("fixtures_snapshot sunucuda eksik; yerel kayıt korunuyor.");
+    }
+
     clearQueuedAppStateSync(id);
     return true;
   } catch (error) {
@@ -146,7 +164,18 @@ export async function flushPendingAppStateSync() {
         value: mergedValue,
         updated_at: new Date().toISOString(),
       }).select("id,updated_at").maybeSingle();
-      if (!error && data?.id) clearQueuedAppStateSync(entry.id);
+      if (!error && data?.id) {
+        const { data: verifyRow, error: verifyError } = await supabase
+          .from("app_state").select("value").eq("id", String(entry.id)).maybeSingle();
+        if (!verifyError && verifyRow) {
+          if (String(entry.id) !== "fixtures_snapshot") clearQueuedAppStateSync(entry.id);
+          else {
+            const wanted = Array.isArray(mergedValue) ? mergedValue.reduce((n,m)=>n+(Array.isArray(m?.events)?m.events.length:0),0) : 0;
+            const got = Array.isArray(verifyRow.value) ? verifyRow.value.reduce((n,m)=>n+(Array.isArray(m?.events)?m.events.length:0),0) : -1;
+            if (got >= wanted) clearQueuedAppStateSync(entry.id);
+          }
+        }
+      }
     } catch (error) {
       console.warn(`Bekleyen app_state/${entry.id} eşitlemesi tekrar denenecek:`, error);
     }
