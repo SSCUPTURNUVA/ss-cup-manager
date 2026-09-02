@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabase";
-import { readPendingAppStateSync, syncAppStateWithRetry } from "../utils/pendingAppStateSync";
 
 const CLOUD_KEY = "squads";
 
@@ -34,19 +33,6 @@ export default function SquadManager({ teams = [] }) {
     let cancelled = false;
 
     async function loadCloudSquads() {
-      // Önce yarım kalmış yerel kadro yazısını koru; eski bulut kadrosu bunu ezemez.
-      const pendingSquads = readPendingAppStateSync()?.[CLOUD_KEY];
-      if (pendingSquads?.value && typeof pendingSquads.value === "object" && !Array.isArray(pendingSquads.value)) {
-        localEditUntilRef.current = Date.now() + 10000;
-        applyingCloudRef.current = true;
-        setSquads(pendingSquads.value);
-        localStorage.setItem("sscup-squads", JSON.stringify(pendingSquads.value));
-        applyingCloudRef.current = false;
-        cloudReadyRef.current = true;
-        await syncAppStateWithRetry(CLOUD_KEY, pendingSquads.value);
-        return;
-      }
-
       const { data, error } = await supabase
         .from("app_state")
         .select("value,updated_at")
@@ -82,8 +68,12 @@ export default function SquadManager({ teams = [] }) {
         // Bulutta {} / boş kadro varsa PC'deki dolu kadroyu ASLA ezme.
         // Yerel oyuncuları buluta taşı; böylece telefon da aynı kadroyu görür.
         if (localHasPlayers) {
-          const seeded = await syncAppStateWithRetry(CLOUD_KEY, squads);
-          if (!seeded) console.warn("Yerel kadro buluta gönderilmek üzere kuyruğa alındı.");
+          const { error: seedError } = await supabase.from("app_state").upsert({
+            id: CLOUD_KEY,
+            value: squads,
+            updated_at: new Date().toISOString(),
+          });
+          if (seedError) console.error("Yerel kadroyu buluta taşıma hatası:", seedError);
         } else if (cloudIsObject) {
           applyingCloudRef.current = true;
           setSquads(cloudValue);
@@ -129,7 +119,12 @@ export default function SquadManager({ teams = [] }) {
     if (!cloudReadyRef.current || applyingCloudRef.current) return;
 
     const timer = window.setTimeout(async () => {
-      await syncAppStateWithRetry(CLOUD_KEY, squads);
+      const { error } = await supabase.from("app_state").upsert({
+        id: CLOUD_KEY,
+        value: squads,
+        updated_at: new Date().toISOString(),
+      });
+      if (error) console.error("Kadro bulut kaydetme hatası:", error);
     }, 250);
 
     return () => window.clearTimeout(timer);
@@ -287,10 +282,8 @@ export default function SquadManager({ teams = [] }) {
     localEditUntilRef.current = Date.now() + 10000;
     setSquads(next);
     localStorage.setItem("sscup-squads", JSON.stringify(next));
-    const cloudSaved = await syncAppStateWithRetry(CLOUD_KEY, next);
-    setMessage(cloudSaved
-      ? `✅ ${players.length} oyuncu tek seferde kaydedildi.`
-      : `✅ ${players.length} oyuncu PC'ye kaydedildi; internet gelince buluta otomatik gönderilecek.`);
+    const { error } = await supabase.from("app_state").upsert({ id: CLOUD_KEY, value: next, updated_at: new Date().toISOString() });
+    setMessage(error ? `Kadro kaydedilemedi: ${error.message}` : `✅ ${players.length} oyuncu tek seferde kaydedildi.`);
   }
 
   function getTotalPlayers() {

@@ -23,7 +23,7 @@ import TeamContacts from "./components/TeamContacts";
 import DisciplineBoard from "./components/DisciplineBoard";
 import BackupManager from "./components/BackupManager";
 import { sortFixturesBySchedule } from "./utils/fixtureOrder";
-import { flushPendingFixtureSync } from "./utils/pendingFixtureSync";
+import { flushPendingFixtureSync, readPendingFixtureSync } from "./utils/pendingFixtureSync";
 
 const mobileMenuItems = [
   { id: "home", icon: "🏠", label: "Ana Sayfa" },
@@ -62,6 +62,11 @@ function readStorage(key, fallback) {
   } catch {
     return fallback;
   }
+}
+
+function appPhaseRank(phase) {
+  const ranks = { waiting: 0, first_half: 1, halftime: 2, second_half: 3, penalty: 4, completed: 5 };
+  return ranks[phase || "waiting"] ?? 0;
 }
 
 function calculateStandings(teams, fixtures) {
@@ -235,19 +240,6 @@ function AdminPinGate({ onUnlock }) {
 }
 
 export default function App() {
-  // Saha kenarında internet kısa süre kesilirse yerel maç kaydı kaybolmaz.
-  // Bekleyen Supabase yazıları uygulama açık kaldığı sürece ve bağlantı geri geldiğinde tamamlanır.
-  useEffect(() => {
-    const flush = () => { flushPendingFixtureSync(); };
-    flush();
-    window.addEventListener("online", flush);
-    const timer = window.setInterval(flush, 10000);
-    return () => {
-      window.removeEventListener("online", flush);
-      window.clearInterval(timer);
-    };
-  }, []);
-
   // MASAÜSTÜ EXE her zaman yönetim modudur.
   // Web/PWA varsayılan olarak salt-okunur canlı takiptir; yalnızca organizatörün
   // özel yönetim bağlantısı bu cihazı yönetici olarak yetkilendirir.
@@ -429,7 +421,17 @@ export default function App() {
   }, [fixtures]);
 
   useEffect(() => {
+    // Halka açık Canlı Takip TAMAMEN salt-okunurdur.
+    // Public sayfa aynı origin/localStorage içinde eski bir pending kayıt görse bile
+    // Supabase'e ASLA maç yazmaz. Bulut yazma/temizleme yalnız yönetimde yapılır.
+    if (isPublicRoute) return undefined;
+
     async function loadFixturesFromSupabase() {
+      // ÖNCE cihazda bekleyen son maç işlemini buluta göndermeyi dene.
+      // Böylece Ctrl+C / tarayıcı kapanması sonrası eski bulut verisi, daha yeni
+      // yerel canlı/bitmiş maç kaydını açılışta ezemez.
+      await flushPendingFixtureSync();
+
       let { data, error } = await supabase
         .from("fixtures")
         .select("*")
@@ -461,6 +463,49 @@ export default function App() {
             const activeIdSet = new Set(activeIds);
             data = data.filter((row) => activeIdSet.has(String(row?.id)));
           }
+        }
+
+        // fixtures yazısı gecikse bile maçın son runtime durumunu ayrı bulut aynasından geri yükle.
+        const { data: runtimeRow, error: runtimeError } = await supabase.from("app_state").select("value").eq("id", "fixture_runtime").maybeSingle();
+        if (!runtimeError && runtimeRow?.value && typeof runtimeRow.value === "object" && !Array.isArray(runtimeRow.value)) {
+          const runtimeMap = runtimeRow.value;
+          data = data.map((row) => {
+            const runtime = runtimeMap[String(row?.id)];
+            if (!runtime || String(runtime?.id ?? "") !== String(row?.id ?? "")) return row;
+            const rowPhase = row?.match_phase || (row?.played === true ? "completed" : "waiting");
+            const runtimePhase = runtime?.matchPhase || "waiting";
+            const rowEvents = Array.isArray(row?.events) ? row.events : [];
+            const runtimeEvents = Array.isArray(runtime?.events) ? runtime.events : [];
+            if (appPhaseRank(runtimePhase) < appPhaseRank(rowPhase)) return row;
+            if (appPhaseRank(runtimePhase) === appPhaseRank(rowPhase) && rowEvents.length > runtimeEvents.length) return row;
+            const completed = row?.played === true || rowPhase === "completed" || runtime?.played === true || runtimePhase === "completed";
+            return { ...row, home_score: Number(runtime.homeScore ?? row.home_score ?? 0), away_score: Number(runtime.awayScore ?? row.away_score ?? 0), played: completed, live: !completed && runtime.live === true, timer_running: !completed && runtime.timerRunning === true, timer_started_at: completed ? null : (runtime.timerStartedAt ?? null), elapsed_seconds: Number(runtime.elapsedSeconds ?? row.elapsed_seconds ?? 0), match_phase: completed ? "completed" : runtimePhase, events: runtimeEvents.length >= rowEvents.length ? runtimeEvents : rowEvents };
+          });
+        }
+
+        // İnternet kesildiği anda kapanmışsa flush başarısız olabilir. Bu durumda
+        // kuyruktaki veri, aynı fixture ID'si için buluttan DAHA YENİ olan gerçek
+        // saha kaydıdır. Yalnız pending kuyruğunu uygularız; genel localStorage
+        // skorlarını asla merge etmeyiz (eski test skorlarının geri dönmesini engeller).
+        const pendingFixtureSync = readPendingFixtureSync();
+        if (pendingFixtureSync && Object.keys(pendingFixtureSync).length > 0) {
+          data = data.map((row) => {
+            const pending = pendingFixtureSync[String(row?.id)];
+            const payload = pending?.payload;
+            if (!payload) return row;
+            return {
+              ...row,
+              home_score: payload.home_score ?? row.home_score ?? 0,
+              away_score: payload.away_score ?? row.away_score ?? 0,
+              played: payload.played === true,
+              live: payload.live === true,
+              timer_running: payload.timer_running === true,
+              timer_started_at: payload.timer_started_at ?? null,
+              elapsed_seconds: Number(payload.elapsed_seconds ?? 0),
+              match_phase: payload.match_phase || "waiting",
+              events: Array.isArray(payload.events) ? payload.events : [],
+            };
+          });
         }
 
         // Bulut boşsa yerel dolu fikstürü silmek yerine önce buluta taşı.
@@ -617,7 +662,24 @@ export default function App() {
     }
 
     loadFixturesFromSupabase();
-  }, []);
+    return undefined;
+  }, [isPublicRoute]);
+
+  // İlk fixture yüklemesi tamamlandıktan sonra bekleyen yazıları düzenli tekrar dene.
+  // Açılışta cloud-load ile yarışmaması için bu ayrı döngü gecikmeli başlar.
+  useEffect(() => {
+    // İzleyici cihazı hiçbir koşulda pending maç yazısı göndermez.
+    if (isPublicRoute) return undefined;
+    const flush = () => { flushPendingFixtureSync(); };
+    const first = window.setTimeout(flush, 2500);
+    window.addEventListener("online", flush);
+    const timer = window.setInterval(flush, 10000);
+    return () => {
+      window.clearTimeout(first);
+      window.removeEventListener("online", flush);
+      window.clearInterval(timer);
+    };
+  }, [isPublicRoute]);
 
   useEffect(() => {
     const refreshGoalScorers = () => {

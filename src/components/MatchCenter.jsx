@@ -14,8 +14,47 @@ function getTeamName(team) {
 }
 
 
+function runtimePhaseRank(phase) {
+  const ranks = { waiting: 0, first_half: 1, halftime: 2, second_half: 3, penalty: 4, completed: 5 };
+  return ranks[phase || "waiting"] ?? 0;
+}
+
 function getMatchCenterKey(match, index = 0) {
   return String(match?.id ?? `${match?.home || ""}|${match?.away || ""}|${match?.week || ""}|${index}`);
+}
+
+async function syncFixtureRuntimeMirror(match) {
+  if (!match || match?.isKnockout === true || match?.id === null || match?.id === undefined || match?.id === "") return true;
+  const key = String(match.id);
+  try {
+    const { data: currentRow, error: readError } = await supabase.from("app_state").select("value").eq("id", "fixture_runtime").maybeSingle();
+    if (readError) throw readError;
+    const currentValue = currentRow?.value && typeof currentRow.value === "object" && !Array.isArray(currentRow.value) ? { ...currentRow.value } : {};
+    const existing = currentValue[key];
+    const incomingPhase = match.matchPhase || "waiting";
+    const existingPhase = existing?.matchPhase || "waiting";
+    const incomingEvents = Array.isArray(match.events) ? match.events : [];
+    const existingEvents = Array.isArray(existing?.events) ? existing.events : [];
+
+    // Geç kalan eski bir async yazı, bitmiş/ilerlemiş maçı runtime aynasında geriye çeviremez.
+    if (existing && runtimePhaseRank(existingPhase) > runtimePhaseRank(incomingPhase)) return true;
+    if (existing && runtimePhaseRank(existingPhase) === runtimePhaseRank(incomingPhase) && existingEvents.length > incomingEvents.length) return true;
+
+    currentValue[key] = {
+      id: match.id, home: match.home || "", away: match.away || "",
+      homeScore: Number(match.homeScore ?? 0), awayScore: Number(match.awayScore ?? 0),
+      played: match.played === true || incomingPhase === "completed", live: match.played !== true && incomingPhase !== "completed" && match.live === true,
+      timerRunning: incomingPhase !== "completed" && match.timerRunning === true, timerStartedAt: incomingPhase === "completed" ? null : (match.timerStartedAt ?? null),
+      elapsedSeconds: Number(match.elapsedSeconds ?? 0), matchPhase: incomingPhase,
+      events: incomingEvents, updatedAt: new Date().toISOString(),
+    };
+    const { error: writeError } = await supabase.from("app_state").upsert({ id: "fixture_runtime", value: currentValue, updated_at: new Date().toISOString() });
+    if (writeError) throw writeError;
+    return true;
+  } catch (error) {
+    console.error("Canlı runtime aynası kaydedilemedi:", error);
+    return false;
+  }
 }
 
 function readMatchRules() {
@@ -607,7 +646,7 @@ export default function MatchCenter({
       if (activeMatch?.isKnockout === true) {
         await syncKnockoutStateToCloud(activeMatch);
       } else if (activeMatch) {
-        await syncLeagueFixtureWithRetry(activeMatch);
+        await Promise.all([syncLeagueFixtureWithRetry(activeMatch), syncFixtureRuntimeMirror(activeMatch)]);
       }
     } catch (error) {
       console.error("Supabase kayıt hatası:", error);
@@ -1268,7 +1307,8 @@ export default function MatchCenter({
     if (liveMatch.isKnockout === true) {
       await syncKnockoutStateToCloud(finishedMatch);
     } else {
-      cloudSynced = await syncLeagueFixtureWithRetry(finishedMatch);
+      const [fixtureSynced, mirrorSynced] = await Promise.all([syncLeagueFixtureWithRetry(finishedMatch), syncFixtureRuntimeMirror(finishedMatch)]);
+      cloudSynced = fixtureSynced || mirrorSynced;
     }
 
     await updateLiveMatch(finishPatch);
