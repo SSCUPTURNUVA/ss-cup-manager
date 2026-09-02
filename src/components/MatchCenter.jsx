@@ -407,6 +407,24 @@ export default function MatchCenter({
 
   const activeMatchCenterKey = localStorage.getItem("sscup-match-center-active") || "";
   const reopenedResetId = localStorage.getItem("sscup-match-center-reopened-reset") || "";
+  const reopenedResetSignature = (() => {
+    try {
+      return JSON.parse(localStorage.getItem("sscup-match-center-reopened-reset-signature") || "null");
+    } catch {
+      return null;
+    }
+  })();
+  const isReopenedResetMatch = (match) => {
+    if (!match) return false;
+    if (reopenedResetId && String(match?.id ?? "") === reopenedResetId) return true;
+    if (!reopenedResetSignature) return false;
+    return (
+      String(match?.home || "") === String(reopenedResetSignature.home || "") &&
+      String(match?.away || "") === String(reopenedResetSignature.away || "") &&
+      (!reopenedResetSignature.date || String(match?.date || "") === String(reopenedResetSignature.date || "")) &&
+      (!reopenedResetSignature.time || String(match?.time || "") === String(reopenedResetSignature.time || ""))
+    );
+  };
 
   // Maç Merkezi'ne hazırlanıp sonra geri çekilmiş eski bir maç localStorage'da
   // seçili kalabiliyordu. Böyle bir "waiting" kaydı, kendisinden daha erken
@@ -450,8 +468,7 @@ export default function MatchCenter({
   }, [stalePreparedSelection, activeMatchCenterKey]);
 
   const liveMatchIndex = fixtures.findIndex((match, index) => {
-    const resetBlocksMatch = reopenedResetId && String(match?.id ?? "") === reopenedResetId;
-    if (resetBlocksMatch) return false;
+    if (isReopenedResetMatch(match)) return false;
     return (
       (match.live === true && ["first_half", "halftime", "second_half", "penalty"].includes(match.matchPhase || "waiting")) ||
       (!stalePreparedSelection && activeMatchCenterKey && getMatchCenterKey(match, index) === activeMatchCenterKey)
@@ -1109,8 +1126,9 @@ export default function MatchCenter({
 
     const nextIndex = fixtures.findIndex((match) => match === nextMatch || match?.id === nextMatch?.id);
     const nextId = String(nextMatch?.id ?? "");
-    if (nextId && localStorage.getItem("sscup-match-center-reopened-reset") === nextId) {
+    if (isReopenedResetMatch(nextMatch)) {
       localStorage.removeItem("sscup-match-center-reopened-reset");
+      localStorage.removeItem("sscup-match-center-reopened-reset-signature");
     }
     try {
       await supabase.from("app_state").upsert({

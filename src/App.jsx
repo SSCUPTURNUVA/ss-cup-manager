@@ -712,9 +712,25 @@ export default function App() {
         // Bilinçli "Maçı Yeniden Aç" işlemi normalde geriye doğru bir durum geçişidir.
         // Eski runtime/completed kayıtları daha ileri fazda görünse bile bu reset yerelde kazanır.
         const reopenedResetId = localStorage.getItem("sscup-match-center-reopened-reset") || "";
-        if (reopenedResetId) {
+        let reopenedResetSignature = null;
+        try {
+          reopenedResetSignature = JSON.parse(localStorage.getItem("sscup-match-center-reopened-reset-signature") || "null");
+        } catch {
+          reopenedResetSignature = null;
+        }
+        const matchesReopenReset = (match) => {
+          if (reopenedResetId && String(match?.id ?? "") === reopenedResetId) return true;
+          if (!reopenedResetSignature) return false;
+          return (
+            String(match?.home || "") === String(reopenedResetSignature.home || "") &&
+            String(match?.away || "") === String(reopenedResetSignature.away || "") &&
+            (!reopenedResetSignature.date || String(match?.date || "") === String(reopenedResetSignature.date || "")) &&
+            (!reopenedResetSignature.time || String(match?.time || "") === String(reopenedResetSignature.time || ""))
+          );
+        };
+        if (reopenedResetId || reopenedResetSignature) {
           sortedSupabaseFixtures = sortedSupabaseFixtures.map((match) =>
-            String(match?.id ?? "") === reopenedResetId
+            matchesReopenReset(match)
               ? { ...match, homeScore: 0, awayScore: 0, homePen: "", awayPen: "", events: [], goals: [], played: false, live: false, timerRunning: false, timerStartedAt: null, elapsedSeconds: 0, matchPhase: "waiting" }
               : match
           );

@@ -318,6 +318,16 @@ export default function CompletedMatches({
     // yeniden Maç Merkezi'ne sokamasın. Yeniden Maç Merkezi'ne alınırken kaldırılır.
     const reopenedResetId = String(match?.id ?? "");
     if (reopenedResetId) localStorage.setItem("sscup-match-center-reopened-reset", reopenedResetId);
+    localStorage.setItem(
+      "sscup-match-center-reopened-reset-signature",
+      JSON.stringify({
+        id: reopenedResetId,
+        home: String(match?.home || ""),
+        away: String(match?.away || ""),
+        date: String(match?.date || ""),
+        time: String(match?.time || ""),
+      })
+    );
 
     // Bu maç Maç Merkezi'nde aktif/seçili kaldıysa geri alma sırasında mutlaka temizle.
     // Aksi halde played=false/waiting olsa bile MatchCenter localStorage anahtarından maçı
