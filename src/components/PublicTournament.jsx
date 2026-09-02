@@ -368,6 +368,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const [activeTab, setActiveTab] = useState("overview");
   const [remoteFixtures, setRemoteFixtures] = useState(null);
   const [publicMatchCenterId, setPublicMatchCenterId] = useState("");
+  const [publicResetFixtureId, setPublicResetFixtureId] = useState("");
   const [remoteTeams, setRemoteTeams] = useState(null);
   const [remoteSquads, setRemoteSquads] = useState(null);
   const [remoteKnockout, setRemoteKnockout] = useState([]);
@@ -668,12 +669,17 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         const { data, error } = await supabase
           .from("app_state")
           .select("id,value,updated_at")
-          .in("id", ["fixtures_snapshot", "public_match_center"]);
+          .in("id", ["fixtures_snapshot", "public_match_center", "fixture_reopen_reset"]);
 
         if (disposed || error || !Array.isArray(data)) return;
 
         const snapshotRow = data.find((row) => row?.id === "fixtures_snapshot");
         const centerRow = data.find((row) => row?.id === "public_match_center");
+        const resetRow = data.find((row) => row?.id === "fixture_reopen_reset");
+
+        if (resetRow) {
+          setPublicResetFixtureId(String(resetRow?.value?.matchId || ""));
+        }
 
         if (centerRow) {
           setPublicMatchCenterId(String(centerRow?.value?.matchId || ""));
@@ -830,7 +836,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     ...knockoutMatches,
   ]);
   const liveMatches = displayFixtures
-    .filter((match) => match?.live === true && match?.played !== true)
+    .filter((match) => match?.live === true && match?.played !== true && String(match?.id ?? "") !== publicResetFixtureId)
     .slice()
     .sort((a, b) => {
       const updatedA = Date.parse(a.cloudUpdatedAt || "") || 0;
@@ -842,7 +848,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       return `${b.date || ""} ${b.time || ""}`.localeCompare(`${a.date || ""} ${a.time || ""}`);
     });
   const liveMatch = liveMatches[0] || null;
-  const preparedMatch = !liveMatch && publicMatchCenterId
+  const preparedMatch = !liveMatch && publicMatchCenterId && publicMatchCenterId !== publicResetFixtureId
     ? displayFixtures.find((match) => String(match?.id ?? "") === publicMatchCenterId && match?.played !== true) || null
     : null;
   const featuredMatch = liveMatch || preparedMatch;

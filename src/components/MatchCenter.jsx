@@ -406,6 +406,7 @@ export default function MatchCenter({
   }
 
   const activeMatchCenterKey = localStorage.getItem("sscup-match-center-active") || "";
+  const reopenedResetId = localStorage.getItem("sscup-match-center-reopened-reset") || "";
 
   // Maç Merkezi'ne hazırlanıp sonra geri çekilmiş eski bir maç localStorage'da
   // seçili kalabiliyordu. Böyle bir "waiting" kaydı, kendisinden daha erken
@@ -448,11 +449,14 @@ export default function MatchCenter({
     localStorage.removeItem("sscup-match-center-active");
   }, [stalePreparedSelection, activeMatchCenterKey]);
 
-  const liveMatchIndex = fixtures.findIndex(
-    (match, index) =>
+  const liveMatchIndex = fixtures.findIndex((match, index) => {
+    const resetBlocksMatch = reopenedResetId && String(match?.id ?? "") === reopenedResetId;
+    if (resetBlocksMatch) return false;
+    return (
       (match.live === true && ["first_half", "halftime", "second_half", "penalty"].includes(match.matchPhase || "waiting")) ||
       (!stalePreparedSelection && activeMatchCenterKey && getMatchCenterKey(match, index) === activeMatchCenterKey)
-  );
+    );
+  });
 
   const liveMatch = liveMatchIndex >= 0 ? fixtures[liveMatchIndex] : null;
 
@@ -1104,6 +1108,19 @@ export default function MatchCenter({
     if (!nextMatch) return;
 
     const nextIndex = fixtures.findIndex((match) => match === nextMatch || match?.id === nextMatch?.id);
+    const nextId = String(nextMatch?.id ?? "");
+    if (nextId && localStorage.getItem("sscup-match-center-reopened-reset") === nextId) {
+      localStorage.removeItem("sscup-match-center-reopened-reset");
+    }
+    try {
+      await supabase.from("app_state").upsert({
+        id: "fixture_reopen_reset",
+        value: { matchId: "", home: "", away: "", updatedAt: new Date().toISOString() },
+        updated_at: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.warn("Maç geri alma kilidi temizlenemedi:", error);
+    }
     if (nextIndex >= 0) {
       localStorage.setItem("sscup-match-center-active", getMatchCenterKey(nextMatch, nextIndex));
     }

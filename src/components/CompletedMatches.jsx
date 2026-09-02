@@ -297,6 +297,11 @@ export default function CompletedMatches({
     };
     const updatedFixtures = fixtures.map((fixture, index) => index === openedIndex ? reopened : fixture);
 
+    // Bilinçli geri alma işareti: gecikmiş eski runtime/completed/live yazıları bu maçı
+    // yeniden Maç Merkezi'ne sokamasın. Yeniden Maç Merkezi'ne alınırken kaldırılır.
+    const reopenedResetId = String(match?.id ?? "");
+    if (reopenedResetId) localStorage.setItem("sscup-match-center-reopened-reset", reopenedResetId);
+
     // Bu maç Maç Merkezi'nde aktif/seçili kaldıysa geri alma sırasında mutlaka temizle.
     // Aksi halde played=false/waiting olsa bile MatchCenter localStorage anahtarından maçı
     // yeniden aktifmiş gibi açabiliyor.
@@ -316,6 +321,14 @@ export default function CompletedMatches({
     persist(updatedFixtures);
 
     try {
+      // Reset işaretini ÖNCE yaz. Böylece diğer cihazlar eski completed/runtime kaydını
+      // bir an görse bile geri alınmış maçı aktif/canlı kabul etmez.
+      await supabase.from("app_state").upsert({
+        id: "fixture_reopen_reset",
+        value: { matchId: String(match.id), home: match.home || "", away: match.away || "", updatedAt: new Date().toISOString() },
+        updated_at: new Date().toISOString(),
+      });
+
       await supabase.from("fixtures").update({
         home_score: 0,
         away_score: 0,

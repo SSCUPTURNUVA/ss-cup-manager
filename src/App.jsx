@@ -707,7 +707,18 @@ export default function App() {
         // Supabase lig fikstürü tek doğru kaynaktır. Eski localStorage skor/
         // oynandı bilgisi yeni turnuvaya taşınmasın. Eleme tarafı kendi
         // app_state kaydından yönetildiği için burada yerel eleme de eklenmez.
-        const sortedSupabaseFixtures = sortFixturesBySchedule(supabaseFixtures);
+        let sortedSupabaseFixtures = sortFixturesBySchedule(supabaseFixtures);
+
+        // Bilinçli "Maçı Yeniden Aç" işlemi normalde geriye doğru bir durum geçişidir.
+        // Eski runtime/completed kayıtları daha ileri fazda görünse bile bu reset yerelde kazanır.
+        const reopenedResetId = localStorage.getItem("sscup-match-center-reopened-reset") || "";
+        if (reopenedResetId) {
+          sortedSupabaseFixtures = sortedSupabaseFixtures.map((match) =>
+            String(match?.id ?? "") === reopenedResetId
+              ? { ...match, homeScore: 0, awayScore: 0, homePen: "", awayPen: "", events: [], goals: [], played: false, live: false, timerRunning: false, timerStartedAt: null, elapsedSeconds: 0, matchPhase: "waiting" }
+              : match
+          );
+        }
 
         // Maç Merkezi'ne alınmış ama BAŞLATILMADAN geri çekilmiş eski seçimi tamamen unut.
         // Gerçekten devam eden bir maç varsa anahtarı koruruz; yoksa Maç Merkezi her açılışta
