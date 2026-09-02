@@ -320,13 +320,14 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current;
 
-    const [fixturesResult, teamsResult, squadsResult, knockoutResult, activeFixtureResult, runtimeResult] = await Promise.allSettled([
+    const [fixturesResult, teamsResult, squadsResult, knockoutResult, activeFixtureResult, runtimeResult, completedResult] = await Promise.allSettled([
       supabase.from("fixtures").select("*").order("id"),
       supabase.from("teams").select("id,name").order("id"),
       supabase.from("app_state").select("value,updated_at").eq("id", "squads").maybeSingle(),
       supabase.from("app_state").select("value,updated_at").eq("id", "knockout").maybeSingle(),
       supabase.from("app_state").select("value,updated_at").eq("id", "active_fixture_ids").maybeSingle(),
       supabase.from("app_state").select("value,updated_at").eq("id", "fixture_runtime").maybeSingle(),
+      supabase.from("app_state").select("value,updated_at").eq("id", "completed_fixture_results").maybeSingle(),
     ]);
 
     // Yavaş kalan eski bir istek, yeni verinin üstüne yazamasın.
@@ -336,9 +337,15 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     let stagedKnockout = null;
     let currentActiveIds = activeFixtureIdsRef.current;
     let runtimeMap = {};
+    let completedMap = {};
     if (runtimeResult.status === "fulfilled") {
       const { data: runtimeRow, error: runtimeError } = runtimeResult.value;
       if (!runtimeError && runtimeRow?.value && typeof runtimeRow.value === "object" && !Array.isArray(runtimeRow.value)) runtimeMap = runtimeRow.value;
+    }
+
+    if (completedResult.status === "fulfilled") {
+      const { data: completedRow, error: completedError } = completedResult.value;
+      if (!completedError && completedRow?.value && typeof completedRow.value === "object" && !Array.isArray(completedRow.value)) completedMap = completedRow.value;
     }
 
     if (activeFixtureResult.status === "fulfilled") {
@@ -371,10 +378,36 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           : data;
 
         mappedFixtures = sortFixturesBySchedule(currentRows.map((row) => {
-          const base = mapCloudFixture(row);
+          let merged = mapCloudFixture(row);
           const runtime = runtimeMap[String(row?.id)];
-          if (!runtime || String(runtime?.id ?? "") !== String(row?.id ?? "")) return base;
-          return mergeRuntimeMonotonic(base, runtime);
+          if (runtime && String(runtime?.id ?? "") === String(row?.id ?? "")) {
+            merged = mergeRuntimeMonotonic(merged, runtime);
+          }
+
+          // Bitmiş maç arşivi append-only kaynaktır. Aynı fixture kimliği + takım çifti
+          // eşleşiyorsa hiçbir waiting/canlı/runtime kaydı tamamlanmış sonucu geri alamaz.
+          const completed = completedMap[String(row?.id)];
+          if (completed &&
+              String(completed?.id ?? "") === String(row?.id ?? "") &&
+              completed?.home === row?.home &&
+              completed?.away === row?.away) {
+            const mergedEvents = Array.isArray(merged?.events) ? merged.events : [];
+            const completedEvents = Array.isArray(completed?.events) ? completed.events : [];
+            merged = {
+              ...merged,
+              homeScore: Number(completed?.homeScore ?? merged?.homeScore ?? 0),
+              awayScore: Number(completed?.awayScore ?? merged?.awayScore ?? 0),
+              played: true,
+              live: false,
+              timerRunning: false,
+              timerStartedAt: null,
+              elapsedSeconds: Number(completed?.elapsedSeconds ?? merged?.elapsedSeconds ?? 0),
+              matchPhase: "completed",
+              events: completedEvents.length >= mergedEvents.length ? completedEvents : mergedEvents,
+              cloudUpdatedAt: completed?.updatedAt || merged?.cloudUpdatedAt || "",
+            };
+          }
+          return merged;
         }));
         setRemoteFixtures(mappedFixtures);
       }
@@ -479,6 +512,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.active_fixture_ids" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.fixture_runtime" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.completed_fixture_results" }, refresh)
       .subscribe();
 
     return () => {

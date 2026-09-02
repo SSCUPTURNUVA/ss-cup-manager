@@ -23,6 +23,51 @@ function getMatchCenterKey(match, index = 0) {
   return String(match?.id ?? `${match?.home || ""}|${match?.away || ""}|${match?.week || ""}|${index}`);
 }
 
+async function syncCompletedFixtureArchive(match) {
+  const phase = match?.matchPhase || "waiting";
+  if (!match || match?.isKnockout === true || (match?.played !== true && phase !== "completed") || match?.id === null || match?.id === undefined || match?.id === "") return true;
+  const key = String(match.id);
+  try {
+    const { data: currentRow, error: readError } = await supabase
+      .from("app_state")
+      .select("value")
+      .eq("id", "completed_fixture_results")
+      .maybeSingle();
+    if (readError) throw readError;
+    const currentValue = currentRow?.value && typeof currentRow.value === "object" && !Array.isArray(currentRow.value)
+      ? { ...currentRow.value }
+      : {};
+    const existing = currentValue[key];
+    const incomingEvents = Array.isArray(match?.events) ? match.events : [];
+    const existingEvents = Array.isArray(existing?.events) ? existing.events : [];
+    currentValue[key] = {
+      id: match.id,
+      home: match.home || "",
+      away: match.away || "",
+      homeScore: Number(match.homeScore ?? 0),
+      awayScore: Number(match.awayScore ?? 0),
+      played: true,
+      live: false,
+      timerRunning: false,
+      timerStartedAt: null,
+      elapsedSeconds: Number(match.elapsedSeconds ?? existing?.elapsedSeconds ?? 0),
+      matchPhase: "completed",
+      events: incomingEvents.length >= existingEvents.length ? incomingEvents : existingEvents,
+      updatedAt: new Date().toISOString(),
+    };
+    const { error: writeError } = await supabase.from("app_state").upsert({
+      id: "completed_fixture_results",
+      value: currentValue,
+      updated_at: new Date().toISOString(),
+    });
+    if (writeError) throw writeError;
+    return true;
+  } catch (error) {
+    console.error("Tamamlanmış maç arşivi kaydedilemedi:", error);
+    return false;
+  }
+}
+
 async function syncFixtureRuntimeMirror(match) {
   if (!match || match?.isKnockout === true || match?.id === null || match?.id === undefined || match?.id === "") return true;
   const key = String(match.id);
@@ -646,7 +691,9 @@ export default function MatchCenter({
       if (activeMatch?.isKnockout === true) {
         await syncKnockoutStateToCloud(activeMatch);
       } else if (activeMatch) {
-        await Promise.all([syncLeagueFixtureWithRetry(activeMatch), syncFixtureRuntimeMirror(activeMatch)]);
+        const jobs = [syncLeagueFixtureWithRetry(activeMatch), syncFixtureRuntimeMirror(activeMatch)];
+        if (activeMatch.played === true || activeMatch.matchPhase === "completed") jobs.push(syncCompletedFixtureArchive(activeMatch));
+        await Promise.all(jobs);
       }
     } catch (error) {
       console.error("Supabase kayıt hatası:", error);
@@ -1307,8 +1354,12 @@ export default function MatchCenter({
     if (liveMatch.isKnockout === true) {
       await syncKnockoutStateToCloud(finishedMatch);
     } else {
-      const [fixtureSynced, mirrorSynced] = await Promise.all([syncLeagueFixtureWithRetry(finishedMatch), syncFixtureRuntimeMirror(finishedMatch)]);
-      cloudSynced = fixtureSynced || mirrorSynced;
+      const [fixtureSynced, mirrorSynced, archiveSynced] = await Promise.all([
+        syncLeagueFixtureWithRetry(finishedMatch),
+        syncFixtureRuntimeMirror(finishedMatch),
+        syncCompletedFixtureArchive(finishedMatch),
+      ]);
+      cloudSynced = fixtureSynced || mirrorSynced || archiveSynced;
     }
 
     await updateLiveMatch(finishPatch);

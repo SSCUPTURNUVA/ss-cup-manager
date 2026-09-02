@@ -483,6 +483,38 @@ export default function App() {
           });
         }
 
+        // Tamamlanmış maçlar ayrıca append-only arşivde tutulur. Yönetim açılışında da
+        // fixtures/runtime eski bir duruma dönse bile bitmiş maç geriye alınamaz.
+        const { data: completedRow, error: completedError } = await supabase
+          .from("app_state")
+          .select("value")
+          .eq("id", "completed_fixture_results")
+          .maybeSingle();
+        if (!completedError && completedRow?.value && typeof completedRow.value === "object" && !Array.isArray(completedRow.value)) {
+          const completedMap = completedRow.value;
+          data = data.map((row) => {
+            const completed = completedMap[String(row?.id)];
+            if (!completed ||
+                String(completed?.id ?? "") !== String(row?.id ?? "") ||
+                completed?.home !== row?.home ||
+                completed?.away !== row?.away) return row;
+            const rowEvents = Array.isArray(row?.events) ? row.events : [];
+            const completedEvents = Array.isArray(completed?.events) ? completed.events : [];
+            return {
+              ...row,
+              home_score: Number(completed?.homeScore ?? row?.home_score ?? 0),
+              away_score: Number(completed?.awayScore ?? row?.away_score ?? 0),
+              played: true,
+              live: false,
+              timer_running: false,
+              timer_started_at: null,
+              elapsed_seconds: Number(completed?.elapsedSeconds ?? row?.elapsed_seconds ?? 0),
+              match_phase: "completed",
+              events: completedEvents.length >= rowEvents.length ? completedEvents : rowEvents,
+            };
+          });
+        }
+
         // İnternet kesildiği anda kapanmışsa flush başarısız olabilir. Bu durumda
         // kuyruktaki veri, aynı fixture ID'si için buluttan DAHA YENİ olan gerçek
         // saha kaydıdır. Yalnız pending kuyruğunu uygularız; genel localStorage
