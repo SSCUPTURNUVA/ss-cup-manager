@@ -25,6 +25,20 @@ export default function SquadManager({ teams = [] }) {
   const localEditUntilRef = useRef(0);
   const cloudReadyRef = useRef(false);
   const applyingCloudRef = useRef(false);
+  const writeSeqRef = useRef(0);
+
+  async function commitSquads(nextValue) {
+    const seq = ++writeSeqRef.current;
+    localEditUntilRef.current = Date.now() + 15000;
+    localStorage.setItem("sscup-squads", JSON.stringify(nextValue));
+    setSquads(nextValue);
+
+    const ok = await syncAppStateWithRetry(CLOUD_KEY, nextValue);
+    if (seq === writeSeqRef.current) {
+      localEditUntilRef.current = ok ? Date.now() + 1200 : Date.now() + 15000;
+    }
+    return ok;
+  }
 
   useEffect(() => {
     localStorage.setItem("sscup-squads", JSON.stringify(squads));
@@ -63,12 +77,10 @@ export default function SquadManager({ teams = [] }) {
 
       const cloudValue = data?.value;
       const cloudIsObject = cloudValue && typeof cloudValue === "object" && !Array.isArray(cloudValue);
-      const cloudHasPlayers = cloudIsObject && Object.values(cloudValue).some(
-        (list) => Array.isArray(list) && list.length > 0
-      );
-      const localHasPlayers = Object.values(squads).some((list) => Array.isArray(list) && list.length > 0);
 
-      if (cloudHasPlayers) {
+      // BULUT TEK OTORİTE: Bulutta boş kadro bile geçerli bir durumdur.
+      // Eski telefon/PC localStorage verisi ASLA buluta geri seed edilmez.
+      if (cloudIsObject) {
         applyingCloudRef.current = true;
         setSquads(cloudValue);
         localStorage.setItem("sscup-squads", JSON.stringify(cloudValue));
@@ -78,20 +90,6 @@ export default function SquadManager({ teams = [] }) {
         }, 0);
       } else {
         cloudReadyRef.current = true;
-
-        // Bulutta {} / boş kadro varsa PC'deki dolu kadroyu ASLA ezme.
-        // Yerel oyuncuları buluta taşı; böylece telefon da aynı kadroyu görür.
-        if (localHasPlayers) {
-          const seeded = await syncAppStateWithRetry(CLOUD_KEY, squads);
-          if (!seeded) console.warn("Yerel kadro buluta gönderilmek üzere kuyruğa alındı.");
-        } else if (cloudIsObject) {
-          applyingCloudRef.current = true;
-          setSquads(cloudValue);
-          localStorage.setItem("sscup-squads", JSON.stringify(cloudValue));
-          window.setTimeout(() => {
-            applyingCloudRef.current = false;
-          }, 0);
-        }
       }
     }
 
@@ -125,15 +123,6 @@ export default function SquadManager({ teams = [] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!cloudReadyRef.current || applyingCloudRef.current) return;
-
-    const timer = window.setTimeout(async () => {
-      await syncAppStateWithRetry(CLOUD_KEY, squads);
-    }, 250);
-
-    return () => window.clearTimeout(timer);
-  }, [squads]);
 
   useEffect(() => {
     if (selectedTeam && !teams.some((team) => getTeamName(team) === selectedTeam)) {
@@ -181,11 +170,11 @@ export default function SquadManager({ teams = [] }) {
       shirtNumber: numericNumber,
     };
 
-    localEditUntilRef.current = Date.now() + 5000;
-    setSquads((current) => ({
-      ...current,
-      [selectedTeam]: [...(current[selectedTeam] || []), newPlayer].sort((a, b) => Number(a.shirtNumber) - Number(b.shirtNumber)),
-    }));
+    const next = {
+      ...squads,
+      [selectedTeam]: [...(squads[selectedTeam] || []), newPlayer].sort((a, b) => Number(a.shirtNumber) - Number(b.shirtNumber)),
+    };
+    commitSquads(next);
     setPlayerName("");
     setShirtNumber("");
     setMessage("Oyuncu kadroya eklendi ve cihazlar arasında eşitlenecek.");
@@ -220,13 +209,13 @@ export default function SquadManager({ teams = [] }) {
     );
     if (duplicateName) return setMessage("Bu oyuncu aynı takımda zaten kayıtlı.");
 
-    localEditUntilRef.current = Date.now() + 5000;
-    setSquads((current) => ({
-      ...current,
-      [selectedTeam]: (current[selectedTeam] || [])
+    const next = {
+      ...squads,
+      [selectedTeam]: (squads[selectedTeam] || [])
         .map((p) => (p.id === playerId ? { ...p, name: cleanName, shirtNumber: numericNumber } : p))
         .sort((a, b) => Number(a.shirtNumber) - Number(b.shirtNumber)),
-    }));
+    };
+    commitSquads(next);
     cancelEditPlayer();
     setMessage("Oyuncu bilgileri güncellendi.");
   }
@@ -235,18 +224,19 @@ export default function SquadManager({ teams = [] }) {
     const player = selectedSquad.find((item) => item.id === playerId);
     if (!player) return;
     if (!window.confirm(`${player.name} kadrodan silinsin mi?`)) return;
-    localEditUntilRef.current = Date.now() + 5000;
-    setSquads((current) => ({
-      ...current,
-      [selectedTeam]: (current[selectedTeam] || []).filter((item) => item.id !== playerId),
-    }));
+    const next = {
+      ...squads,
+      [selectedTeam]: (squads[selectedTeam] || []).filter((item) => item.id !== playerId),
+    };
+    commitSquads(next);
     setMessage("Oyuncu kadrodan silindi.");
   }
 
   function clearTeamSquad() {
     if (!selectedTeam || selectedSquad.length === 0) return;
     if (!window.confirm(`${selectedTeam} takımının bütün kadrosu silinecek. Emin misiniz?`)) return;
-    setSquads((current) => ({ ...current, [selectedTeam]: [] }));
+    const next = { ...squads, [selectedTeam]: [] };
+    commitSquads(next);
     setMessage("Takım kadrosu temizlendi.");
   }
 
@@ -284,10 +274,7 @@ export default function SquadManager({ teams = [] }) {
       shirtNumber: Number(row.shirtNumber),
     })).sort((a,b) => a.shirtNumber - b.shirtNumber);
     const next = { ...squads, [selectedTeam]: players };
-    localEditUntilRef.current = Date.now() + 10000;
-    setSquads(next);
-    localStorage.setItem("sscup-squads", JSON.stringify(next));
-    const cloudSaved = await syncAppStateWithRetry(CLOUD_KEY, next);
+    const cloudSaved = await commitSquads(next);
     setMessage(cloudSaved
       ? `✅ ${players.length} oyuncu tek seferde kaydedildi.`
       : `✅ ${players.length} oyuncu PC'ye kaydedildi; internet gelince buluta otomatik gönderilecek.`);
