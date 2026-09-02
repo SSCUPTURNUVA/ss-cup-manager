@@ -365,6 +365,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const [selectedMatch, setSelectedMatch] = useState(null);
 
   const refreshSequence = useRef(0);
+  const lastAppliedRefreshSequence = useRef(0);
 
   const refreshTeams = useCallback(async () => {
     const { data, error } = await supabase
@@ -391,8 +392,12 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       supabase.from("app_state").select("value,updated_at").eq("id", "fixtures_snapshot").maybeSingle(),
     ]);
 
-    // Yavaş kalan eski bir istek, yeni verinin üstüne yazamasın.
-    if (sequence !== refreshSequence.current) return;
+    // Realtime sırasında fixtures + runtime + snapshot art arda değişebilir.
+    // Önceki mantık yeni bir refresh BAŞLADIĞI anda devam eden isteği çöpe atıyordu;
+    // yoğun maç işlemlerinde hiçbir istek tamamlanamıyor ve public ancak F5 ile güncelleniyordu.
+    // Sadece DAHA YENİ bir cevap gerçekten ekrana uygulandıysa bu eski cevabı yok say.
+    if (sequence < lastAppliedRefreshSequence.current) return;
+    lastAppliedRefreshSequence.current = sequence;
 
     let mappedFixtures = null;
     let stagedKnockout = null;
