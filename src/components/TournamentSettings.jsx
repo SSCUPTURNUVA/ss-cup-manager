@@ -154,10 +154,11 @@ export default function TournamentSettings() {
     setNewSponsor("");
   }
 
-  async function saveSettings() {
+  function saveSettings() {
+    // Önce yerelde uygula ve tüm ekranlara ANINDA bildir.
+    // Bulut kaydı arka planda devam eder; saha kenarında kullanıcı beklemez.
     localStorage.setItem("sscup-settings", JSON.stringify(settings));
     localStorage.setItem("sscup-settings-updated-at", new Date().toISOString());
-    const cloudSaved = await syncAppStateWithRetry("settings", settings);
 
     window.dispatchEvent(
       new CustomEvent("sscup-settings-updated", {
@@ -165,9 +166,13 @@ export default function TournamentSettings() {
       })
     );
 
-    alert(cloudSaved
-      ? "Turnuva ayarları kaydedildi."
-      : "Ayarlar PC'ye kaydedildi. İnternet gelince buluta otomatik gönderilecek.");
+    void syncAppStateWithRetry("settings", settings).then((cloudSaved) => {
+      if (!cloudSaved) {
+        console.warn("Ayarlar yerelde kaydedildi; bulut senkronu kuyrukta bekliyor.");
+      }
+    });
+
+    alert("Turnuva ayarları kaydedildi.");
   }
 
   return (

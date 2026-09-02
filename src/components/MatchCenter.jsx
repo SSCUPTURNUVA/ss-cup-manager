@@ -305,7 +305,9 @@ export default function MatchCenter({
     );
   }
 
-  const activeMatchCenterKey = localStorage.getItem("sscup-match-center-active") || "";
+  const [activeMatchCenterKey, setActiveMatchCenterKey] = useState(() =>
+    localStorage.getItem("sscup-match-center-active") || ""
+  );
 
   // Maç Merkezi'ne hazırlanıp sonra geri çekilmiş eski bir maç localStorage'da
   // seçili kalabiliyordu. Böyle bir "waiting" kaydı, kendisinden daha erken
@@ -346,6 +348,7 @@ export default function MatchCenter({
   useEffect(() => {
     if (!stalePreparedSelection) return;
     localStorage.removeItem("sscup-match-center-active");
+    setActiveMatchCenterKey("");
   }, [stalePreparedSelection, activeMatchCenterKey]);
 
   const liveMatchIndex = fixtures.findIndex(
@@ -1018,7 +1021,10 @@ export default function MatchCenter({
 
     const nextIndex = fixtures.findIndex((match) => match === nextMatch || match?.id === nextMatch?.id);
     if (nextIndex >= 0) {
-      localStorage.setItem("sscup-match-center-active", getMatchCenterKey(nextMatch, nextIndex));
+      const nextActiveKey = getMatchCenterKey(nextMatch, nextIndex);
+      localStorage.setItem("sscup-match-center-active", nextActiveKey);
+      // Saha kenarında seçim Supabase/Realtime cevabını beklemeden anında ekrana yansısın.
+      setActiveMatchCenterKey(nextActiveKey);
     }
 
     // Maçı Maç Merkezi'ne almak yalnız seçim yapar; kayıtlı skor/gol/kart/timer

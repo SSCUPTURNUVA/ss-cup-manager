@@ -199,12 +199,25 @@ function statusText(match) {
 }
 
 function MatchDetailModal({ match, onClose, now, halfDurationMinutes }) {
-  if (!match) return null;
-  const events = getEvents(match).slice().reverse();
-  const penaltyEvents = getEvents(match).filter((event) => ["penalty_shootout_goal", "penalty_shootout_miss"].includes(event.type));
+  const eventsContainerRef = useRef(null);
+  const events = match ? getEvents(match) : [];
+  const penaltyEvents = match ? getEvents(match).filter((event) => ["penalty_shootout_goal", "penalty_shootout_miss"].includes(event.type)) : [];
   const homePenaltyEvents = penaltyEvents.filter((event) => event.team === match.home || event.side === "home");
   const awayPenaltyEvents = penaltyEvents.filter((event) => event.team === match.away || event.side === "away");
   const matchEvents = events.filter((event) => !["penalty_shootout_goal", "penalty_shootout_miss"].includes(event.type));
+  const latestEventId = matchEvents.length > 0 ? String(matchEvents[matchEvents.length - 1]?.id || "") : "";
+
+  useEffect(() => {
+    if (!match || !eventsContainerRef.current || matchEvents.length === 0) return;
+    const frame = window.requestAnimationFrame(() => {
+      const container = eventsContainerRef.current;
+      if (!container) return;
+      container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [match?.id, match?.knockoutKey, matchEvents.length, latestEventId]);
+
+  if (!match) return null;
   const liveMinute = getMinute(match, now, halfDurationMinutes);
   const showScore = match.live === true || match.played === true;
   return (
@@ -252,7 +265,7 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes }) {
         {matchEvents.length === 0 ? (
           <div className="public-modal-empty">{match.played ? "Bu maç için kayıtlı gol/kart olayı bulunmuyor." : "Maç başladığında goller ve kartlar burada görünecek."}</div>
         ) : (
-          <div className="public-modal-events">
+          <div className="public-modal-events" ref={eventsContainerRef}>
             {matchEvents.map((event) => (
               <div className="public-modal-event" key={event.id}>
                 <span className="public-modal-event-minute">{event.minute !== "" ? `${event.minute}'` : "•"}</span>
