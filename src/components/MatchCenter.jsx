@@ -102,6 +102,43 @@ async function syncFixtureRuntimeMirror(match) {
   }
 }
 
+
+async function syncFixturesSnapshot(fixtures) {
+  try {
+    const leagueFixtures = (Array.isArray(fixtures) ? fixtures : [])
+      .filter((match) => match?.isKnockout !== true && match?.id !== null && match?.id !== undefined && match?.id !== "")
+      .map((match) => ({
+        id: match.id,
+        home: match.home || "",
+        away: match.away || "",
+        date: match.date || null,
+        time: match.time || null,
+        field: match.field || match.pitch || null,
+        week: match.week ?? null,
+        homeScore: Number(match.homeScore ?? 0),
+        awayScore: Number(match.awayScore ?? 0),
+        played: match.played === true || match.matchPhase === "completed",
+        live: match.played !== true && match.matchPhase !== "completed" && match.live === true,
+        timerRunning: match.played !== true && match.matchPhase !== "completed" && match.timerRunning === true,
+        timerStartedAt: match.played === true || match.matchPhase === "completed" ? null : (match.timerStartedAt ?? null),
+        elapsedSeconds: Number(match.elapsedSeconds ?? 0),
+        matchPhase: match.played === true ? "completed" : (match.matchPhase || "waiting"),
+        events: Array.isArray(match.events) ? match.events : [],
+      }));
+
+    const { error } = await supabase.from("app_state").upsert({
+      id: "fixtures_snapshot",
+      value: { fixtures: leagueFixtures, updatedAt: new Date().toISOString() },
+      updated_at: new Date().toISOString(),
+    });
+    if (error) throw error;
+    return true;
+  } catch (error) {
+    console.error("Fikstür snapshot kaydedilemedi:", error);
+    return false;
+  }
+}
+
 function readMatchRules() {
   try {
     const saved = JSON.parse(localStorage.getItem("sscup-settings") || "{}");
@@ -688,12 +725,15 @@ export default function MatchCenter({
         match.live === true || (activeKey && getMatchCenterKey(match, index) === activeKey)
       );
 
+      const snapshotJob = syncFixturesSnapshot(updatedFixtures);
       if (activeMatch?.isKnockout === true) {
-        await syncKnockoutStateToCloud(activeMatch);
+        await Promise.all([syncKnockoutStateToCloud(activeMatch), snapshotJob]);
       } else if (activeMatch) {
-        const jobs = [syncLeagueFixtureWithRetry(activeMatch), syncFixtureRuntimeMirror(activeMatch)];
+        const jobs = [syncLeagueFixtureWithRetry(activeMatch), syncFixtureRuntimeMirror(activeMatch), snapshotJob];
         if (activeMatch.played === true || activeMatch.matchPhase === "completed") jobs.push(syncCompletedFixtureArchive(activeMatch));
         await Promise.all(jobs);
+      } else {
+        await snapshotJob;
       }
     } catch (error) {
       console.error("Supabase kayıt hatası:", error);

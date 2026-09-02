@@ -515,6 +515,45 @@ export default function App() {
           });
         }
 
+        // Yönetim her maç işleminde güncel fikstürün tamamını fixtures_snapshot'a yazar.
+        // fixtures tablosundaki gecikmiş/eski bir satır yönetim yeniden açıldığında gerçek
+        // saha durumunu geri alamaz. Kimlik + takım çifti eşleşmeden snapshot uygulanmaz.
+        const { data: snapshotRow, error: snapshotError } = await supabase
+          .from("app_state")
+          .select("value")
+          .eq("id", "fixtures_snapshot")
+          .maybeSingle();
+        if (!snapshotError && Array.isArray(snapshotRow?.value?.fixtures)) {
+          const snapshotMap = Object.fromEntries(
+            snapshotRow.value.fixtures
+              .filter((match) => match?.id !== null && match?.id !== undefined && match?.id !== "")
+              .map((match) => [String(match.id), match])
+          );
+          data = data.map((row) => {
+            const snap = snapshotMap[String(row?.id)];
+            if (!snap || String(snap?.id ?? "") !== String(row?.id ?? "") || snap?.home !== row?.home || snap?.away !== row?.away) return row;
+            const rowPhase = row?.match_phase || (row?.played === true ? "completed" : "waiting");
+            const snapPhase = snap?.matchPhase || (snap?.played === true ? "completed" : "waiting");
+            const rowEvents = Array.isArray(row?.events) ? row.events : [];
+            const snapEvents = Array.isArray(snap?.events) ? snap.events : [];
+            if (appPhaseRank(snapPhase) < appPhaseRank(rowPhase)) return row;
+            if (appPhaseRank(snapPhase) === appPhaseRank(rowPhase) && rowEvents.length > snapEvents.length) return row;
+            const completed = row?.played === true || snap?.played === true || rowPhase === "completed" || snapPhase === "completed";
+            return {
+              ...row,
+              home_score: Number(snap?.homeScore ?? row?.home_score ?? 0),
+              away_score: Number(snap?.awayScore ?? row?.away_score ?? 0),
+              played: completed,
+              live: !completed && snap?.live === true,
+              timer_running: !completed && snap?.timerRunning === true,
+              timer_started_at: completed ? null : (snap?.timerStartedAt ?? null),
+              elapsed_seconds: Number(snap?.elapsedSeconds ?? row?.elapsed_seconds ?? 0),
+              match_phase: completed ? "completed" : snapPhase,
+              events: snapEvents.length >= rowEvents.length ? snapEvents : rowEvents,
+            };
+          });
+        }
+
         // İnternet kesildiği anda kapanmışsa flush başarısız olabilir. Bu durumda
         // kuyruktaki veri, aynı fixture ID'si için buluttan DAHA YENİ olan gerçek
         // saha kaydıdır. Yalnız pending kuyruğunu uygularız; genel localStorage

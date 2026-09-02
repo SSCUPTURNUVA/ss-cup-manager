@@ -320,7 +320,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current;
 
-    const [fixturesResult, teamsResult, squadsResult, knockoutResult, activeFixtureResult, runtimeResult, completedResult] = await Promise.allSettled([
+    const [fixturesResult, teamsResult, squadsResult, knockoutResult, activeFixtureResult, runtimeResult, completedResult, snapshotResult] = await Promise.allSettled([
       supabase.from("fixtures").select("*").order("id"),
       supabase.from("teams").select("id,name").order("id"),
       supabase.from("app_state").select("value,updated_at").eq("id", "squads").maybeSingle(),
@@ -328,6 +328,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       supabase.from("app_state").select("value,updated_at").eq("id", "active_fixture_ids").maybeSingle(),
       supabase.from("app_state").select("value,updated_at").eq("id", "fixture_runtime").maybeSingle(),
       supabase.from("app_state").select("value,updated_at").eq("id", "completed_fixture_results").maybeSingle(),
+      supabase.from("app_state").select("value,updated_at").eq("id", "fixtures_snapshot").maybeSingle(),
     ]);
 
     // Yavaş kalan eski bir istek, yeni verinin üstüne yazamasın.
@@ -338,6 +339,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     let currentActiveIds = activeFixtureIdsRef.current;
     let runtimeMap = {};
     let completedMap = {};
+    let snapshotMap = {};
     if (runtimeResult.status === "fulfilled") {
       const { data: runtimeRow, error: runtimeError } = runtimeResult.value;
       if (!runtimeError && runtimeRow?.value && typeof runtimeRow.value === "object" && !Array.isArray(runtimeRow.value)) runtimeMap = runtimeRow.value;
@@ -346,6 +348,16 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     if (completedResult.status === "fulfilled") {
       const { data: completedRow, error: completedError } = completedResult.value;
       if (!completedError && completedRow?.value && typeof completedRow.value === "object" && !Array.isArray(completedRow.value)) completedMap = completedRow.value;
+    }
+
+    if (snapshotResult.status === "fulfilled") {
+      const { data: snapshotRow, error: snapshotError } = snapshotResult.value;
+      const list = !snapshotError && Array.isArray(snapshotRow?.value?.fixtures) ? snapshotRow.value.fixtures : [];
+      snapshotMap = Object.fromEntries(
+        list
+          .filter((match) => match?.id !== null && match?.id !== undefined && match?.id !== "")
+          .map((match) => [String(match.id), match])
+      );
     }
 
     if (activeFixtureResult.status === "fulfilled") {
@@ -387,6 +399,12 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
                   completed?.home === row?.home &&
                   completed?.away === row?.away) return true;
 
+              // Yönetimin tek-kaynak snapshot'ı bu maçı güncel/live/completed olarak biliyorsa
+              // active_fixture_ids onu publicten saklayamaz. Takım çifti de eşleşmeli.
+              const snap = snapshotMap[key];
+              if (snap && String(snap?.id ?? "") === key && snap?.home === row?.home && snap?.away === row?.away &&
+                  (snap?.played === true || snap?.matchPhase === "completed" || snap?.live === true)) return true;
+
               // Arşiv yazısı bir an gecikirse completed runtime da aynı korumayı sağlar.
               const runtime = runtimeMap[key];
               return Boolean(runtime &&
@@ -397,6 +415,16 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
         mappedFixtures = sortFixturesBySchedule(currentRows.map((row) => {
           let merged = mapCloudFixture(row);
+          const snap = snapshotMap[String(row?.id)];
+          if (snap &&
+              String(snap?.id ?? "") === String(row?.id ?? "") &&
+              snap?.home === row?.home &&
+              snap?.away === row?.away) {
+            merged = mergeRuntimeMonotonic(merged, {
+              ...snap,
+              updatedAt: snap?.updatedAt || "",
+            });
+          }
           const runtime = runtimeMap[String(row?.id)];
           if (runtime && String(runtime?.id ?? "") === String(row?.id ?? "")) {
             merged = mergeRuntimeMonotonic(merged, runtime);
@@ -531,6 +559,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.active_fixture_ids" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.fixture_runtime" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.completed_fixture_results" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.fixtures_snapshot" }, refresh)
       .subscribe();
 
     return () => {
