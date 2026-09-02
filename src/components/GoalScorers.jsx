@@ -1,73 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 
-export default function GoalScorers() {
-  const [goalStats, setGoalStats] = useState(() => {
-    try {
-      const saved =
-        localStorage.getItem("sscup-goals");
-
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
-
-  useEffect(() => {
-    function loadGoals() {
-      try {
-        const saved =
-          localStorage.getItem("sscup-goals");
-
-        setGoalStats(
-          saved ? JSON.parse(saved) : []
-        );
-      } catch {
-        setGoalStats([]);
-      }
-    }
-
-    function handleGoalsUpdated(event) {
-      if (Array.isArray(event.detail)) {
-        setGoalStats(event.detail);
-      } else {
-        loadGoals();
-      }
-    }
-
-    window.addEventListener(
-      "sscup-goals-updated",
-      handleGoalsUpdated
-    );
-
-    window.addEventListener(
-      "storage",
-      loadGoals
-    );
-
-    window.addEventListener(
-      "focus",
-      loadGoals
-    );
-
-    loadGoals();
-
-    return () => {
-      window.removeEventListener(
-        "sscup-goals-updated",
-        handleGoalsUpdated
-      );
-
-      window.removeEventListener(
-        "storage",
-        loadGoals
-      );
-
-      window.removeEventListener(
-        "focus",
-        loadGoals
-      );
-    };
-  }, []);
+export default function GoalScorers({ goalScorers = [] }) {
+  const goalStats = Array.isArray(goalScorers) ? goalScorers : [];
 
   const sortedGoalStats = useMemo(() => {
     return [...goalStats].sort((a, b) => {
@@ -91,27 +25,6 @@ export default function GoalScorers() {
     if (index === 2) return "🥉";
 
     return "⚽";
-  }
-
-  function clearGoalScorers() {
-    if (goalStats.length === 0) {
-      return;
-    }
-
-    const confirmed = window.confirm(
-      "Gol krallığı kayıtları silinsin mi? Maçları tekrar kaydederseniz otomatik yeniden oluşur."
-    );
-
-    if (!confirmed) {
-      return;
-    }
-
-    localStorage.setItem(
-      "sscup-goals",
-      JSON.stringify([])
-    );
-
-    setGoalStats([]);
   }
 
   return (
@@ -262,15 +175,6 @@ export default function GoalScorers() {
         </div>
       )}
 
-      {goalStats.length > 0 && (
-        <button
-          type="button"
-          onClick={clearGoalScorers}
-          style={{ marginTop: "20px" }}
-        >
-          🗑️ Gol Krallığını Temizle
-        </button>
-      )}
     </div>
   );
 }

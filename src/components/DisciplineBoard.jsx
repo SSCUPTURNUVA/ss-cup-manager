@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "../supabase";
 
 function getMatchEvents(match) {
   return Array.isArray(match?.events) ? match.events : [];
@@ -7,12 +8,103 @@ function getMatchEvents(match) {
 export default function DisciplineBoard({ fixtures = [], teams = [] }) {
   const [selectedTeam, setSelectedTeam] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
+  const [cloudEventFixtures, setCloudEventFixtures] = useState([]);
+
+  // Disiplin Kurulu yalnız bu cihazdaki React state'ine bağlı kalmasın.
+  // Kart başka bir yönetim cihazından girilse bile fixtures_snapshot/knockout
+  // üzerinden anında gelir; F5 ya da sayfa değiştirip geri dönmek gerekmez.
+  useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
+
+    async function refreshCloudEvents() {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const { data, error } = await supabase
+          .from("app_state")
+          .select("id,value,updated_at")
+          .in("id", ["fixtures_snapshot", "knockout"]);
+        if (error) throw error;
+        if (cancelled) return;
+
+        const rows = Array.isArray(data) ? data : [];
+        const snapshot = rows.find((row) => row?.id === "fixtures_snapshot")?.value;
+        const knockout = rows.find((row) => row?.id === "knockout")?.value;
+        const knockoutMatches = knockout && typeof knockout === "object"
+          ? [
+              ...(Array.isArray(knockout.quarter) ? knockout.quarter : []),
+              ...(Array.isArray(knockout.semi) ? knockout.semi : []),
+              ...(knockout.finalMatch ? [knockout.finalMatch] : []),
+              ...(knockout.thirdPlace ? [knockout.thirdPlace] : []),
+            ]
+          : [];
+
+        setCloudEventFixtures([
+          ...(Array.isArray(snapshot) ? snapshot : []),
+          ...knockoutMatches,
+        ]);
+      } catch (error) {
+        console.error("Disiplin kart senkron hatası:", error);
+      } finally {
+        inFlight = false;
+      }
+    }
+
+    refreshCloudEvents();
+    const poll = window.setInterval(refreshCloudEvents, 1200);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshCloudEvents();
+    };
+    window.addEventListener("focus", refreshCloudEvents);
+    document.addEventListener("visibilitychange", onVisible);
+
+    const channel = supabase
+      .channel(`sscup-discipline-${Math.random().toString(36).slice(2)}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "app_state" },
+        (payload) => {
+          const id = payload?.new?.id || payload?.old?.id;
+          if (id === "fixtures_snapshot" || id === "knockout") refreshCloudEvents();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(poll);
+      window.removeEventListener("focus", refreshCloudEvents);
+      document.removeEventListener("visibilitychange", onVisible);
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const eventFixtures = useMemo(() => {
+    const byKey = new Map();
+    const mergeMatch = (match, sourceIndex = 0) => {
+      if (!match) return;
+      const key = String(match.id || match.knockoutKey || `${match.home || ""}-${match.away || ""}-${match.date || ""}-${match.time || ""}-${sourceIndex}`);
+      const existing = byKey.get(key) || { ...match, events: [] };
+      const eventMap = new Map();
+      [...(Array.isArray(existing.events) ? existing.events : []), ...(Array.isArray(match.events) ? match.events : [])]
+        .forEach((event, index) => {
+          const eventKey = String(event?.id || event?.actionId || `${event?.type || event?.eventType || "event"}-${event?.team || event?.teamName || ""}-${event?.playerId || event?.playerName || event?.player || ""}-${event?.minute ?? ""}-${index}`);
+          eventMap.set(eventKey, event);
+        });
+      byKey.set(key, { ...existing, ...match, events: Array.from(eventMap.values()) });
+    };
+
+    (fixtures || []).forEach((match, index) => mergeMatch(match, index));
+    (cloudEventFixtures || []).forEach((match, index) => mergeMatch(match, index));
+    return Array.from(byKey.values());
+  }, [fixtures, cloudEventFixtures]);
 
   // Bütün maçlardaki kartları oyuncu bazında topla
   const disciplinaryData = useMemo(() => {
     const playerStats = {};
 
-    (fixtures || []).forEach((match) => {
+    (eventFixtures || []).forEach((match) => {
       const events = getMatchEvents(match);
 
       events.forEach((ev) => {
@@ -54,7 +146,7 @@ export default function DisciplineBoard({ fixtures = [], teams = [] }) {
     });
 
     return Object.values(playerStats);
-  }, [fixtures]);
+  }, [eventFixtures]);
 
   // Takım listesini ayıkla
   const teamList = useMemo(() => {

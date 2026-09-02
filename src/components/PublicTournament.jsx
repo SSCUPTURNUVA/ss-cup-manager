@@ -37,6 +37,8 @@ function normalizeEvent(event, index) {
     team: event?.team || event?.teamName || "",
     minute: event?.minute ?? event?.matchMinute ?? event?.time ?? event?.elapsedMinute ?? "",
     shirtNumber: event?.shirtNumber || event?.number || event?.jerseyNumber || "",
+    playerOutName: event?.playerOutName || event?.playerName || event?.player || event?.name || "",
+    playerInName: event?.playerInName || event?.secondPlayerName || "",
   };
 }
 
@@ -54,15 +56,15 @@ function getEvents(match) {
 }
 
 function mapCloudFixture(item) {
-  // match_phase maçın esas durumudur. live/played bayrakları gecikmiş bir yazıdan
-  // kısa süreli farklı gelse bile izleyici ekranı maçı kaybetmemeli.
-  const phase = item.match_phase || "waiting";
+  const played = item.played === true;
+  // Maç merkezine alınmış olmak tek başına CANLI değildir.
+  // Yalnız devre/penaltı gerçekten başladıysa canlı sayılır; waiting/null fikstürde kalır.
+  // Ayrıca fikstür tarihi henüz gelmemiş bir maç eski bir test kaydı yüzünden CANLI kalamaz.
   const activePhases = new Set(["first_half", "halftime", "second_half", "penalty"]);
-  const played = item.played === true || phase === "completed";
   const now = new Date();
   const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const isFutureFixture = Boolean(item.date && String(item.date).slice(0, 10) > todayKey);
-  const live = !played && !isFutureFixture && activePhases.has(phase);
+  const live = item.live === true && !played && !isFutureFixture && activePhases.has(item.match_phase);
   return {
     id: item.id,
     home: item.home,
@@ -78,7 +80,7 @@ function mapCloudFixture(item) {
     timerRunning: item.timer_running,
     timerStartedAt: item.timer_started_at,
     elapsedSeconds: item.elapsed_seconds,
-    matchPhase: phase,
+    matchPhase: item.match_phase,
     isKnockout: item.is_knockout === true,
     knockoutKey: item.knockout_key || "",
     stageLabel: item.stage || item.stage_label || "",
@@ -87,115 +89,6 @@ function mapCloudFixture(item) {
     events: Array.isArray(item.events) ? item.events : [],
     cloudUpdatedAt: item.updated_at || item.updatedAt || "",
   };
-}
-
-
-function matchPhaseRank(phase) {
-  const ranks = { waiting: 0, first_half: 1, halftime: 2, second_half: 3, penalty: 4, completed: 5 };
-  return ranks[phase || "waiting"] ?? 0;
-}
-
-function mergeRuntimeMonotonic(base, runtime) {
-  if (!runtime) return base;
-  const basePhase = base?.matchPhase || "waiting";
-  const runtimePhase = runtime?.matchPhase || "waiting";
-  const baseRank = matchPhaseRank(basePhase);
-  const runtimeRank = matchPhaseRank(runtimePhase);
-
-  // Bir maç ilerledikten/bitirildikten sonra eski runtime kaydı onu ASLA geriye alamaz.
-  if (runtimeRank < baseRank) return base;
-
-  const baseEvents = Array.isArray(base?.events) ? base.events : [];
-  const runtimeEvents = Array.isArray(runtime?.events) ? runtime.events : [];
-  if (runtimeRank === baseRank && baseEvents.length > runtimeEvents.length) return base;
-
-  const played = base?.played === true || runtime?.played === true || runtimePhase === "completed" || basePhase === "completed";
-  const finalPhase = played ? "completed" : runtimePhase;
-  return {
-    ...base,
-    homeScore: Number(runtime?.homeScore ?? base?.homeScore ?? 0),
-    awayScore: Number(runtime?.awayScore ?? base?.awayScore ?? 0),
-    played,
-    live: !played && ["first_half", "halftime", "second_half", "penalty"].includes(finalPhase),
-    timerRunning: !played && runtime?.timerRunning === true,
-    timerStartedAt: played ? null : (runtime?.timerStartedAt ?? null),
-    elapsedSeconds: Number(runtime?.elapsedSeconds ?? base?.elapsedSeconds ?? 0),
-    matchPhase: finalPhase,
-    events: runtimeEvents.length >= baseEvents.length ? runtimeEvents : baseEvents,
-    cloudUpdatedAt: runtime?.updatedAt || base?.cloudUpdatedAt || "",
-  };
-}
-
-function normalizePublicFixtureCandidate(match) {
-  if (!match) return null;
-  if (Object.prototype.hasOwnProperty.call(match, "home_score") || Object.prototype.hasOwnProperty.call(match, "match_phase")) {
-    return mapCloudFixture(match);
-  }
-  return {
-    ...match,
-    played: match.played === true || match.matchPhase === "completed",
-    live: match.played === true || match.matchPhase === "completed" ? false : match.live === true,
-    timerRunning: match.played === true || match.matchPhase === "completed" ? false : match.timerRunning === true,
-    matchPhase: match.played === true ? "completed" : (match.matchPhase || "waiting"),
-    events: Array.isArray(match.events) ? match.events : [],
-    homeScore: Number(match.homeScore ?? 0),
-    awayScore: Number(match.awayScore ?? 0),
-  };
-}
-
-function cloudTime(value) {
-  const time = Date.parse(value || "");
-  return Number.isFinite(time) ? time : 0;
-}
-
-function isMoreAdvancedFixture(candidate, incoming) {
-  if (!candidate) return false;
-  if (!incoming) return true;
-  if (String(candidate?.home || "") !== String(incoming?.home || "") ||
-      String(candidate?.away || "") !== String(incoming?.away || "")) return false;
-
-  const candidatePhase = candidate?.played === true ? "completed" : (candidate?.matchPhase || "waiting");
-  const incomingPhase = incoming?.played === true ? "completed" : (incoming?.matchPhase || "waiting");
-  const candidateRank = matchPhaseRank(candidatePhase);
-  const incomingRank = matchPhaseRank(incomingPhase);
-  if (candidateRank > incomingRank) {
-    const candidateTime = cloudTime(candidate?.cloudUpdatedAt || candidate?.updatedAt);
-    const incomingTime = cloudTime(incoming?.cloudUpdatedAt || incoming?.updatedAt);
-    // Yönetimde bilinçli "maçı yeniden aç" işlemi daha yeni bir waiting kaydı üretirse
-    // eski completed/live görüntüsü bunu kilitlemesin.
-    if (incomingTime > candidateTime && incomingTime > 0) return false;
-    return true;
-  }
-
-  const candidateEvents = Array.isArray(candidate?.events) ? candidate.events.length : 0;
-  const incomingEvents = Array.isArray(incoming?.events) ? incoming.events.length : 0;
-  if (candidateRank === incomingRank && candidateEvents > incomingEvents) return true;
-
-  // Aynı fazda publicte görünen gerçek skorun 0-0/waiting cevabıyla silinmesini engelle.
-  if (candidateRank > 0 && incomingRank === candidateRank) {
-    const candidateScore = Number(candidate?.homeScore ?? 0) + Number(candidate?.awayScore ?? 0);
-    const incomingScore = Number(incoming?.homeScore ?? 0) + Number(incoming?.awayScore ?? 0);
-    if (candidateScore > incomingScore && incomingScore === 0) return true;
-  }
-  return false;
-}
-
-function keepVisibleMatchState(incomingFixtures, previousFixtures, initialFixtures) {
-  const incoming = Array.isArray(incomingFixtures) ? incomingFixtures : [];
-  const result = new Map(incoming.map((match) => [String(match?.id), match]));
-  const protectedSources = [
-    ...(Array.isArray(previousFixtures) ? previousFixtures : []),
-    ...(Array.isArray(initialFixtures) ? initialFixtures : []),
-  ];
-
-  for (const raw of protectedSources) {
-    const candidate = normalizePublicFixtureCandidate(raw);
-    if (!candidate?.id) continue;
-    const key = String(candidate.id);
-    const current = result.get(key);
-    if (isMoreAdvancedFixture(candidate, current)) result.set(key, candidate);
-  }
-  return sortFixturesBySchedule([...result.values()]);
 }
 
 function calculateStandings(teams, fixtures) {
@@ -239,6 +132,12 @@ function calculateStandings(teams, fixtures) {
 function deriveScorers(fixtures) {
   const totals = {};
   (fixtures || []).forEach((match) => {
+    const phase = match?.matchPhase || match?.match_phase || "waiting";
+    const countsForStats =
+      match?.played === true ||
+      (match?.live === true && ["first_half", "halftime", "second_half", "penalty"].includes(phase));
+    if (!countsForStats) return;
+
     getEvents(match)
       .filter((event) => GOAL_EVENT_TYPES.has(event.type))
       .forEach((event) => {
@@ -354,7 +253,20 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes }) {
               <div className="public-modal-event" key={event.id}>
                 <span className="public-modal-event-minute">{event.minute !== "" ? `${event.minute}'` : "•"}</span>
                 <span className="public-modal-event-icon">{event.icon}</span>
-                <div><b>{event.label}</b><strong>{event.player}</strong><small>{event.team}</small></div>
+                <div>
+                  <b>{event.label}</b>
+                  {event.type === "substitution" ? (
+                    <>
+                      <strong>Çıktı: {event.playerOutName || event.player}</strong>
+                      <small>Girdi: {event.playerInName || "Oyuncu"} • {event.team}</small>
+                    </>
+                  ) : (
+                    <>
+                      <strong>{event.player}</strong>
+                      <small>{event.team}</small>
+                    </>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -367,19 +279,19 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes }) {
 export default function PublicTournament({ teams = [], fixtures = [], standings = [], goalScorers = [], settings = {} }) {
   const [activeTab, setActiveTab] = useState("overview");
   const [remoteFixtures, setRemoteFixtures] = useState(null);
-  const [publicMatchCenterId, setPublicMatchCenterId] = useState("");
-  const [publicResetFixtureId, setPublicResetFixtureId] = useState("");
   const [remoteTeams, setRemoteTeams] = useState(null);
   const [remoteSquads, setRemoteSquads] = useState(null);
   const [remoteKnockout, setRemoteKnockout] = useState([]);
+  const [remoteSettings, setRemoteSettings] = useState(null);
   const [activeFixtureIds, setActiveFixtureIds] = useState(null);
+  const [publicMatchCenterId, setPublicMatchCenterId] = useState("");
   const activeFixtureIdsRef = useRef(null);
   const [now, setNow] = useState(Date.now());
   const [lastSync, setLastSync] = useState(null);
   const [selectedMatch, setSelectedMatch] = useState(null);
 
   const refreshSequence = useRef(0);
-  const lastAppliedRefreshSequence = useRef(0);
+  const refreshInFlight = useRef(false);
 
   const refreshTeams = useCallback(async () => {
     const { data, error } = await supabase
@@ -393,253 +305,120 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   }, []);
 
   const refresh = useCallback(async () => {
+    // Telefonda ağ 1 saniyeden yavaşsa üst üste refresh başlatmak eski kodda
+    // her cevabı iptal ediyordu. Tek istek bitsin, sonra yenisi başlasın.
+    if (refreshInFlight.current) return;
+    refreshInFlight.current = true;
     const sequence = ++refreshSequence.current;
 
-    const [fixturesResult, teamsResult, squadsResult, knockoutResult, activeFixtureResult, publicCenterResult, runtimeResult, completedResult, snapshotResult] = await Promise.allSettled([
-      supabase.from("fixtures").select("*").order("id"),
-      supabase.from("teams").select("id,name").order("id"),
-      supabase.from("app_state").select("value,updated_at").eq("id", "squads").maybeSingle(),
-      supabase.from("app_state").select("value,updated_at").eq("id", "knockout").maybeSingle(),
-      supabase.from("app_state").select("value,updated_at").eq("id", "active_fixture_ids").maybeSingle(),
-      supabase.from("app_state").select("value,updated_at").eq("id", "public_match_center").maybeSingle(),
-      supabase.from("app_state").select("value,updated_at").eq("id", "fixture_runtime").maybeSingle(),
-      supabase.from("app_state").select("value,updated_at").eq("id", "completed_fixture_results").maybeSingle(),
-      supabase.from("app_state").select("value,updated_at").eq("id", "fixtures_snapshot").maybeSingle(),
-    ]);
+    try {
+      const [fixturesResult, teamsResult, appStateResult] = await Promise.all([
+        supabase.from("fixtures").select("*").order("id"),
+        supabase.from("teams").select("id,name").order("id"),
+        supabase.from("app_state")
+          .select("id,value,updated_at")
+          .in("id", ["squads", "knockout", "active_fixture_ids", "settings", "fixtures_snapshot", "public_match_center"]),
+      ]);
 
-    // Realtime sırasında fixtures + runtime + snapshot art arda değişebilir.
-    // Önceki mantık yeni bir refresh BAŞLADIĞI anda devam eden isteği çöpe atıyordu;
-    // yoğun maç işlemlerinde hiçbir istek tamamlanamıyor ve public ancak F5 ile güncelleniyordu.
-    // Sadece DAHA YENİ bir cevap gerçekten ekrana uygulandıysa bu eski cevabı yok say.
-    if (sequence < lastAppliedRefreshSequence.current) return;
-    lastAppliedRefreshSequence.current = sequence;
+      if (sequence !== refreshSequence.current) return;
 
-    let mappedFixtures = null;
-    let stagedKnockout = null;
-    let currentActiveIds = activeFixtureIdsRef.current;
-    if (publicCenterResult.status === "fulfilled") {
-      const { data: centerRow, error: centerError } = publicCenterResult.value;
-      if (!centerError) setPublicMatchCenterId(String(centerRow?.value?.matchId || ""));
-    }
-    let runtimeMap = {};
-    let completedMap = {};
-    let snapshotMap = {};
-    let snapshotFixtures = [];
-    let snapshotUpdatedAt = "";
-    if (runtimeResult.status === "fulfilled") {
-      const { data: runtimeRow, error: runtimeError } = runtimeResult.value;
-      if (!runtimeError && runtimeRow?.value && typeof runtimeRow.value === "object" && !Array.isArray(runtimeRow.value)) runtimeMap = runtimeRow.value;
-    }
+      const stateRows = Array.isArray(appStateResult?.data) ? appStateResult.data : [];
+      const stateById = new Map(stateRows.map((row) => [row.id, row]));
+      const activeRow = stateById.get("active_fixture_ids");
+      const ids = Array.isArray(activeRow?.value?.ids) ? activeRow.value.ids : null;
+      activeFixtureIdsRef.current = ids;
+      setActiveFixtureIds(ids);
 
-    if (completedResult.status === "fulfilled") {
-      const { data: completedRow, error: completedError } = completedResult.value;
-      if (!completedError && completedRow?.value && typeof completedRow.value === "object" && !Array.isArray(completedRow.value)) completedMap = completedRow.value;
-    }
+      const activeIdSet = Array.isArray(ids) ? new Set(ids.map((id) => String(id))) : null;
+      let mappedFixtures = null;
 
-    if (snapshotResult.status === "fulfilled") {
-      const { data: snapshotRow, error: snapshotError } = snapshotResult.value;
-      const list = !snapshotError && Array.isArray(snapshotRow?.value?.fixtures) ? snapshotRow.value.fixtures : [];
-      snapshotFixtures = list;
-      snapshotUpdatedAt = snapshotRow?.value?.updatedAt || snapshotRow?.updated_at || "";
-      snapshotMap = Object.fromEntries(
-        list
-          .filter((match) => match?.id !== null && match?.id !== undefined && match?.id !== "")
-          .map((match) => [String(match.id), match])
-      );
-    }
-
-    if (activeFixtureResult.status === "fulfilled") {
-      const { data: activeRow, error: activeError } = activeFixtureResult.value;
-      if (!activeError) {
-        const ids = Array.isArray(activeRow?.value?.ids) ? activeRow.value.ids : null;
-        currentActiveIds = ids;
-        activeFixtureIdsRef.current = ids;
-        setActiveFixtureIds(ids);
-      }
-    }
-
-    const fixtureRows = fixturesResult.status === "fulfilled" && !fixturesResult.value?.error && Array.isArray(fixturesResult.value?.data)
-      ? fixturesResult.value.data
-      : [];
-
-    if (snapshotFixtures.length > 0 || fixtureRows.length > 0) {
-      const data = fixtureRows;
-        // Yönetim snapshot'ı mevcutsa PUBLIC için esas fikstür budur.
-        // Önceki kod snapshot'ı yalnız fixtures tablosunda zaten bulunan satırların üstüne
-        // bindiriyordu. Supabase fixtures cevabında güncel maç eksikse public ilk doğru
-        // görüntüden sonra remoteFixtures ile o maçı tamamen siliyordu.
-        const sourceRows = snapshotFixtures.length > 0
-          ? snapshotFixtures.map((match) => ({
-              id: match.id,
-              home: match.home || "",
-              away: match.away || "",
-              date: match.date || null,
-              time: match.time || null,
-              pitch: match.field || match.pitch || null,
-              field: match.field || match.pitch || null,
-              week: match.week ?? null,
-              home_score: Number(match.homeScore ?? 0),
-              away_score: Number(match.awayScore ?? 0),
-              played: match.played === true || match.matchPhase === "completed",
-              live: match.live === true,
-              timer_running: match.timerRunning === true,
-              timer_started_at: match.timerStartedAt ?? null,
-              elapsed_seconds: Number(match.elapsedSeconds ?? 0),
-              match_phase: match.played === true ? "completed" : (match.matchPhase || "waiting"),
-              events: Array.isArray(match.events) ? match.events : [],
-              updated_at: match.updatedAt || snapshotUpdatedAt || "",
-            }))
-          : data;
-
-        // active_fixture_ids Maç Merkezi seçimi değildir; DrawManager mevcut turnuvanın
-        // TÜM lig fikstür ID'lerini buraya yazar. Supabase DELETE/RLS eski satırları
-        // bıraksa bile canlı takip yalnız güncel turnuvanın maçlarını göstermelidir.
-        // Bu filtre eski test maçının (ör. 21:00) gecenin en başında kalmasını da önler.
-        // active_fixture_ids bazen Supabase/app_state yenilenirken geçici olarak [] dönebilir.
-        // Boş dizi "aktif fikstür yok" anlamına gelmez; filtre uygularsak canlı ekran
-        // bir yenilemede bütün maçları silip sonraki yenilemede tekrar gösterir.
-        // Yalnız gerçekten en az bir aktif ID varsa filtrele.
-        // Snapshot zaten yönetimdeki güncel turnuvanın tamamıdır; snapshot kullanılırken
-        // active_fixture_ids ile tekrar filtrelemek doğru maçı yeniden saklayabilir.
-        const activeIdSet = snapshotFixtures.length > 0
-          ? null
-          : (Array.isArray(currentActiveIds) && currentActiveIds.length > 0
-              ? new Set(currentActiveIds.map((id) => String(id)))
-              : null);
-
+      if (!fixturesResult.error && Array.isArray(fixturesResult.data)) {
         const currentRows = activeIdSet
-          ? sourceRows.filter((row) => {
-              const key = String(row?.id);
-              if (activeIdSet.has(key)) return true;
-
-              // Tamamlanan maç aktif fikstür ID listesinden yanlışlıkla düşse bile
-              // public ekrandan ASLA kaybolamaz. Önceki kod bu filtreyi arşiv merge'inden
-              // önce uyguladığı için bitmiş maç ilk görüntüden sonra siliniyordu.
-              const completed = completedMap[key];
-              if (completed &&
-                  String(completed?.id ?? "") === key &&
-                  completed?.home === row?.home &&
-                  completed?.away === row?.away) return true;
-
-              // Yönetimin tek-kaynak snapshot'ı bu maçı güncel/live/completed olarak biliyorsa
-              // active_fixture_ids onu publicten saklayamaz. Takım çifti de eşleşmeli.
-              const snap = snapshotMap[key];
-              if (snap && String(snap?.id ?? "") === key && snap?.home === row?.home && snap?.away === row?.away &&
-                  (snap?.played === true || snap?.matchPhase === "completed" || snap?.live === true)) return true;
-
-              // Arşiv yazısı bir an gecikirse completed runtime da aynı korumayı sağlar.
-              const runtime = runtimeMap[key];
-              return Boolean(runtime &&
-                String(runtime?.id ?? "") === key &&
-                (runtime?.played === true || runtime?.matchPhase === "completed"));
-            })
-          : sourceRows;
-
-        mappedFixtures = sortFixturesBySchedule(currentRows.map((row) => {
-          let merged = mapCloudFixture(row);
-          const snap = snapshotMap[String(row?.id)];
-          if (snap &&
-              String(snap?.id ?? "") === String(row?.id ?? "") &&
-              snap?.home === row?.home &&
-              snap?.away === row?.away) {
-            merged = mergeRuntimeMonotonic(merged, {
-              ...snap,
-              updatedAt: snap?.updatedAt || "",
-            });
-          }
-          const runtime = runtimeMap[String(row?.id)];
-          if (runtime && String(runtime?.id ?? "") === String(row?.id ?? "")) {
-            merged = mergeRuntimeMonotonic(merged, runtime);
-          }
-
-          // Bitmiş maç arşivi append-only kaynaktır. Aynı fixture kimliği + takım çifti
-          // eşleşiyorsa hiçbir waiting/canlı/runtime kaydı tamamlanmış sonucu geri alamaz.
-          const completed = completedMap[String(row?.id)];
-          if (completed &&
-              String(completed?.id ?? "") === String(row?.id ?? "") &&
-              completed?.home === row?.home &&
-              completed?.away === row?.away) {
-            const mergedEvents = Array.isArray(merged?.events) ? merged.events : [];
-            const completedEvents = Array.isArray(completed?.events) ? completed.events : [];
-            merged = {
-              ...merged,
-              homeScore: Number(completed?.homeScore ?? merged?.homeScore ?? 0),
-              awayScore: Number(completed?.awayScore ?? merged?.awayScore ?? 0),
-              played: true,
-              live: false,
-              timerRunning: false,
-              timerStartedAt: null,
-              elapsedSeconds: Number(completed?.elapsedSeconds ?? merged?.elapsedSeconds ?? 0),
-              matchPhase: "completed",
-              events: completedEvents.length >= mergedEvents.length ? completedEvents : mergedEvents,
-              cloudUpdatedAt: completed?.updatedAt || merged?.cloudUpdatedAt || "",
-            };
-          }
-          return merged;
-        }));
-        setRemoteFixtures((previous) => keepVisibleMatchState(mappedFixtures, previous, fixtures));
-    }
-
-    if (teamsResult.status === "fulfilled") {
-      const { data: teamRows, error: teamsError } = teamsResult.value;
-      if (!teamsError && Array.isArray(teamRows)) {
-        setRemoteTeams(teamRows.map((row) => row?.name).filter(Boolean));
+          ? fixturesResult.data.filter((row) => activeIdSet.has(String(row?.id)))
+          : fixturesResult.data;
+        mappedFixtures = sortFixturesBySchedule(currentRows.map(mapCloudFixture));
       }
-    }
 
-    if (squadsResult.status === "fulfilled") {
-      const { data: squadsRow, error: squadsError } = squadsResult.value;
-      if (!squadsError) {
-        const value = squadsRow?.value;
-        if (value && typeof value === "object" && !Array.isArray(value)) {
-          setRemoteSquads(value);
-        } else {
-          setRemoteSquads({});
-        }
+      // fixtures tablosu skor + played için TEK OTORİTEDİR. Snapshot yalnız
+      // canlı runtime (faz/sayaç/olaylar) taşır. Böylece eski snapshot 3 bitmiş
+      // maçı tekrar oynanmış yapamaz.
+      const snapshotRow = stateById.get("fixtures_snapshot");
+      if (Array.isArray(mappedFixtures) && Array.isArray(snapshotRow?.value)) {
+        const snapshotById = new Map(snapshotRow.value.map((m) => [String(m?.id), m]));
+        mappedFixtures = mappedFixtures.map((base) => {
+          const runtime = snapshotById.get(String(base?.id));
+          if (!runtime) return base;
+          return {
+            ...base,
+            live: base.played !== true && runtime?.live === true,
+            timerRunning: runtime?.timerRunning === true,
+            timerStartedAt: runtime?.timerStartedAt ?? null,
+            elapsedSeconds: Number(runtime?.elapsedSeconds ?? 0),
+            matchPhase: base.played === true ? "completed" : (runtime?.matchPhase || "waiting"),
+            events: Array.isArray(runtime?.events) ? runtime.events : [],
+            goals: Array.isArray(runtime?.goals) ? runtime.goals : [],
+            homePenalties: runtime?.homePenalties ?? runtime?.homePen ?? base.homePenalties ?? "",
+            awayPenalties: runtime?.awayPenalties ?? runtime?.awayPen ?? base.awayPenalties ?? "",
+            cloudUpdatedAt: snapshotRow?.updated_at || base.cloudUpdatedAt || "",
+          };
+        });
       }
-    }
 
-    if (knockoutResult.status === "fulfilled") {
-      const { data: knockoutRow, error: knockoutError } = knockoutResult.value;
-      if (!knockoutError) {
-        const value = knockoutRow?.value && typeof knockoutRow.value === "object" ? knockoutRow.value : {};
-        const cloudUpdatedAt = knockoutRow?.updated_at || "";
-        stagedKnockout = [
-          ...(Array.isArray(value.quarter) ? value.quarter.map((m, i) => ({ ...m, knockoutKey: `quarter-${i}`, stageLabel: "ÇEYREK FİNAL" })) : []),
-          ...(Array.isArray(value.semi) ? value.semi.map((m, i) => ({ ...m, knockoutKey: `semi-${i}`, stageLabel: "YARI FİNAL" })) : []),
-          ...(value.finalMatch ? [{ ...value.finalMatch, knockoutKey: "final-0", stageLabel: "FİNAL" }] : []),
-          ...(value.thirdPlace ? [{ ...value.thirdPlace, knockoutKey: "third-place-0", stageLabel: "3.'LÜK MAÇI" }] : []),
-        ].filter((m) => m?.home && m?.away).map((m, i) => ({
-          ...m,
-          id: m.id || `ko-${m.knockoutKey || i}`,
-          isKnockout: true,
-          played: m.played === true,
-          live: m.live === true && m.played !== true && m.matchPhase !== "completed" && m.matchPhase !== "waiting",
-          homePenalties: m.homePenalties ?? m.homePen ?? "",
-          awayPenalties: m.awayPenalties ?? m.awayPen ?? "",
-          events: Array.isArray(m.events) ? m.events : [],
-          field: m.field || m.pitch || "Saha 1",
-          cloudUpdatedAt: m.updated_at || m.updatedAt || cloudUpdatedAt,
-        }));
-        setRemoteKnockout(stagedKnockout);
+      if (Array.isArray(mappedFixtures)) setRemoteFixtures(mappedFixtures);
+
+      if (!teamsResult.error && Array.isArray(teamsResult.data)) {
+        setRemoteTeams(teamsResult.data.map((row) => row?.name).filter(Boolean));
       }
+
+      const squadsRow = stateById.get("squads");
+      const squadsValue = squadsRow?.value;
+      setRemoteSquads(squadsValue && typeof squadsValue === "object" && !Array.isArray(squadsValue) ? squadsValue : {});
+
+      const settingsRow = stateById.get("settings");
+      if (settingsRow?.value && typeof settingsRow.value === "object" && !Array.isArray(settingsRow.value)) {
+        setRemoteSettings(settingsRow.value);
+      }
+
+      const centerRow = stateById.get("public_match_center");
+      setPublicMatchCenterId(String(centerRow?.value?.matchId || ""));
+
+      let stagedKnockout = null;
+      const knockoutRow = stateById.get("knockout");
+      const value = knockoutRow?.value && typeof knockoutRow.value === "object" ? knockoutRow.value : {};
+      const cloudUpdatedAt = knockoutRow?.updated_at || "";
+      stagedKnockout = [
+        ...(Array.isArray(value.quarter) ? value.quarter.map((m, i) => ({ ...m, knockoutKey: `quarter-${i}`, stageLabel: "ÇEYREK FİNAL" })) : []),
+        ...(Array.isArray(value.semi) ? value.semi.map((m, i) => ({ ...m, knockoutKey: `semi-${i}`, stageLabel: "YARI FİNAL" })) : []),
+        ...(value.finalMatch ? [{ ...value.finalMatch, knockoutKey: "final-0", stageLabel: "FİNAL" }] : []),
+        ...(value.thirdPlace ? [{ ...value.thirdPlace, knockoutKey: "third-place-0", stageLabel: "3.'LÜK MAÇI" }] : []),
+      ].filter((m) => m?.home && m?.away).map((m, i) => ({
+        ...m,
+        id: m.id || `ko-${m.knockoutKey || i}`,
+        isKnockout: true,
+        played: m.played === true,
+        live: m.live === true && m.played !== true && m.matchPhase !== "completed" && m.matchPhase !== "waiting",
+        homePenalties: m.homePenalties ?? m.homePen ?? "",
+        awayPenalties: m.awayPenalties ?? m.awayPen ?? "",
+        events: Array.isArray(m.events) ? m.events : [],
+        field: m.field || m.pitch || "Saha 1",
+        cloudUpdatedAt: m.updated_at || m.updatedAt || cloudUpdatedAt,
+      }));
+      setRemoteKnockout(stagedKnockout);
+
+      setLastSync(new Date());
+      setSelectedMatch((current) => {
+        if (!current) return current;
+        const candidates = [...(mappedFixtures || []), ...(stagedKnockout || [])];
+        return candidates.find((m) =>
+          (current.knockoutKey && m.knockoutKey === current.knockoutKey) ||
+          String(m.id) === String(current.id)
+        ) || null;
+      });
+    } catch (error) {
+      console.error("Canlı takip yenileme hatası:", error);
+    } finally {
+      refreshInFlight.current = false;
     }
-
-    setLastSync(new Date());
-
-    // Açık maç detayını da canlı veriyle güncelle. Eski maç nesnesine kilitlenmesin.
-    setSelectedMatch((current) => {
-      if (!current) return current;
-      const candidates = [
-        ...(mappedFixtures || []),
-        ...(stagedKnockout || []),
-      ];
-      const updated = candidates.find((m) =>
-        (current.knockoutKey && m.knockoutKey === current.knockoutKey) ||
-        String(m.id) === String(current.id)
-      );
-      return updated || null;
-    });
   }, []);
 
   useEffect(() => {
@@ -657,70 +436,9 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     };
   }, [refreshTeams]);
 
-  // SAHA GÜVENLİ MODU:
-  // Public ekranın kritik maç verisi tek hafif sorgudan gelir:
-  // fixtures_snapshot = skor/faz/olaylar, public_match_center = hazırlanan maç.
-  // Bu poll realtime çalışmasa bile açık sayfayı F5 istemeden güncel tutar.
-  useEffect(() => {
-    let disposed = false;
-
-    const pullPublicMatchState = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("app_state")
-          .select("id,value,updated_at")
-          .in("id", ["fixtures_snapshot", "public_match_center", "fixture_reopen_reset"]);
-
-        if (disposed || error || !Array.isArray(data)) return;
-
-        const snapshotRow = data.find((row) => row?.id === "fixtures_snapshot");
-        const centerRow = data.find((row) => row?.id === "public_match_center");
-        const resetRow = data.find((row) => row?.id === "fixture_reopen_reset");
-
-        if (resetRow) {
-          setPublicResetFixtureId(String(resetRow?.value?.matchId || ""));
-        }
-
-        if (centerRow) {
-          setPublicMatchCenterId(String(centerRow?.value?.matchId || ""));
-        }
-
-        if (Array.isArray(snapshotRow?.value?.fixtures)) {
-          const updatedAt = snapshotRow?.value?.updatedAt || snapshotRow?.updated_at || "";
-          const mapped = sortFixturesBySchedule(
-            snapshotRow.value.fixtures
-              .filter((match) => match?.isKnockout !== true && match?.id !== null && match?.id !== undefined && match?.id !== "")
-              .map((match) => normalizePublicFixtureCandidate({
-                ...match,
-                updatedAt: match?.updatedAt || updatedAt,
-                cloudUpdatedAt: match?.cloudUpdatedAt || updatedAt,
-              }))
-              .filter(Boolean)
-          );
-
-          if (!disposed) {
-            setRemoteFixtures((previous) => keepVisibleMatchState(mapped, previous, fixtures));
-          }
-        }
-
-        if (!disposed) setLastSync(new Date());
-      } catch (error) {
-        console.warn("Public maç durumu yenileme hatası:", error);
-      }
-    };
-
-    pullPublicMatchState();
-    const publicStatePoll = window.setInterval(pullPublicMatchState, 1000);
-
-    return () => {
-      disposed = true;
-      window.clearInterval(publicStatePoll);
-    };
-  }, [fixtures]);
-
   useEffect(() => {
     refresh();
-    const poll = window.setInterval(refresh, 3000);
+    const poll = window.setInterval(refresh, 1000);
 
     const onVisible = () => {
       if (document.visibilityState === "visible") refresh();
@@ -739,10 +457,9 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.squads" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.active_fixture_ids" }, refresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.public_match_center" }, refresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.fixture_runtime" }, refresh)
-      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.completed_fixture_results" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.settings" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.fixtures_snapshot" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.public_match_center" }, refresh)
       .subscribe();
 
     return () => {
@@ -768,6 +485,9 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     return () => window.removeEventListener("keydown", handler);
   }, [selectedMatch]);
 
+  const displaySettings = remoteSettings && typeof remoteSettings === "object"
+    ? { ...settings, ...remoteSettings }
+    : settings;
   const displayTeams = Array.isArray(remoteTeams) ? remoteTeams : teams;
   const displaySquads = remoteSquads && typeof remoteSquads === "object"
     ? remoteSquads
@@ -836,7 +556,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     ...knockoutMatches,
   ]);
   const liveMatches = displayFixtures
-    .filter((match) => match?.live === true && match?.played !== true && String(match?.id ?? "") !== publicResetFixtureId)
+    .filter((match) => match?.live === true && match?.played !== true)
     .slice()
     .sort((a, b) => {
       const updatedA = Date.parse(a.cloudUpdatedAt || "") || 0;
@@ -847,11 +567,11 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       if (startedA !== startedB) return startedB - startedA;
       return `${b.date || ""} ${b.time || ""}`.localeCompare(`${a.date || ""} ${a.time || ""}`);
     });
-  const liveMatch = liveMatches[0] || null;
-  const preparedMatch = !liveMatch && publicMatchCenterId && publicMatchCenterId !== publicResetFixtureId
-    ? displayFixtures.find((match) => String(match?.id ?? "") === publicMatchCenterId && match?.played !== true) || null
+  const actuallyLiveMatch = liveMatches[0] || null;
+  const preparedMatch = !actuallyLiveMatch && publicMatchCenterId
+    ? displayFixtures.find((match) => String(match?.id) === String(publicMatchCenterId) && match?.played !== true) || null
     : null;
-  const featuredMatch = liveMatch || preparedMatch;
+  const liveMatch = actuallyLiveMatch || preparedMatch;
   const upcoming = displayFixtures.filter(
     (match) => match?.played !== true && match?.live !== true
   );
@@ -900,9 +620,9 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const topScorer = liveScorers[0];
   const liveEvents = liveMatch ? getEvents(liveMatch).slice().reverse() : [];
   const lastGoal = liveEvents.find((event) => GOAL_EVENT_TYPES.has(event.type));
-  const minute = getMinute(liveMatch, now, settings.halfDurationMinutes || 30);
+  const minute = getMinute(liveMatch, now, displaySettings.halfDurationMinutes || 30);
   const playedCount = displayFixtures.filter((match) => match?.played === true).length;
-  const tournamentName = settings.tournamentName || settings.title || "S&S CUP";
+  const tournamentName = displaySettings.tournamentName || displaySettings.title || "S&S CUP";
 
   // Final tamamlandığında şampiyonu doğrudan final skorundan/penaltısından bul.
   // Böylece app_state içinde ayrıca winner/champion alanı tutulmasına ihtiyaç kalmaz.
@@ -931,9 +651,9 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       <header className="public-live-header">
         <div className="public-brand-block">
           <div className="public-brand-mark">🏆</div>
-          <div><span className="public-kicker">RESMİ CANLI TURNUVA MERKEZİ</span><h1>{tournamentName}</h1><p>{settings.slogan || "Kazanan Sahada Belli Olur"}</p>{settings.mainSponsor && <small style={{ display: "block", marginTop: "5px", fontWeight: 900 }}>🤝 ANA SPONSOR • {settings.mainSponsor}</small>}</div>
+          <div><span className="public-kicker">RESMİ CANLI TURNUVA MERKEZİ</span><h1>{tournamentName}</h1><p>{displaySettings.slogan || "Kazanan Sahada Belli Olur"}</p>{displaySettings.mainSponsor && <small style={{ display: "block", marginTop: "5px", fontWeight: 900 }}>🤝 ANA SPONSOR • {displaySettings.mainSponsor}</small>}</div>
         </div>
-        <div className="public-header-meta"><span>{settings.season || "2026"}</span><span>📍 {settings.venue || "Gol Park"}</span><span className="public-sync-dot">● CANLI VERİ</span></div>
+        <div className="public-header-meta"><span>{displaySettings.season || "2026"}</span><span>📍 {displaySettings.venue || "Gol Park"}</span><span className="public-sync-dot">● CANLI VERİ</span></div>
       </header>
 
       <main className="public-live-shell">
@@ -946,7 +666,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
             <div className="public-champion-content">
               <span className="public-champion-kicker">🏆 S&S CUP ŞAMPİYONU 🏆</span>
               <h2>{championName}</h2>
-              <strong>{settings.season || "2026"} ŞAMPİYONU</strong>
+              <strong>{displaySettings.season || "2026"} ŞAMPİYONU</strong>
               <div className="public-champion-final">
                 <span>FİNAL</span>
                 <b>{finalMatch.home}</b>
@@ -958,13 +678,13 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           </section>
         )}
 
-        {featuredMatch && (
-          <section className="public-live-scoreboard public-clickable" onClick={() => setSelectedMatch(featuredMatch)}>
-            <div className="public-scoreboard-topline"><div className="public-live-pill"><i /> {liveMatch ? "CANLI" : "MAÇ MERKEZİ"}</div><div className="public-match-status">{liveMatch ? (minute || "CANLI") : "BAŞLAMAYI BEKLİYOR"}</div><div className="public-stage-label">{stageText(featuredMatch)}</div></div>
+        {liveMatch && (
+          <section className="public-live-scoreboard public-clickable" onClick={() => setSelectedMatch(liveMatch)}>
+            <div className="public-scoreboard-topline"><div className="public-live-pill"><i /> {actuallyLiveMatch ? "CANLI" : "MAÇ MERKEZİ"}</div><div className="public-match-status">{actuallyLiveMatch ? (minute || "CANLI") : "BAŞLAMAYI BEKLİYOR"}</div><div className="public-stage-label">{stageText(liveMatch)}</div></div>
             <div className="public-score-grid">
-              <div className="public-score-team home"><span>EV SAHİBİ</span><strong>{featuredMatch.home}</strong></div>
-              <div className="public-score-center"><div className="public-score-numbers"><b>{scoreText(featuredMatch.homeScore)}</b><em>:</em><b>{scoreText(featuredMatch.awayScore)}</b></div><small>{featuredMatch.time || ""} {featuredMatch.field ? `• ${featuredMatch.field}` : ""}</small></div>
-              <div className="public-score-team away"><span>DEPLASMAN</span><strong>{featuredMatch.away}</strong></div>
+              <div className="public-score-team home"><span>EV SAHİBİ</span><strong>{liveMatch.home}</strong></div>
+              <div className="public-score-center"><div className="public-score-numbers"><b>{scoreText(liveMatch.homeScore)}</b><em>:</em><b>{scoreText(liveMatch.awayScore)}</b></div><small>{liveMatch.time || ""} {liveMatch.field ? `• ${liveMatch.field}` : ""}</small></div>
+              <div className="public-score-team away"><span>DEPLASMAN</span><strong>{liveMatch.away}</strong></div>
             </div>
             {lastGoal && <div className="public-last-goal"><span>⚽</span><div><b>SON GOL</b><strong>{lastGoal.player}</strong><small>{lastGoal.team}{lastGoal.minute !== "" ? ` • ${lastGoal.minute}'` : ""}</small></div></div>}
             <div className="public-tap-hint">Maç olaylarını görmek için tıkla ›</div>
@@ -1034,7 +754,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
                 <button className="public-fixture-card" key={match.id || index} onClick={() => setSelectedMatch(match)}>
                   <div className="public-fixture-meta"><span>{stageText(match, index)}</span><b>{formatDate(match.date)} • {match.time || "Saat açıklanacak"}</b></div>
                   <div className="public-fixture-teams"><strong>{match.home}</strong><span>VS</span><strong>{match.away}</strong></div>
-                  <div className="public-fixture-place">📍 {match.field || settings.venue || "Gol Park Halı Saha"}<i>Detay ›</i></div>
+                  <div className="public-fixture-place">📍 {match.field || displaySettings.venue || "Gol Park Halı Saha"}<i>Detay ›</i></div>
                 </button>
               ))}</div>
             )}
@@ -1124,10 +844,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           </section>
         )}
 
-        <footer className="public-live-footer"><div><b>{tournamentName}</b><span>{settings.slogan || "Kazanan Sahada Belli Olur"}</span></div><small>{lastSync ? `Son veri: ${lastSync.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Canlı veri bağlantısı kuruluyor…"}</small></footer>
+        <footer className="public-live-footer"><div><b>{tournamentName}</b><span>{displaySettings.slogan || "Kazanan Sahada Belli Olur"}</span></div><small>{lastSync ? `Son veri: ${lastSync.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Canlı veri bağlantısı kuruluyor…"}</small></footer>
       </main>
 
-      <MatchDetailModal match={selectedMatch} onClose={() => setSelectedMatch(null)} now={now} halfDurationMinutes={settings.halfDurationMinutes || 30} />
+      <MatchDetailModal match={selectedMatch} onClose={() => setSelectedMatch(null)} now={now} halfDurationMinutes={displaySettings.halfDurationMinutes || 30} />
     </div>
   );
 }
