@@ -48,18 +48,29 @@ export function clearQueuedFixtureSync(id) {
 export async function syncLeagueFixtureWithRetry(match) {
   if (match?.isKnockout === true || match?.id === null || match?.id === undefined || match?.id === "") return true;
 
+  // WRITE-AHEAD: ağ isteğinden ÖNCE yerel kuyruğa yaz. Tarayıcı/EXE tam bu anda
+  // kapanırsa bile son skor/event kaydı sonraki açılışta yeniden gönderilir.
+  queueFixtureSync(match);
+
   try {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("fixtures")
       .update(fixtureCloudPayload(match))
-      .eq("id", match.id);
+      .eq("id", match.id)
+      .select("id")
+      .maybeSingle();
 
     if (error) throw error;
+    // Supabase UPDATE bazı RLS/policy durumlarında hata vermeden 0 satır etkileyebilir.
+    // Gerçek satır döndüğünü görmeden kuyruğu ASLA temizleme.
+    if (!data?.id && data?.id !== 0) {
+      throw new Error(`Fikstür ${match.id} bulutta doğrulanamadı; kayıt kuyrukta korunuyor.`);
+    }
+
     clearQueuedFixtureSync(match.id);
     return true;
   } catch (error) {
     console.error("Fikstür bulut eşitlemesi beklemeye alındı:", error);
-    queueFixtureSync(match);
     return false;
   }
 }
@@ -72,12 +83,16 @@ export async function flushPendingFixtureSync() {
     if (entry?.id === null || entry?.id === undefined || entry?.id === "" || !entry?.payload) continue;
 
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("fixtures")
         .update(entry.payload)
-        .eq("id", entry.id);
+        .eq("id", entry.id)
+        .select("id")
+        .maybeSingle();
 
-      if (!error) clearQueuedFixtureSync(entry.id);
+      if (error) throw error;
+      if (!data?.id && data?.id !== 0) continue;
+      clearQueuedFixtureSync(entry.id);
     } catch (error) {
       console.warn("Bekleyen fikstür eşitlemesi tekrar denenecek:", error);
     }

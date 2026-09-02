@@ -305,13 +305,14 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const refresh = useCallback(async () => {
     const sequence = ++refreshSequence.current;
 
-    const [fixturesResult, teamsResult, squadsResult, knockoutResult, activeFixtureResult, settingsResult] = await Promise.allSettled([
+    const [fixturesResult, teamsResult, squadsResult, knockoutResult, activeFixtureResult, settingsResult, snapshotResult] = await Promise.allSettled([
       supabase.from("fixtures").select("*").order("id"),
       supabase.from("teams").select("id,name").order("id"),
       supabase.from("app_state").select("value,updated_at").eq("id", "squads").maybeSingle(),
       supabase.from("app_state").select("value,updated_at").eq("id", "knockout").maybeSingle(),
       supabase.from("app_state").select("value,updated_at").eq("id", "active_fixture_ids").maybeSingle(),
       supabase.from("app_state").select("value,updated_at").eq("id", "settings").maybeSingle(),
+      supabase.from("app_state").select("value,updated_at").eq("id", "fixtures_snapshot").maybeSingle(),
     ]);
 
     // Yavaş kalan eski bir istek, yeni verinin üstüne yazamasın.
@@ -331,6 +332,18 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       }
     }
 
+    let snapshotById = new Map();
+    let snapshotUpdatedAt = 0;
+    if (snapshotResult.status === "fulfilled") {
+      const { data: snapshotRow, error: snapshotError } = snapshotResult.value;
+      if (!snapshotError && Array.isArray(snapshotRow?.value?.fixtures)) {
+        snapshotById = new Map(
+          snapshotRow.value.fixtures.map((m) => [String(m?.id ?? ""), m])
+        );
+        snapshotUpdatedAt = Date.parse(snapshotRow?.updated_at || snapshotRow?.value?.savedAt || "") || 0;
+      }
+    }
+
     if (fixturesResult.status === "fulfilled") {
       const { data, error } = fixturesResult.value;
       if (!error && Array.isArray(data)) {
@@ -346,7 +359,26 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           ? data.filter((row) => activeIdSet.has(String(row?.id)))
           : data;
 
-        mappedFixtures = sortFixturesBySchedule(currentRows.map(mapCloudFixture));
+        mappedFixtures = sortFixturesBySchedule(currentRows.map((row) => {
+          const cloudMatch = mapCloudFixture(row);
+          const snap = snapshotById.get(String(cloudMatch?.id ?? ""));
+          if (!snap) return cloudMatch;
+          if (String(snap.home || "") !== String(cloudMatch.home || "") || String(snap.away || "") !== String(cloudMatch.away || "")) return cloudMatch;
+          const cloudUpdatedAt = Date.parse(cloudMatch.cloudUpdatedAt || "") || 0;
+          if (cloudUpdatedAt > snapshotUpdatedAt) return cloudMatch;
+          return {
+            ...cloudMatch,
+            homeScore: Number(snap.homeScore ?? snap.home_score ?? cloudMatch.homeScore ?? 0),
+            awayScore: Number(snap.awayScore ?? snap.away_score ?? cloudMatch.awayScore ?? 0),
+            played: snap.played === true,
+            live: snap.live === true && snap.played !== true && ["first_half", "halftime", "second_half", "penalty"].includes(snap.matchPhase || "waiting"),
+            timerRunning: snap.timerRunning === true,
+            timerStartedAt: snap.timerStartedAt ?? null,
+            elapsedSeconds: Number(snap.elapsedSeconds ?? 0),
+            matchPhase: snap.matchPhase || "waiting",
+            events: Array.isArray(snap.events) ? snap.events : cloudMatch.events,
+          };
+        }));
         setRemoteFixtures(mappedFixtures);
       }
     }
@@ -457,6 +489,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.active_fixture_ids" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.settings" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.fixtures_snapshot" }, refresh)
       .subscribe();
 
     return () => {

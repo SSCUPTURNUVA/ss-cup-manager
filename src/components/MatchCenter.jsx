@@ -621,6 +621,13 @@ export default function MatchCenter({
       JSON.stringify(updatedFixtures)
     );
 
+    // İkinci kalıcı kopya: fixtures tablosundaki tekil update gecikse bile
+    // tüm maç durumu app_state snapshot'ında kaybolmadan tutulur.
+    syncAppStateWithRetry("fixtures_snapshot", {
+      fixtures: updatedFixtures,
+      savedAt: new Date().toISOString(),
+    });
+
     try {
       // KRİTİK: Sadece `live:true` olan maçı değil, değişen her lig maçını
       // anında kalıcı kuyruğa yaz. Böylece uygulama/ekran kapanırsa yapılan
@@ -905,18 +912,11 @@ export default function MatchCenter({
     await persistFixtures(updatedFixtures);
     const updatedMatch = updatedFixtures[liveMatchIndex];
 
-    const cloudId = updatedMatch?.id;
+    // Lig maçı persistFixtures içinde skor + event + kart + timer tek payload olarak
+    // yazılır. Burada ikinci, eksik bir UPDATE çalıştırmak aynı maçın yeni eventlerini
+    // eski/eksik veriyle yarıştırıyordu. Eleme maçı ise kendi app_state kaydını kullanır.
     if (updatedMatch.isKnockout) {
       await syncKnockoutStateToCloud(updatedMatch);
-    } else if (cloudId !== null && cloudId !== undefined && cloudId !== "") {
-      await supabase
-        .from("fixtures")
-        .update({
-          played: updatedMatch.played,
-          home_score: updatedMatch.homeScore,
-          away_score: updatedMatch.awayScore,
-        })
-        .eq("id", cloudId);
     }
 
     if (EVENT_TYPES[eventType]?.countsGoal === true) {
@@ -1010,41 +1010,16 @@ export default function MatchCenter({
       localStorage.setItem("sscup-match-center-active", getMatchCenterKey(nextMatch, nextIndex));
     }
 
-    const updatedFixtures = fixtures.map((match, index) => {
-      const isPreparedMatch = index === nextIndex;
-      return {
-        ...match,
-        // Başlatılacak maç HER ZAMAN temiz bir maç oturumu olarak hazırlanır.
-        // Eski telefon/test skorları, timer veya olayları bu maça taşınamaz.
-        live: false,
-        timerRunning: false,
-        timerStartedAt: null,
-        elapsedSeconds: isPreparedMatch ? 0 : match.elapsedSeconds ?? 0,
-        matchPhase: isPreparedMatch ? "waiting" : match.matchPhase,
+    // Maçı Maç Merkezi'ne almak yalnız seçim yapar; kayıtlı skor/gol/kart/timer
+    // verisine ASLA dokunmaz. Yeni fikstür zaten DrawManager'dan 0-0/waiting gelir.
+    // Böylece uygulama yeniden açıldığında veya maç tekrar seçildiğinde gerçek veri silinmez.
+    const updatedFixtures = fixtures.map((match, index) =>
+      index === nextIndex
+        ? { ...match, matchPhase: match.matchPhase || "waiting" }
+        : match
+    );
 
-        ...(isPreparedMatch && {
-          homeScore: 0,
-          awayScore: 0,
-          homePen: "",
-          awayPen: "",
-          events: [],
-          goals: [],
-          played: false,
-        }),
-      };
-    });
-
-    if (typeof setFixtures === "function") setFixtures(updatedFixtures);
-    localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));
-
-    const preparedMatch = updatedFixtures[nextIndex];
-    if (preparedMatch?.isKnockout === true) {
-      await syncKnockoutStateToCloud(preparedMatch);
-    } else if (preparedMatch) {
-      await syncLeagueFixtureWithRetry(preparedMatch);
-    }
-
-    window.dispatchEvent(new CustomEvent("sscup-fixtures-updated", { detail: updatedFixtures }));
+    await persistFixtures(updatedFixtures);
   }
 
   async function handleUndoLastEvent() {

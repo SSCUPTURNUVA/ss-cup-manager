@@ -188,6 +188,91 @@ function calculateStandings(teams, fixtures) {
     });
 }
 
+
+const GOAL_EVENT_TYPES = new Set(["goal", "penalty_goal", "penalty_shootout_goal", "scorer_record"]);
+
+function getFixtureEvents(match) {
+  const events = Array.isArray(match?.events) ? match.events : [];
+  const goals = Array.isArray(match?.goals) ? match.goals : [];
+  const eventIds = new Set(events.map((event) => event?.id).filter(Boolean));
+  const legacyGoals = goals
+    .filter((goal) => !eventIds.has(goal?.id))
+    .map((goal) => ({ ...goal, type: goal?.type || "goal" }));
+  return [...events, ...legacyGoals];
+}
+
+function runtimeStrength(match) {
+  if (!match) return -1;
+  const events = getFixtureEvents(match);
+  const phase = match?.matchPhase || match?.match_phase || "waiting";
+  const homeScore = Number(match?.homeScore ?? match?.home_score ?? 0) || 0;
+  const awayScore = Number(match?.awayScore ?? match?.away_score ?? 0) || 0;
+  const elapsed = Number(match?.elapsedSeconds ?? match?.elapsed_seconds ?? 0) || 0;
+  let score = events.length * 1000;
+  if (match?.played === true || phase === "completed") score += 500;
+  if (match?.live === true || ["first_half", "halftime", "second_half", "penalty"].includes(phase)) score += 200;
+  score += Math.max(0, homeScore + awayScore) * 10;
+  if (elapsed > 0) score += 1;
+  return score;
+}
+
+function sameFixtureIdentity(a, b) {
+  if (!a || !b) return false;
+  if (a.id !== undefined && a.id !== null && b.id !== undefined && b.id !== null) {
+    if (String(a.id) !== String(b.id)) return false;
+  }
+  return String(a.home || "") === String(b.home || "") && String(a.away || "") === String(b.away || "");
+}
+
+function mergeRuntimeSafely(cloudMatch, candidate) {
+  if (!sameFixtureIdentity(cloudMatch, candidate)) return cloudMatch;
+  if (runtimeStrength(candidate) <= runtimeStrength(cloudMatch)) return cloudMatch;
+  return {
+    ...cloudMatch,
+    homeScore: Number(candidate.homeScore ?? candidate.home_score ?? cloudMatch.homeScore ?? 0),
+    awayScore: Number(candidate.awayScore ?? candidate.away_score ?? cloudMatch.awayScore ?? 0),
+    played: candidate.played === true || candidate.matchPhase === "completed" || candidate.match_phase === "completed",
+    live: candidate.live === true,
+    timerRunning: candidate.timerRunning === true || candidate.timer_running === true,
+    timerStartedAt: candidate.timerStartedAt ?? candidate.timer_started_at ?? null,
+    elapsedSeconds: Number(candidate.elapsedSeconds ?? candidate.elapsed_seconds ?? 0),
+    matchPhase: candidate.matchPhase || candidate.match_phase || cloudMatch.matchPhase || "waiting",
+    events: getFixtureEvents(candidate),
+  };
+}
+
+function deriveGoalScorers(fixtures) {
+  const totals = {};
+  (fixtures || []).forEach((match) => {
+    const phase = match?.matchPhase || "waiting";
+    const counts = match?.played === true || (match?.live === true && ["first_half", "halftime", "second_half", "penalty"].includes(phase));
+    if (!counts) return;
+    getFixtureEvents(match)
+      .filter((event) => GOAL_EVENT_TYPES.has(event?.type || "goal"))
+      .forEach((event) => {
+        const playerId = event?.playerId || event?.id || event?.playerName || event?.name || event?.player;
+        const name = event?.playerName || event?.name || event?.player || "Oyuncu";
+        const team = event?.team || event?.teamName || "";
+        if (!playerId || !team) return;
+        const key = `${team}-${playerId}`;
+        if (!totals[key]) {
+          totals[key] = {
+            id: key,
+            playerId,
+            name,
+            playerName: name,
+            team,
+            teamName: team,
+            shirtNumber: event?.shirtNumber || event?.number || "",
+            goals: 0,
+          };
+        }
+        totals[key].goals += 1;
+      });
+  });
+  return Object.values(totals).sort((a, b) => b.goals - a.goals || String(a.name).localeCompare(String(b.name), "tr"));
+}
+
 const MOBILE_ADMIN_ACCESS_TOKEN = "SSCUP-YONETIM-2026-7pQ4mN9xK2vR8sT5";
 const ADMIN_PIN = "2026";
 
@@ -409,9 +494,7 @@ export default function App() {
     sortFixturesBySchedule(readStorage("sscup-fixtures", []))
   );
 
-  const [goalScorers, setGoalScorers] = useState(() =>
-    readStorage("sscup-goals", [])
-  );
+  const [goalScorers, setGoalScorers] = useState([]);
 
   useEffect(() => {
     localStorage.setItem("sscup-format", JSON.stringify(tournamentFormat));
@@ -465,81 +548,8 @@ export default function App() {
             ? activeFixtureRow.value.ids.map((id) => String(id))
             : [];
 
-          // 02.09.2026 güvenli saha temizliği:
-          // FİKSTÜR/TARİH/SAAT/TAKIM/OYUNCU korunur; yalnız eski test maç state'i temizlenir.
-          // Buluttaki işaret sayesinde bu işlem tüm cihazlarda SADECE BİR KEZ çalışır.
-          const CLEANUP_ID = "fixture_runtime_cleanup_20260902_v2";
-          try {
-            const { data: cleanupRow } = await supabase
-              .from("app_state")
-              .select("value")
-              .eq("id", CLEANUP_ID)
-              .maybeSingle();
-
-            if (cleanupRow?.value?.done !== true && !isPublicRoute) {
-              const idsToReset = activeIds.length > 0
-                ? activeIds
-                : (Array.isArray(data) ? data.map((row) => String(row?.id ?? "")).filter(Boolean) : []);
-              const resetIdSet = new Set(idsToReset);
-
-              for (const id of idsToReset) {
-                const { error: resetError } = await supabase
-                  .from("fixtures")
-                  .update({
-                    played: false,
-                    home_score: 0,
-                    away_score: 0,
-                    live: false,
-                    timer_running: false,
-                    timer_started_at: null,
-                    elapsed_seconds: 0,
-                    match_phase: "waiting",
-                    events: [],
-                  })
-                  .eq("id", id);
-                if (resetError) throw resetError;
-              }
-
-              const { error: scorerCleanupError } = await supabase
-                .from("goal_scorers")
-                .delete()
-                .neq("id", 0);
-              if (scorerCleanupError) console.warn("Eski gol krallığı temizlenemedi:", scorerCleanupError);
-
-              await supabase.from("app_state").upsert({
-                id: "match_lineups",
-                value: {},
-                updated_at: new Date().toISOString(),
-              });
-
-              // Eski cihazın bekleyen yazma kuyruğu temiz veriyi yeniden kirletemesin.
-              [
-                "sscup-goals", "sscup-goal-scorers", "sscup-match-goals",
-                "sscup-match-events", "sscup-active-match", "sscup-live-match",
-                "sscup-match-lineups", "sscup-match-center-active",
-                "sscup-pending-fixture-sync", "sscup-pending-app-state-sync"
-              ].forEach((key) => localStorage.removeItem(key));
-
-              data = (Array.isArray(data) ? data : []).map((row) =>
-                resetIdSet.has(String(row?.id ?? ""))
-                  ? {
-                      ...row, played: false, home_score: 0, away_score: 0, live: false,
-                      timer_running: false, timer_started_at: null, elapsed_seconds: 0,
-                      match_phase: "waiting", events: [],
-                    }
-                  : row
-              );
-
-              const { error: markerError } = await supabase.from("app_state").upsert({
-                id: CLEANUP_ID,
-                value: { done: true, completedAt: new Date().toISOString() },
-                updated_at: new Date().toISOString(),
-              });
-              if (markerError) throw markerError;
-            }
-          } catch (cleanupError) {
-            console.error("Fikstürü koruyan tek seferlik maç temizliği hatası:", cleanupError);
-          }
+          // Otomatik runtime temizliği KALDIRILDI.
+          // Uygulama açılışında hiçbir maç/skor/event verisi otomatik silinmez.
 
           if (activeIds.length > 0) {
             const activeIdSet = new Set(activeIds);
@@ -592,145 +602,75 @@ export default function App() {
           }
         }
 
-        // Eski sürümden bulutta CANLI kalmış hazırlık/test maçlarını temizle.
-        // waiting/null zaten canlı değildir. Ayrıca tarihi henüz gelmemiş bir maçın
-        // first_half vb. durumda kalması da eski test kaydıdır; gerçek maç olamaz.
-        const now = new Date();
-        const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-        const staleWaitingRows = (Array.isArray(data) ? data : []).filter(
-          (item) => {
-            const isFutureFixture = Boolean(item?.date && String(item.date).slice(0, 10) > todayKey);
-            return (
-              item?.live === true &&
-              item?.played !== true &&
-              (!item?.match_phase || item.match_phase === "waiting" || isFutureFixture)
-            );
-          }
-        );
+        // AÇILIŞTA OTOMATİK VERİ DEĞİŞİKLİĞİ YOK.
+        // Skor, gol, kart, timer, maç durumu ve eventler bulutta nasılsa aynen okunur.
 
-        if (staleWaitingRows.length > 0) {
-          await Promise.all(
-            staleWaitingRows.map((item) =>
-              supabase
-                .from("fixtures")
-                .update({
-                  live: false,
-                  timer_running: false,
-                  timer_started_at: null,
-                  elapsed_seconds: 0,
-                  match_phase: "waiting",
-                })
-                .eq("id", item.id)
-            )
-          );
+        const supabaseFixtures = data.map((item) => ({
+          id: item.id,
+          home: item.home,
+          away: item.away,
+          date: item.date,
+          time: item.time,
+          field: item.pitch,
+          week: item.week,
+          played: item.played === true,
+          homeScore: Number(item.home_score ?? 0),
+          awayScore: Number(item.away_score ?? 0),
+          live: item.live === true,
+          timerRunning: item.timer_running === true,
+          timerStartedAt: item.timer_started_at ?? null,
+          elapsedSeconds: Number(item.elapsed_seconds ?? 0),
+          matchPhase: item.match_phase || "waiting",
+          isKnockout: item.is_knockout === true,
+          knockoutKey: item.knockout_key || "",
+          stageLabel: item.stage || "",
+          events: Array.isArray(item.events) ? item.events : [],
+          cloudUpdatedAt: item.updated_at || "",
+        }));
 
-          data = data.map((item) =>
-            staleWaitingRows.some((stale) => stale.id === item.id)
-              ? {
-                  ...item,
-                  live: false,
-                  timer_running: false,
-                  timer_started_at: null,
-                  elapsed_seconds: 0,
-                  match_phase: "waiting",
-                }
-              : item
-          );
-        }
-
-        const supabaseFixtures = data.map((item) => {
-          const phase = item.match_phase || "waiting";
-          const isCleanWaitingMatch = item.played !== true && item.live !== true && phase === "waiting";
-
-          return {
-            id: item.id,
-            home: item.home,
-            away: item.away,
-            date: item.date,
-            time: item.time,
-            field: item.pitch,
-            week: item.week,
-            played: item.played === true,
-            // BAŞLAMAMIŞ maçın runtime verisi asla eski cihaz/cache kaydından taşınmaz.
-            // Fikstür kimliği ve programı korunur; yalnız maç içi durum temiz başlar.
-            homeScore: isCleanWaitingMatch ? 0 : item.home_score,
-            awayScore: isCleanWaitingMatch ? 0 : item.away_score,
-            live: isCleanWaitingMatch ? false : item.live === true,
-            timerRunning: isCleanWaitingMatch ? false : item.timer_running === true,
-            timerStartedAt: isCleanWaitingMatch ? null : item.timer_started_at,
-            elapsedSeconds: isCleanWaitingMatch ? 0 : item.elapsed_seconds,
-            matchPhase: isCleanWaitingMatch ? "waiting" : phase,
-            isKnockout: item.is_knockout === true,
-            knockoutKey: item.knockout_key || "",
-            stageLabel: item.stage || "",
-            events: isCleanWaitingMatch ? [] : (Array.isArray(item.events) ? item.events : []),
-          };
-        });
-
-        // Normalde Supabase güncel turnuvanın ana kaynağıdır. ANCAK bir maç için
-        // pending kayıt hâlâ duruyorsa, bu PC'deki yerel maç verisi buluttan daha yenidir.
-        // Eski bulut skorunun/golünün/kartının/kademe durumunun bunu ezmesini engelle.
-        const pendingAfterFlush = readPendingFixtureSync();
+        // TEK KAYNAK + KORUMALI AÇILIŞ:
+        // App.jsx bulutu okur; aynı güncel fikstür ID'sine ait yerel/snapshot kopya
+        // daha doluysa gerçek saha verisini eski 0-0 bulut satırıyla ezmez.
+        const { data: snapshotRow } = await supabase
+          .from("app_state")
+          .select("value")
+          .eq("id", "fixtures_snapshot")
+          .maybeSingle();
+        const snapshotFixtures = Array.isArray(snapshotRow?.value?.fixtures)
+          ? snapshotRow.value.fixtures
+          : [];
+        const snapshotById = new Map(snapshotFixtures.map((m) => [String(m?.id ?? ""), m]));
         const localById = new Map(
           (Array.isArray(localBeforeCloud) ? localBeforeCloud : [])
-            .filter((match) => match?.id !== null && match?.id !== undefined && match?.id !== "")
-            .map((match) => [String(match.id), match])
+            .filter((m) => m?.id !== undefined && m?.id !== null)
+            .map((m) => [String(m.id), m])
         );
 
-        const protectedFixtures = supabaseFixtures.map((cloudMatch) => {
+        const recoveredFixtures = supabaseFixtures.map((cloudMatch) => {
           const key = String(cloudMatch?.id ?? "");
-          const pending = pendingAfterFlush?.[key];
-          const local = localById.get(key);
+          let best = cloudMatch;
+          best = mergeRuntimeSafely(best, snapshotById.get(key));
+          best = mergeRuntimeSafely(best, localById.get(key));
+          return best;
+        });
 
-          // Waiting + oynanmamış maçta pending/local runtime verisini ASLA koruma.
-          // Bu kayıtlar eski telefon/test oturumundan gelebilir ve 5-3 gibi skorları geri taşıyabilir.
-          const phase = cloudMatch?.matchPhase || "waiting";
-          const cleanWaiting = cloudMatch?.played !== true && cloudMatch?.live !== true && phase === "waiting";
-          if (cleanWaiting || !pending) return cloudMatch;
+        const sortedSupabaseFixtures = sortFixturesBySchedule(recoveredFixtures);
 
-          if (local) {
-            return {
-              ...cloudMatch,
-              ...local,
-              id: cloudMatch.id,
-              home: cloudMatch.home || local.home,
-              away: cloudMatch.away || local.away,
-            };
+        // Eğer yerel/snapshot kopya buluttan daha dolu çıktıysa onu yeniden buluta yaz.
+        // Bu işlem veri silmez; yalnız kurtarılan gerçek maç runtime'ını kalıcı hale getirir.
+        recoveredFixtures.forEach((match, index) => {
+          const cloudMatch = supabaseFixtures[index];
+          if (runtimeStrength(match) > runtimeStrength(cloudMatch) && match?.isKnockout !== true) {
+            syncLeagueFixtureWithRetry(match);
           }
-
-          const payload = pending.payload || {};
-          return {
-            ...cloudMatch,
-            homeScore: payload.home_score ?? cloudMatch.homeScore,
-            awayScore: payload.away_score ?? cloudMatch.awayScore,
-            played: payload.played === true,
-            live: payload.live === true,
-            timerRunning: payload.timer_running === true,
-            timerStartedAt: payload.timer_started_at ?? null,
-            elapsedSeconds: payload.elapsed_seconds ?? 0,
-            matchPhase: payload.match_phase || cloudMatch.matchPhase || "waiting",
-            events: Array.isArray(payload.events) ? payload.events : cloudMatch.events,
-          };
         });
 
-        const sortedSupabaseFixtures = sortFixturesBySchedule(protectedFixtures);
-
-        // Maç Merkezi'ne alınmış ama BAŞLATILMADAN geri çekilmiş eski seçimi tamamen unut.
-        // Gerçekten devam eden bir maç varsa anahtarı koruruz; yoksa Maç Merkezi her açılışta
-        // fikstürün tarih+saat sırasındaki ilk oynanmamış maçından başlar.
-        const actuallyRunningMatch = sortedSupabaseFixtures.find((match) => {
-          const phase = match?.matchPhase || "waiting";
-          return (
-            match?.played !== true &&
-            match?.live === true &&
-            ["first_half", "halftime", "second_half", "penalty"].includes(phase)
-          );
-        });
-
-        if (!actuallyRunningMatch) {
-          localStorage.removeItem("sscup-match-center-active");
-        } else {
-          localStorage.setItem("sscup-match-center-active", String(actuallyRunningMatch.id));
+        // Maç Merkezi seçimi de aç/kapat sonrası korunur. Sadece artık var olmayan
+        // veya bitmiş bir maça işaret ediyorsa temizlenir.
+        const savedActiveKey = localStorage.getItem("sscup-match-center-active") || "";
+        if (savedActiveKey) {
+          const savedMatch = sortedSupabaseFixtures.find((m) => String(m?.id ?? "") === String(savedActiveKey));
+          if (!savedMatch || savedMatch.played === true) localStorage.removeItem("sscup-match-center-active");
         }
 
         setFixtures(sortedSupabaseFixtures);
@@ -757,18 +697,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const refreshGoalScorers = () => {
-      setGoalScorers(readStorage("sscup-goals", []));
-    };
-
-    window.addEventListener("storage", refreshGoalScorers);
-    const interval = window.setInterval(refreshGoalScorers, 1000);
-
-    return () => {
-      window.removeEventListener("storage", refreshGoalScorers);
-      window.clearInterval(interval);
-    };
-  }, []);
+    // Gol krallığı ayrı ve bağımsız bir "hayalet" kayıt değildir.
+    // Her zaman maç eventlerinden yeniden hesaplanır; skor/event silinmeden bu liste de kaybolmaz.
+    const derived = deriveGoalScorers(fixtures);
+    setGoalScorers(derived);
+    localStorage.setItem("sscup-goals", JSON.stringify(derived));
+    localStorage.setItem("sscup-goal-scorers", JSON.stringify(derived));
+  }, [fixtures]);
 
   useEffect(() => {
     const refreshSettings = () => {
