@@ -1082,8 +1082,15 @@ export default function MatchCenter({
       }
     });
 
+    const deletedEventIds = [...new Set([
+      ...(Array.isArray(liveMatch?.deletedEventIds) ? liveMatch.deletedEventIds.map(String) : []),
+      ...removedEvents.map((event) => String(event?.id ?? "")).filter(Boolean),
+    ])];
+
     const patch = {
       events: updatedEvents,
+      deletedEventIds,
+      runtimeUpdatedAt: new Date().toISOString(),
       homeScore: newHomeScore,
       awayScore: newAwayScore,
       homePen: newHomePen,

@@ -56,11 +56,25 @@ function mergeFixtureSnapshots(cloudValue, localValue, cloudRowUpdatedAt = "", l
     // Eşit zamanda yerel kullanıcı işlemi kazanır (remove-wins/local-write-wins).
     const newer = lt >= ct ? l : c;
     const older = lt >= ct ? c : l;
+
+    // DELETE-WINS: silinen event ID'leri cihazlar arasında UNION edilir.
+    // Eski telefon/PC snapshot'ında event hâlâ bulunsa bile tombstone onu tekrar diriltmez.
+    const deletedEventIds = [...new Set([
+      ...(Array.isArray(c?.deletedEventIds) ? c.deletedEventIds.map(String) : []),
+      ...(Array.isArray(l?.deletedEventIds) ? l.deletedEventIds.map(String) : []),
+    ])];
+    const deletedSet = new Set(deletedEventIds);
+    const nextEvents = (Array.isArray(newer?.events) ? newer.events : [])
+      .filter((event) => !deletedSet.has(String(event?.id ?? "")));
+    const nextGoals = (Array.isArray(newer?.goals) ? newer.goals : [])
+      .filter((event) => !deletedSet.has(String(event?.id ?? "")));
+
     return {
       ...older,
       ...newer,
-      events: Array.isArray(newer?.events) ? newer.events : [],
-      goals: Array.isArray(newer?.goals) ? newer.goals : [],
+      events: nextEvents,
+      goals: nextGoals,
+      deletedEventIds,
       runtimeUpdatedAt: newer?.runtimeUpdatedAt || new Date(Math.max(ct, lt, Date.now())).toISOString(),
     };
   });

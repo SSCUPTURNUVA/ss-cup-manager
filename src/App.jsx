@@ -192,8 +192,11 @@ function calculateStandings(teams, fixtures) {
 const GOAL_EVENT_TYPES = new Set(["goal", "penalty_goal", "penalty_shootout_goal", "scorer_record"]);
 
 function getFixtureEvents(match) {
-  const events = Array.isArray(match?.events) ? match.events : [];
-  const goals = Array.isArray(match?.goals) ? match.goals : [];
+  const deletedSet = new Set((Array.isArray(match?.deletedEventIds) ? match.deletedEventIds : []).map(String));
+  const events = (Array.isArray(match?.events) ? match.events : [])
+    .filter((event) => !deletedSet.has(String(event?.id ?? "")));
+  const goals = (Array.isArray(match?.goals) ? match.goals : [])
+    .filter((event) => !deletedSet.has(String(event?.id ?? "")));
   const eventIds = new Set(events.map((event) => event?.id).filter(Boolean));
   const legacyGoals = goals
     .filter((goal) => !eventIds.has(goal?.id))
@@ -690,8 +693,13 @@ export default function App() {
             timerStartedAt: base.played !== true ? (runtime.timerStartedAt ?? null) : null,
             elapsedSeconds: Number(runtime.elapsedSeconds ?? 0),
             matchPhase: base.played === true ? "completed" : (runtime.matchPhase || "waiting"),
-            events: Array.isArray(runtime.events) ? runtime.events : [],
-            goals: Array.isArray(runtime.goals) ? runtime.goals : [],
+            deletedEventIds: Array.isArray(runtime.deletedEventIds) ? runtime.deletedEventIds.map(String) : [],
+            events: (Array.isArray(runtime.events) ? runtime.events : []).filter(
+              (event) => !(Array.isArray(runtime.deletedEventIds) ? runtime.deletedEventIds.map(String) : []).includes(String(event?.id ?? ""))
+            ),
+            goals: (Array.isArray(runtime.goals) ? runtime.goals : []).filter(
+              (event) => !(Array.isArray(runtime.deletedEventIds) ? runtime.deletedEventIds.map(String) : []).includes(String(event?.id ?? ""))
+            ),
             homePen: runtime.homePen ?? runtime.homePenalties ?? base.homePen ?? 0,
             awayPen: runtime.awayPen ?? runtime.awayPenalties ?? base.awayPen ?? 0,
             homePenalties: runtime.homePenalties ?? runtime.homePen ?? base.homePenalties ?? "",
@@ -803,8 +811,26 @@ export default function App() {
               timerRunning: played ? false : runtime?.timerRunning === true,
               timerStartedAt: played ? null : (runtime?.timerStartedAt ?? null),
               matchPhase: played ? "completed" : (runtime?.matchPhase || match.matchPhase || "waiting"),
-              events: Array.isArray(runtime?.events) ? runtime.events : (Array.isArray(match.events) ? match.events : []),
-              goals: Array.isArray(runtime?.goals) ? runtime.goals : (Array.isArray(match.goals) ? match.goals : []),
+              deletedEventIds: [...new Set([
+                ...(Array.isArray(match?.deletedEventIds) ? match.deletedEventIds.map(String) : []),
+                ...(Array.isArray(runtime?.deletedEventIds) ? runtime.deletedEventIds.map(String) : []),
+              ])],
+              events: (() => {
+                const deleted = new Set([
+                  ...(Array.isArray(match?.deletedEventIds) ? match.deletedEventIds.map(String) : []),
+                  ...(Array.isArray(runtime?.deletedEventIds) ? runtime.deletedEventIds.map(String) : []),
+                ]);
+                const source = Array.isArray(runtime?.events) ? runtime.events : (Array.isArray(match.events) ? match.events : []);
+                return source.filter((event) => !deleted.has(String(event?.id ?? "")));
+              })(),
+              goals: (() => {
+                const deleted = new Set([
+                  ...(Array.isArray(match?.deletedEventIds) ? match.deletedEventIds.map(String) : []),
+                  ...(Array.isArray(runtime?.deletedEventIds) ? runtime.deletedEventIds.map(String) : []),
+                ]);
+                const source = Array.isArray(runtime?.goals) ? runtime.goals : (Array.isArray(match.goals) ? match.goals : []);
+                return source.filter((event) => !deleted.has(String(event?.id ?? "")));
+              })(),
               runtimeUpdatedAt: runtime?.runtimeUpdatedAt || match.runtimeUpdatedAt || "",
               cloudUpdatedAt: snapshotResult.data?.updated_at || match.cloudUpdatedAt || "",
             };

@@ -85,14 +85,20 @@ export default function DisciplineBoard({ fixtures = [], teams = [] }) {
     const mergeMatch = (match, sourceIndex = 0) => {
       if (!match) return;
       const key = String(match.id || match.knockoutKey || `${match.home || ""}-${match.away || ""}-${match.date || ""}-${match.time || ""}-${sourceIndex}`);
-      const existing = byKey.get(key) || { ...match, events: [] };
+      const existing = byKey.get(key) || { ...match, events: [], deletedEventIds: [] };
+      const deletedEventIds = [...new Set([
+        ...(Array.isArray(existing.deletedEventIds) ? existing.deletedEventIds.map(String) : []),
+        ...(Array.isArray(match.deletedEventIds) ? match.deletedEventIds.map(String) : []),
+      ])];
+      const deletedSet = new Set(deletedEventIds);
       const eventMap = new Map();
       [...(Array.isArray(existing.events) ? existing.events : []), ...(Array.isArray(match.events) ? match.events : [])]
         .forEach((event, index) => {
           const eventKey = String(event?.id || event?.actionId || `${event?.type || event?.eventType || "event"}-${event?.team || event?.teamName || ""}-${event?.playerId || event?.playerName || event?.player || ""}-${event?.minute ?? ""}-${index}`);
+          if (deletedSet.has(String(event?.id ?? ""))) return;
           eventMap.set(eventKey, event);
         });
-      byKey.set(key, { ...existing, ...match, events: Array.from(eventMap.values()) });
+      byKey.set(key, { ...existing, ...match, deletedEventIds, events: Array.from(eventMap.values()) });
     };
 
     (fixtures || []).forEach((match, index) => mergeMatch(match, index));

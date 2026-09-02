@@ -43,8 +43,11 @@ function normalizeEvent(event, index) {
 }
 
 function getEvents(match) {
-  const events = Array.isArray(match?.events) ? match.events : [];
-  const directGoals = Array.isArray(match?.goals) ? match.goals : [];
+  const deletedSet = new Set((Array.isArray(match?.deletedEventIds) ? match.deletedEventIds : []).map(String));
+  const events = (Array.isArray(match?.events) ? match.events : [])
+    .filter((event) => !deletedSet.has(String(event?.id ?? "")));
+  const directGoals = (Array.isArray(match?.goals) ? match.goals : [])
+    .filter((goal) => !deletedSet.has(String(goal?.id ?? "")));
   const eventIds = new Set(events.map((event) => event?.id).filter(Boolean));
   const legacyGoals = directGoals
     .filter((goal) => !eventIds.has(goal?.id))

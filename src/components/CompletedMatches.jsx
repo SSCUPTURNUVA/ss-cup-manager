@@ -125,8 +125,12 @@ export default function CompletedMatches({
   }
 
   function getEvents(match, matchIndex) {
+    const deletedSet = new Set(
+      (Array.isArray(match?.deletedEventIds) ? match.deletedEventIds : []).map(String)
+    );
     const events = Array.isArray(match?.events)
       ? match.events.map(normalizeEvent)
+          .filter((event) => !deletedSet.has(String(event?.id ?? "")))
       : [];
 
     return events;
@@ -262,9 +266,13 @@ export default function CompletedMatches({
       : [...currentEvents, eventData];
 
     const runtimeUpdatedAt = new Date().toISOString();
+    const revivedId = String(eventData.id ?? "");
+    const deletedEventIds = (Array.isArray(match?.deletedEventIds) ? match.deletedEventIds : [])
+      .map(String)
+      .filter((id) => id !== revivedId);
     const updatedFixtures = fixtures.map((fixture, index) =>
       index === openedIndex
-        ? { ...fixture, events: updatedEvents, runtimeUpdatedAt }
+        ? { ...fixture, events: updatedEvents, deletedEventIds, runtimeUpdatedAt }
         : fixture
     );
 
@@ -290,9 +298,13 @@ export default function CompletedMatches({
       (event) => event.id !== eventId
     );
     const runtimeUpdatedAt = new Date().toISOString();
+    const deletedEventIds = [...new Set([
+      ...(Array.isArray(match?.deletedEventIds) ? match.deletedEventIds.map(String) : []),
+      String(eventId),
+    ])];
     const updatedFixtures = fixtures.map((fixture, index) =>
       index === openedIndex
-        ? { ...fixture, events: updatedEvents, runtimeUpdatedAt }
+        ? { ...fixture, events: updatedEvents, deletedEventIds, runtimeUpdatedAt }
         : fixture
     );
     await persist(updatedFixtures);
