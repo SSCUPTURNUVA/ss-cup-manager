@@ -288,6 +288,16 @@ export default function CompletedMatches({
       matchPhase: "waiting",
     };
     const updatedFixtures = fixtures.map((fixture, index) => index === openedIndex ? reopened : fixture);
+
+    // Bu maç Maç Merkezi'nde aktif/seçili kaldıysa geri alma sırasında mutlaka temizle.
+    // Aksi halde played=false/waiting olsa bile MatchCenter localStorage anahtarından maçı
+    // yeniden aktifmiş gibi açabiliyor.
+    const activeMatchCenterKey = localStorage.getItem("sscup-match-center-active") || "";
+    const reopenedKey = String(match?.id ?? `${match?.home || ""}|${match?.away || ""}|${match?.week || ""}|${openedIndex}`);
+    if (activeMatchCenterKey === reopenedKey) {
+      localStorage.removeItem("sscup-match-center-active");
+    }
+
     persist(updatedFixtures);
 
     try {
