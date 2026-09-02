@@ -1128,15 +1128,15 @@ export default function MatchCenter({
       }),
     }));
 
-    if (typeof setFixtures === "function") setFixtures(updatedFixtures);
-    localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));
+    // Maçı Maç Merkezi'ne almak da gerçek bir maç durumu değişikliğidir.
+    // Tek persist hattından geçir ki fixtures_snapshot da anında yazılsın;
+    // public ekran F5 beklemeden hazırlanan maçı görsün.
+    await persistFixtures(updatedFixtures);
 
     const preparedMatch = updatedFixtures[nextIndex];
     await syncPublicMatchCenter(preparedMatch);
     if (preparedMatch?.isKnockout === true) {
       await syncKnockoutStateToCloud(preparedMatch);
-    } else if (preparedMatch) {
-      await syncLeagueFixtureWithRetry(preparedMatch);
     }
 
     window.dispatchEvent(new CustomEvent("sscup-fixtures-updated", { detail: updatedFixtures }));

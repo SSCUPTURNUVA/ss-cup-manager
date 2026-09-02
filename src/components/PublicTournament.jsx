@@ -657,49 +657,58 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   }, [refreshTeams]);
 
   // SAHA GÜVENLİ MODU:
-  // Yönetim her maç işleminde fixtures_snapshot'ı yazar. Public ekran bunu bağımsız
-  // olarak kısa aralıkla okur. Böylece fixtures/runtime/realtime zincirlerinden biri
-  // gecikse bile kullanıcı F5 yapmak zorunda kalmaz.
+  // Public ekranın kritik maç verisi tek hafif sorgudan gelir:
+  // fixtures_snapshot = skor/faz/olaylar, public_match_center = hazırlanan maç.
+  // Bu poll realtime çalışmasa bile açık sayfayı F5 istemeden güncel tutar.
   useEffect(() => {
     let disposed = false;
 
-    const pullFixtureSnapshot = async () => {
+    const pullPublicMatchState = async () => {
       try {
         const { data, error } = await supabase
           .from("app_state")
-          .select("value,updated_at")
-          .eq("id", "fixtures_snapshot")
-          .maybeSingle();
+          .select("id,value,updated_at")
+          .in("id", ["fixtures_snapshot", "public_match_center"]);
 
-        if (disposed || error || !Array.isArray(data?.value?.fixtures)) return;
+        if (disposed || error || !Array.isArray(data)) return;
 
-        const updatedAt = data?.value?.updatedAt || data?.updated_at || "";
-        const mapped = sortFixturesBySchedule(
-          data.value.fixtures
-            .filter((match) => match?.isKnockout !== true && match?.id !== null && match?.id !== undefined && match?.id !== "")
-            .map((match) => normalizePublicFixtureCandidate({
-              ...match,
-              updatedAt: match?.updatedAt || updatedAt,
-              cloudUpdatedAt: match?.cloudUpdatedAt || updatedAt,
-            }))
-            .filter(Boolean)
-        );
+        const snapshotRow = data.find((row) => row?.id === "fixtures_snapshot");
+        const centerRow = data.find((row) => row?.id === "public_match_center");
 
-        if (!disposed) {
-          setRemoteFixtures((previous) => keepVisibleMatchState(mapped, previous, fixtures));
-          setLastSync(new Date());
+        if (centerRow) {
+          setPublicMatchCenterId(String(centerRow?.value?.matchId || ""));
         }
+
+        if (Array.isArray(snapshotRow?.value?.fixtures)) {
+          const updatedAt = snapshotRow?.value?.updatedAt || snapshotRow?.updated_at || "";
+          const mapped = sortFixturesBySchedule(
+            snapshotRow.value.fixtures
+              .filter((match) => match?.isKnockout !== true && match?.id !== null && match?.id !== undefined && match?.id !== "")
+              .map((match) => normalizePublicFixtureCandidate({
+                ...match,
+                updatedAt: match?.updatedAt || updatedAt,
+                cloudUpdatedAt: match?.cloudUpdatedAt || updatedAt,
+              }))
+              .filter(Boolean)
+          );
+
+          if (!disposed) {
+            setRemoteFixtures((previous) => keepVisibleMatchState(mapped, previous, fixtures));
+          }
+        }
+
+        if (!disposed) setLastSync(new Date());
       } catch (error) {
-        console.warn("Public snapshot yenileme hatası:", error);
+        console.warn("Public maç durumu yenileme hatası:", error);
       }
     };
 
-    pullFixtureSnapshot();
-    const snapshotPoll = window.setInterval(pullFixtureSnapshot, 1200);
+    pullPublicMatchState();
+    const publicStatePoll = window.setInterval(pullPublicMatchState, 1000);
 
     return () => {
       disposed = true;
-      window.clearInterval(snapshotPoll);
+      window.clearInterval(publicStatePoll);
     };
   }, [fixtures]);
 
