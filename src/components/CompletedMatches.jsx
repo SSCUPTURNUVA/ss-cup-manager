@@ -42,6 +42,22 @@ function isGoalEvent(event) {
   return ["goal", "penalty_goal", "scorer_record"].includes(event?.type);
 }
 
+function goalCountForTeam(events, teamName) {
+  return (Array.isArray(events) ? events : []).filter(
+    (event) => isGoalEvent(event) && event?.team === teamName
+  ).length;
+}
+
+function applyGoalEventScoreDelta(match, beforeEvents, afterEvents) {
+  const homeDelta = goalCountForTeam(afterEvents, match.home) - goalCountForTeam(beforeEvents, match.home);
+  const awayDelta = goalCountForTeam(afterEvents, match.away) - goalCountForTeam(beforeEvents, match.away);
+
+  return {
+    homeScore: Math.max(0, (Number(match.homeScore) || 0) + homeDelta),
+    awayScore: Math.max(0, (Number(match.awayScore) || 0) + awayDelta),
+  };
+}
+
 function formatDate(value) {
   if (!value) return "Tarih belirtilmedi";
   const date = new Date(`${value}T12:00:00`);
@@ -189,8 +205,12 @@ export default function CompletedMatches({
     const totals = {};
 
     updatedFixtures.forEach((match) => {
+      const deletedSet = new Set(
+        (Array.isArray(match?.deletedEventIds) ? match.deletedEventIds : []).map(String)
+      );
       const goals = (Array.isArray(match.events) ? match.events : [])
         .map(normalizeEvent)
+        .filter((event) => !deletedSet.has(String(event?.id ?? "")))
         .filter(isGoalEvent);
 
       goals.forEach((goal) => {
@@ -264,9 +284,10 @@ export default function CompletedMatches({
     const deletedEventIds = (Array.isArray(match?.deletedEventIds) ? match.deletedEventIds : [])
       .map(String)
       .filter((id) => id !== revivedId);
+    const scoreUpdate = applyGoalEventScoreDelta(match, currentEvents, updatedEvents);
     const updatedFixtures = fixtures.map((fixture, index) =>
       index === openedIndex
-        ? { ...fixture, events: updatedEvents, deletedEventIds, runtimeUpdatedAt }
+        ? { ...fixture, ...scoreUpdate, events: updatedEvents, deletedEventIds, runtimeUpdatedAt }
         : fixture
     );
 
@@ -296,9 +317,11 @@ export default function CompletedMatches({
       ...(Array.isArray(match?.deletedEventIds) ? match.deletedEventIds.map(String) : []),
       String(eventId),
     ])];
+    const currentEvents = getEvents(match, openedIndex);
+    const scoreUpdate = applyGoalEventScoreDelta(match, currentEvents, updatedEvents);
     const updatedFixtures = fixtures.map((fixture, index) =>
       index === openedIndex
-        ? { ...fixture, events: updatedEvents, deletedEventIds, runtimeUpdatedAt }
+        ? { ...fixture, ...scoreUpdate, events: updatedEvents, deletedEventIds, runtimeUpdatedAt }
         : fixture
     );
     await persist(updatedFixtures);
