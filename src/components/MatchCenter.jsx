@@ -18,6 +18,13 @@ function readUiPreference(key, fallback) {
   }
 }
 
+function canonicalTeamName(name) {
+  const raw = String(name || "").trim();
+  const normalized = raw.toLocaleLowerCase("tr-TR").replace(/[^a-z0-9çğıöşü]+/gi, " ").trim();
+  if (normalized === "cmt insaat" || normalized === "cmt inşaat") return "Cem Taş CMT İnşaat";
+  return raw;
+}
+
 function getTeamName(team) {
   if (typeof team === "string") return team;
   return team?.name || team?.teamName || "Takım";
@@ -38,6 +45,22 @@ function readMatchRules() {
   } catch {
     return { halfDurationMinutes: 30, halftimeDurationMinutes: 5 };
   }
+}
+
+function formatFootballClock(phase, elapsedSeconds, halfDurationMinutes) {
+  const elapsed = Math.max(0, safeNumber(elapsedSeconds));
+  const half = Math.max(1, safeNumber(halfDurationMinutes, 30));
+  if (phase === "waiting") return "00′";
+  if (phase === "halftime") return "DEVRE";
+  if (phase === "penalty") return "🥅 PENALTI";
+  const minuteInHalf = Math.max(1, Math.ceil(elapsed / 60));
+  if (phase === "first_half") {
+    return minuteInHalf <= half ? `${minuteInHalf}′` : `${half} +${minuteInHalf - half}′`;
+  }
+  if (phase === "second_half") {
+    return minuteInHalf <= half ? `${half + minuteInHalf}′` : `${half * 2} +${minuteInHalf - half}′`;
+  }
+  return `${minuteInHalf}′`;
 }
 
 function formatMatchTime(totalSeconds) {
@@ -380,11 +403,8 @@ export default function MatchCenter({
 
   const matchStatus = getMatchStatus(liveMatch);
   const matchPhase = liveMatch?.matchPhase || "waiting";
-  const phaseLimitSeconds =
-    matchPhase === "halftime"
-      ? matchRules.halftimeDurationMinutes * 60
-      : matchRules.halfDurationMinutes * 60;
-  const remainingSeconds = Math.max(0, phaseLimitSeconds - elapsedSeconds);
+  // Sayaç ileri sayar; süre dolunca otomatik devre/maç bitmez.
+  const footballClock = formatFootballClock(matchPhase, elapsedSeconds, matchRules.halfDurationMinutes);
 
   const matchEvents = useMemo(
     () => getMatchEvents(liveMatch),
@@ -520,31 +540,7 @@ export default function MatchCenter({
 
   const selectedSquad = selectedSubstitutionState.squad;
 
-  useEffect(() => {
-    if (!liveMatch || liveMatch.timerRunning !== true) return;
-    if (phaseLimitSeconds <= 0 || elapsedSeconds < phaseLimitSeconds) return;
-
-    if (matchPhase === "first_half") {
-      updateLiveMatch({
-        matchPhase: "halftime",
-        timerRunning: false,
-        timerStartedAt: null,
-        elapsedSeconds: 0,
-      });
-    } else if (matchPhase === "halftime") {
-      updateLiveMatch({
-        timerRunning: false,
-        timerStartedAt: null,
-        elapsedSeconds: phaseLimitSeconds,
-      });
-    } else if (matchPhase === "second_half") {
-      updateLiveMatch({
-        timerRunning: false,
-        timerStartedAt: null,
-        elapsedSeconds: phaseLimitSeconds,
-      });
-    }
-  }, [currentTime, liveMatch?.id, liveMatch?.timerRunning, matchPhase, phaseLimitSeconds]);
+  // Süre dolunca otomatik geçiş YOK: devreyi ve maçı yalnız operatör bitirir.
 
   const topFiveStandings = standings.slice(0, 5);
   const topFiveScorers = goalScorers.slice(0, 5);
@@ -715,7 +711,7 @@ export default function MatchCenter({
 
       events.forEach((goal) => {
         const playerId = goal.playerId || goal.id;
-        const team = goal.team || goal.teamName;
+        const team = canonicalTeamName(goal.team || goal.teamName);
 
         if (!playerId || !team) return;
 
@@ -1392,7 +1388,7 @@ export default function MatchCenter({
 
               <div className="match-score-center">
                 <span className="match-clock">
-                  {matchPhase === "penalty" ? "🥅 PENALTI" : formatMatchTime(remainingSeconds)}
+                  {footballClock}
                 </span>
 
                 <div className="match-score">

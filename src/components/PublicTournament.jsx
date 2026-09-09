@@ -133,6 +133,13 @@ function calculateStandings(teams, fixtures) {
     .sort((a, b) => b.points - a.points || b.goalDifference - a.goalDifference || b.goalsFor - a.goalsFor || a.team.localeCompare(b.team, "tr"));
 }
 
+function canonicalTeamName(name) {
+  const raw = String(name || "").trim();
+  const normalized = raw.toLocaleLowerCase("tr-TR").replace(/[^a-z0-9çğıöşü]+/gi, " ").trim();
+  if (normalized === "cmt insaat" || normalized === "cmt inşaat") return "Cem Taş CMT İnşaat";
+  return raw;
+}
+
 function deriveScorers(fixtures) {
   const totals = {};
   (fixtures || []).forEach((match) => {
@@ -146,7 +153,7 @@ function deriveScorers(fixtures) {
       .filter((event) => GOAL_EVENT_TYPES.has(event.type))
       .forEach((event) => {
         const playerName = event.playerName || event.name || event.player;
-        const team = event.team || event.teamName;
+        const team = canonicalTeamName(event.team || event.teamName);
         if (!playerName || !team) return;
         const playerId = event.playerId || playerName;
         const key = `${team}-${playerId}`;
@@ -306,6 +313,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const [now, setNow] = useState(Date.now());
   const [lastSync, setLastSync] = useState(null);
   const [selectedMatch, setSelectedMatch] = useState(null);
+  const knownGoalIdsRef = useRef(null);
+  const audioContextRef = useRef(null);
 
   const refreshSequence = useRef(0);
   const refreshInFlight = useRef(false);
@@ -652,6 +661,46 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     const calculated = deriveScorers(displayFixtures);
     return calculated.length > 0 ? calculated : goalScorers;
   }, [displayFixtures, goalScorers, remoteFixtures]);
+
+  useEffect(() => {
+    const currentGoalIds = new Set();
+    displayFixtures.forEach((match) => {
+      getEvents(match).filter((event) => GOAL_EVENT_TYPES.has(event.type)).forEach((event) => {
+        currentGoalIds.add(String(event.id || `${match.id}-${event.type}-${event.playerId || event.playerName}-${event.minute}`));
+      });
+    });
+
+    // İlk yüklemede geçmiş golleri sessizce tanı; yalnız sayfa açıkken SONRADAN gelen gol çalsın.
+    if (knownGoalIdsRef.current === null) {
+      knownGoalIdsRef.current = currentGoalIds;
+      return;
+    }
+    const hasNewGoal = [...currentGoalIds].some((id) => !knownGoalIdsRef.current.has(id));
+    knownGoalIdsRef.current = currentGoalIds;
+    if (!hasNewGoal || document.visibilityState !== "visible") return;
+
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = audioContextRef.current || new AudioCtx();
+      audioContextRef.current = ctx;
+      if (ctx.state === "suspended") ctx.resume();
+      const nowAt = ctx.currentTime;
+      [392, 523.25, 659.25].forEach((frequency, index) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.frequency.value = frequency;
+        osc.type = "square";
+        gain.gain.setValueAtTime(0.0001, nowAt + index * 0.08);
+        gain.gain.exponentialRampToValueAtTime(0.16, nowAt + index * 0.08 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.0001, nowAt + index * 0.08 + 0.28);
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.start(nowAt + index * 0.08); osc.stop(nowAt + index * 0.08 + 0.3);
+      });
+    } catch {
+      // Tarayıcı ses izni vermediyse canlı takip sessizce çalışmaya devam eder.
+    }
+  }, [displayFixtures]);
 
   const leader = liveStandings[0];
   const topScorer = liveScorers[0];

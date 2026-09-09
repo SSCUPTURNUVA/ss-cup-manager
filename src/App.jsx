@@ -205,6 +205,13 @@ function getFixtureEvents(match) {
   return [...events, ...legacyGoals];
 }
 
+function canonicalTeamName(name) {
+  const raw = String(name || "").trim();
+  const normalized = raw.toLocaleLowerCase("tr-TR").replace(/[^a-z0-9çğıöşü]+/gi, " ").trim();
+  if (normalized === "cmt insaat" || normalized === "cmt inşaat") return "Cem Taş CMT İnşaat";
+  return raw;
+}
+
 function deriveGoalScorers(fixtures) {
   const totals = {};
   (fixtures || []).forEach((match) => {
@@ -216,7 +223,7 @@ function deriveGoalScorers(fixtures) {
       .forEach((event) => {
         const playerId = event?.playerId || event?.id || event?.playerName || event?.name || event?.player;
         const name = event?.playerName || event?.name || event?.player || "Oyuncu";
-        const team = event?.team || event?.teamName || "";
+        const team = canonicalTeamName(event?.team || event?.teamName || "");
         if (!playerId || !team) return;
         const key = `${team}-${playerId}`;
         if (!totals[key]) {
