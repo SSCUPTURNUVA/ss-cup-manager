@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { syncLeagueFixtureWithRetry } from "../utils/pendingFixtureSync";
 import { supabase } from "../supabase";
+import { syncMatchEventChanges } from "../utils/matchEventSync";
 
 const EVENT_LABELS = {
   scorer_record: "⚽ Golcü Kaydı",
@@ -152,6 +153,16 @@ export default function CompletedMatches({
   }
 
   async function persist(updatedFixtures) {
+    // Olay ekleme/silme işlemlerini ayrı maç-olay kayıtlarına da yaz.
+    // Böylece eski bir bulut olayı daha sonra geri gelmez.
+    try {
+      await syncMatchEventChanges(fixtures, updatedFixtures);
+    } catch (error) {
+      console.error("Maç olayları buluta kaydedilemedi:", error);
+      alert("Maç olayları buluta kaydedilemedi. İşlem iptal edildi; tekrar deneyin.");
+      return false;
+    }
+
     setFixtures(updatedFixtures);
 
     const changed = updatedFixtures.filter((match, index) =>
@@ -199,6 +210,7 @@ export default function CompletedMatches({
     window.dispatchEvent(
       new CustomEvent("sscup-fixtures-updated", { detail: updatedFixtures })
     );
+    return true;
   }
 
   function rebuildScorers(updatedFixtures) {
@@ -326,6 +338,61 @@ export default function CompletedMatches({
     );
     await persist(updatedFixtures);
     rebuildScorers(updatedFixtures);
+  }
+
+  async function clearMatchEvents() {
+    const match = fixtures[openedIndex];
+    if (!match) return;
+
+    const currentEvents = getEvents(match, openedIndex);
+    const hasLegacyGoals = Array.isArray(match?.goals) && match.goals.length > 0;
+    const hasScore = (Number(match?.homeScore) || 0) !== 0 || (Number(match?.awayScore) || 0) !== 0;
+
+    if (currentEvents.length === 0 && !hasLegacyGoals && !hasScore) {
+      alert("Bu maç zaten 0 - 0 ve temizlenecek maç olayı yok.");
+      return;
+    }
+
+    const scoreText = `${match.homeScore ?? 0} - ${match.awayScore ?? 0}`;
+    const confirmed = window.confirm(
+      `${match.home} - ${match.away} maçındaki TÜM maç olayları ve ${scoreText} skoru temizlenecek.\n\n` +
+      `Maç 0 - 0 olacak. Oynandı kaydı, tarih ve saat değişmeyecek; diğer maçlara dokunulmayacak.\n\n` +
+      `Sonra golleri ve kartları aşağıdan yeniden girebilirsiniz. Devam edilsin mi?`
+    );
+    if (!confirmed) return;
+
+    // Daha önce buluta yazılmış tüm olayları tombstone listesine ekle ki geri gelmesinler.
+    const allKnownIds = [
+      ...(Array.isArray(match?.events) ? match.events : []),
+      ...(Array.isArray(match?.goals) ? match.goals : []),
+    ].map((event, index) => String(event?.id || `event-${index}`));
+
+    const deletedEventIds = [...new Set([
+      ...(Array.isArray(match?.deletedEventIds) ? match.deletedEventIds.map(String) : []),
+      ...allKnownIds,
+    ])];
+
+    const runtimeUpdatedAt = new Date().toISOString();
+    const updatedFixtures = fixtures.map((fixture, index) =>
+      index === openedIndex
+        ? {
+            ...fixture,
+            // Temizleme sonrası tek gerçek kaynak: yeniden girilecek maç olayları.
+            homeScore: 0,
+            awayScore: 0,
+            events: [],
+            goals: [],
+            deletedEventIds,
+            runtimeUpdatedAt,
+          }
+        : fixture
+    );
+
+    const ok = await persist(updatedFixtures);
+    if (ok === false) return;
+    rebuildScorers(updatedFixtures);
+    resetDraft();
+    alert("Maç olayları ve skor temizlendi. Maç 0 - 0 oldu; şimdi olayları yeniden girebilirsiniz.");
   }
 
   async function reopenMatch() {
@@ -491,6 +558,9 @@ export default function CompletedMatches({
                 Vazgeç
               </button>
             )}
+            <button type="button" className="danger-button" onClick={clearMatchEvents}>
+              🧹 Maç Olaylarını Temizle ve Yeniden Gir
+            </button>
             <button type="button" className="danger-button" onClick={reopenMatch}>
               🔓 Maçı Yeniden Aç
             </button>

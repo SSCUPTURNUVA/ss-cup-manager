@@ -1012,6 +1012,103 @@ export default function MatchCenter({
     setPenaltyPlayerId("");
   }
 
+  async function repairCmtOnerCompletedMatch(match) {
+    const homeName = canonicalTeamName(getTeamName(match?.home));
+    const awayName = canonicalTeamName(getTeamName(match?.away));
+    const cmtName = "Cem Taş CMT İnşaat";
+    const onerName = "Öner Yapı FK";
+    const isTarget =
+      ((homeName === cmtName && awayName === onerName && safeNumber(match?.homeScore) === 5 && safeNumber(match?.awayScore) === 3) ||
+       (awayName === cmtName && homeName === onerName && safeNumber(match?.awayScore) === 5 && safeNumber(match?.homeScore) === 3));
+
+    if (!isTarget) return;
+
+    const cmtIsHome = homeName === cmtName;
+    const actualCmtName = cmtIsHome ? getTeamName(match.home) : getTeamName(match.away);
+    const squads = readSquads();
+    const squad =
+      (Array.isArray(squads?.[actualCmtName]) && squads[actualCmtName]) ||
+      (Array.isArray(squads?.[cmtName]) && squads[cmtName]) ||
+      (Array.isArray(squads?.["CMT İnşaat"]) && squads["CMT İnşaat"]) ||
+      [];
+
+    const byNumber = (number) => squad.find((player) =>
+      Number(player?.shirtNumber ?? player?.number) === Number(number)
+    );
+    const required = [73, 10, 5, 47];
+    const missing = required.filter((number) => !byNumber(number));
+    if (missing.length) {
+      alert(`Cem Taş kadrosunda şu forma numaraları bulunamadı: ${missing.join(", ")}. Hiçbir kayıt değiştirilmedi.`);
+      return;
+    }
+
+    if (!window.confirm(
+      "Cem Taş CMT İnşaat – Öner Yapı FK maç olayları onarılsın mı?\\n\\n" +
+      "Cem Taş: 73×1 gol, 10×2 gol, 5×2 gol, 47×1 sarı kart\\n" +
+      "Öner Yapı olayları ve 5-3 skor aynen korunacak."
+    )) return;
+
+    const isCmtEvent = (event) => canonicalTeamName(event?.team || event?.teamName) === cmtName;
+    const oldEvents = Array.isArray(match?.events) ? match.events : [];
+    const removedCmtIds = oldEvents.filter(isCmtEvent).map((event) => String(event?.id || "")).filter(Boolean);
+    const opponentEvents = oldEvents.filter((event) => !isCmtEvent(event));
+    const opponentGoals = (Array.isArray(match?.goals) ? match.goals : []).filter((event) => !isCmtEvent(event));
+    const repairStamp = Date.now();
+
+    const makeEvent = (type, shirtNumber, sequence) => {
+      const player = byNumber(shirtNumber);
+      const playerId = player.id || player.playerId || `cmt-${shirtNumber}`;
+      const playerName = getPlayerName(player);
+      return {
+        id: `repair-cmt-oner-${type}-${shirtNumber}-${sequence}-${repairStamp}`,
+        actionId: `repair-cmt-oner-${repairStamp}-${type}-${shirtNumber}-${sequence}`,
+        type,
+        eventType: type,
+        playerId,
+        playerName,
+        name: playerName,
+        team: actualCmtName,
+        teamName: actualCmtName,
+        shirtNumber: Number(shirtNumber),
+        minute: "",
+        side: cmtIsHome ? "home" : "away",
+        repairedHistoricalEvent: true,
+      };
+    };
+
+    const repairedCmtEvents = [
+      makeEvent("goal", 73, 1),
+      makeEvent("goal", 10, 1),
+      makeEvent("goal", 10, 2),
+      makeEvent("goal", 5, 1),
+      makeEvent("goal", 5, 2),
+      makeEvent("yellow_card", 47, 1),
+    ];
+
+    const targetIndex = fixtures.findIndex((item) =>
+      item === match || (match?.id != null && String(item?.id) === String(match.id))
+    );
+    if (targetIndex < 0) return;
+
+    const deletedEventIds = Array.from(new Set([
+      ...(Array.isArray(match?.deletedEventIds) ? match.deletedEventIds.map(String) : []),
+      ...removedCmtIds,
+    ]));
+
+    const updatedFixtures = fixtures.map((item, index) => index === targetIndex ? {
+      ...item,
+      // Skor ve Öner Yapı olayları özellikle değiştirilmez.
+      events: [...opponentEvents, ...repairedCmtEvents],
+      goals: opponentGoals,
+      deletedEventIds,
+      historicalEventsRepairedAt: new Date().toISOString(),
+    } : item);
+
+    await persistFixtures(updatedFixtures);
+    rebuildGoalScorers(updatedFixtures);
+    alert("Onarım tamamlandı: 5-3 skor ve Öner Yapı olayları korundu; Cem Taş 5 gol + 1 sarı kart maç olaylarına işlendi.");
+  }
+
   async function handleStartNextMatch() {
     if (!nextMatch) return;
 
@@ -1965,6 +2062,23 @@ export default function MatchCenter({
                   >
                     ⚽ Golcüleri Düzenle
                   </button>
+
+                  {(() => {
+                    const h = canonicalTeamName(getTeamName(match.home));
+                    const a = canonicalTeamName(getTeamName(match.away));
+                    const target =
+                      (h === "Cem Taş CMT İnşaat" && a === "Öner Yapı FK" && safeNumber(match.homeScore) === 5 && safeNumber(match.awayScore) === 3) ||
+                      (a === "Cem Taş CMT İnşaat" && h === "Öner Yapı FK" && safeNumber(match.awayScore) === 5 && safeNumber(match.homeScore) === 3);
+                    return target ? (
+                      <button
+                        type="button"
+                        className="primary-button"
+                        onClick={() => repairCmtOnerCompletedMatch(match)}
+                      >
+                        🛠️ Bu Maçın Olaylarını Onar
+                      </button>
+                    ) : null;
+                  })()}
                 </div>
               ))}
             </div>
