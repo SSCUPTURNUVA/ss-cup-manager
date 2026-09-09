@@ -621,7 +621,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const upcoming = displayFixtures.filter(
     (match) => match?.played !== true && match?.live !== true
   );
-  const recent = displayFixtures.filter((match) => match?.played === true).slice().reverse().slice(0, 8);
+  const completedMatches = displayFixtures.filter((match) => match?.played === true).slice().reverse();
+  const recent = completedMatches.slice(0, 8);
 
   const todayDate = new Date(now);
   const todayKey = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, "0")}-${String(todayDate.getDate()).padStart(2, "0")}`;
@@ -788,7 +789,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         </section>
 
         <nav className="public-tabbar">
-          {[["overview","⚡","Genel"],["fixtures","📅","Fikstür"],["standings","📊","Puan Durumu"],["scorers","👑","Gol Krallığı"],["teams","👕","Takımlar"],["knockout","🏆","Eleme Turları"]].map(([id, icon, label]) => (
+          {[["overview","⚡","Genel"],["results","✅","Tamamlanan"],["fixtures","📅","Fikstür"],["standings","📊","Puan Durumu"],["scorers","👑","Gol Krallığı"],["teams","👕","Takımlar"],["knockout","🏆","Eleme Turları"]].map(([id, icon, label]) => (
             <button key={id} className={activeTab === id ? "active" : ""} onClick={() => setActiveTab(id)}><span>{icon}</span>{label}</button>
           ))}
         </nav>
@@ -815,7 +816,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
               <section className="public-section public-results-panel">
                 <div className="public-section-head"><div><span>SON DÜDÜK</span><h2>Sonuçlanan Maçlar</h2></div><b>Maça tıkla • olayları gör</b></div>
-                {recent.length === 0 ? <div className="public-empty-box public-results-empty"><span>🏆</span><strong>Henüz oynanan maç bulunmuyor.</strong><small>Maçlar tamamlandıkça burada görünecektir.</small></div> : <div className="public-results-list">{recent.map((match,index) => <button key={match.id || index} onClick={() => setSelectedMatch(match)}><div><span>{formatDate(match.date)} {match.time || ""}</span><small>{stageText(match,index)}</small></div><strong>{match.home}</strong><b>{scoreText(match.homeScore)} - {scoreText(match.awayScore)}</b><strong>{match.away}</strong><em>MS ›</em></button>)}</div>}
+                {recent.length === 0 ? <div className="public-empty-box public-results-empty"><span>🏆</span><strong>Henüz oynanan maç bulunmuyor.</strong><small>Maçlar tamamlandıkça burada görünecektir.</small></div> : <>
+                  <div className="public-results-list">{recent.map((match,index) => <button key={match.id || index} onClick={() => setSelectedMatch(match)}><div><span>{formatDate(match.date)} {match.time || ""}</span><small>{stageText(match,index)}</small></div><strong>{match.home}</strong><b>{scoreText(match.homeScore)} - {scoreText(match.awayScore)}</b><strong>{match.away}</strong><em>MS ›</em></button>)}</div>
+                  {completedMatches.length > 8 && <button className="public-all-results-button" onClick={() => setActiveTab("results")}>TÜM TAMAMLANAN MAÇLARI GÖR <span>›</span></button>}
+                </>}
               </section>
             </div>
 
@@ -833,6 +837,20 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
               </section>
             </aside>
           </div>
+        )}
+
+        {activeTab === "results" && (
+          <section className="public-section public-results-archive">
+            <div className="public-section-head"><div><span>MAÇ ARŞİVİ</span><h2>Tamamlanan Maçlar</h2></div><b>{completedMatches.length} maç • Detay için maça tıkla</b></div>
+            {completedMatches.length === 0 ? <div className="public-empty-box">Henüz tamamlanan maç bulunmuyor.</div> : (
+              <div className="public-results-list public-results-list-all">{completedMatches.map((match,index) => (
+                <button key={match.id || index} onClick={() => setSelectedMatch(match)}>
+                  <div><span>{formatDate(match.date)} {match.time || ""}</span><small>{stageText(match,index)}</small></div>
+                  <strong>{match.home}</strong><b>{scoreText(match.homeScore)} - {scoreText(match.awayScore)}</b><strong>{match.away}</strong><em>DETAY ›</em>
+                </button>
+              ))}</div>
+            )}
+          </section>
         )}
 
         {activeTab === "fixtures" && (
