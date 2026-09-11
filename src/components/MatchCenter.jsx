@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabase";
 import { sortFixturesBySchedule } from "../utils/fixtureOrder";
 import { flushPendingFixtureSync, queueFixtureSync, syncLeagueFixtureWithRetry } from "../utils/pendingFixtureSync";
@@ -90,6 +90,7 @@ function getMatchStatus(match) {
 
 const EVENT_TYPES = {
   goal: { label: "Gol", icon: "⚽", scores: true, countsGoal: true },
+  own_goal: { label: "Kendi Kalesine", icon: "🥴", scores: true, scoresToOpponent: true, countsGoal: false },
   penalty_goal: { label: "Penaltı Golü", icon: "🥅", scores: true, countsGoal: true },
   penalty_shootout_goal: {
     label: "Seri Penaltı Golü",
@@ -189,6 +190,8 @@ export default function MatchCenter({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [eventSide, setEventSide] = useState(() => readUiPreference("sscup-match-event-side", "home"));
   const [eventType, setEventType] = useState(() => readUiPreference("sscup-match-event-type", "goal"));
+  const [isFinishingMatch, setIsFinishingMatch] = useState(false);
+  const finishLockRef = useRef(false);
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
   const [secondPlayerId, setSecondPlayerId] = useState("");
   const [matchRules, setMatchRules] = useState(readMatchRules);
@@ -680,10 +683,6 @@ export default function MatchCenter({
 
     await persistFixtures(updatedFixtures);
 
-    const updatedMatch = updatedFixtures[liveMatchIndex];
-    if (updatedMatch?.isKnockout) {
-      await syncKnockoutStateToCloud(updatedMatch);
-    }
   }
 
   function getPlayerById(playerId) {
@@ -902,15 +901,19 @@ export default function MatchCenter({
     }
 
     const scores = EVENT_TYPES[eventType]?.scores === true;
+    const scoresToOpponent = EVENT_TYPES[eventType]?.scoresToOpponent === true;
+    const scoringSide = scoresToOpponent
+      ? (eventSide === "home" ? "away" : "home")
+      : eventSide;
 
     const patch = {
       events: [...currentEvents, ...eventsToAdd],
       homeScore:
-        scores && eventSide === "home"
+        scores && scoringSide === "home"
           ? safeNumber(liveMatch.homeScore) + 1
           : safeNumber(liveMatch.homeScore),
       awayScore:
-        scores && eventSide === "away"
+        scores && scoringSide === "away"
           ? safeNumber(liveMatch.awayScore) + 1
           : safeNumber(liveMatch.awayScore),
     };
@@ -1343,7 +1346,7 @@ export default function MatchCenter({
 
   // LİG: beraberlik normal sonuçtur. ELEME: beraberlikte penaltı gerekir.
   async function handleFinishMatch() {
-    if (!liveMatch) return;
+    if (!liveMatch || finishLockRef.current || isFinishingMatch) return;
 
     const isDraw = safeNumber(liveMatch.homeScore) === safeNumber(liveMatch.awayScore);
 
@@ -1369,32 +1372,26 @@ export default function MatchCenter({
 
     if (!confirmed) return;
 
-    localStorage.removeItem("sscup-match-center-active");
+    finishLockRef.current = true;
+    setIsFinishingMatch(true);
+    try {
+      localStorage.removeItem("sscup-match-center-active");
 
-    const finishPatch = {
-      played: true,
-      live: false,
-      matchPhase: "completed",
-      timerRunning: false,
-      timerStartedAt: null,
-      elapsedSeconds,
-    };
+      const finishPatch = {
+        played: true,
+        live: false,
+        matchPhase: "completed",
+        timerRunning: false,
+        timerStartedAt: null,
+        elapsedSeconds,
+      };
 
-    const finishedMatch = { ...liveMatch, ...finishPatch };
-
-    // Maç sonucu önce yerelde kesinleşir. İnternet yoksa bulut kaydı kuyruğa alınır;
-    // saha kenarında "maçı bitirememe" durumu oluşmaz.
-    let cloudSynced = true;
-    if (liveMatch.isKnockout === true) {
-      await syncKnockoutStateToCloud(finishedMatch);
-    } else {
-      cloudSynced = await syncLeagueFixtureWithRetry(finishedMatch);
-    }
-
-    await updateLiveMatch(finishPatch);
-
-    if (!cloudSynced) {
-      alert("⚠️ Maç yerelde güvenle bitirildi. İnternet bağlantısı gelince canlı takip otomatik eşitlenecek.");
+      // Tek basış = tek persist/senkron. updateLiveMatch zaten yerel kaydı ve
+      // ilgili bulut senkronunu yapıyor; burada ikinci kez sync çağırmıyoruz.
+      await updateLiveMatch(finishPatch);
+    } finally {
+      finishLockRef.current = false;
+      setIsFinishingMatch(false);
     }
   }
 
@@ -1618,8 +1615,8 @@ export default function MatchCenter({
               )}
 
               {matchPhase === "second_half" && (
-                <button type="button" className="match-finish-button" onClick={handleFinishMatch}>
-                  🏁 Maçı Bitir
+                <button type="button" className="match-finish-button" onClick={handleFinishMatch} disabled={isFinishingMatch}>
+                  {isFinishingMatch ? "⏳ Bitiriliyor..." : "🏁 Maçı Bitir"}
                 </button>
               )}
             </div>

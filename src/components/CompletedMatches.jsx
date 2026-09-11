@@ -7,6 +7,8 @@ const EVENT_LABELS = {
   scorer_record: "⚽ Golcü Kaydı",
   goal: "⚽ Gol",
   penalty_goal: "🥅 Penaltı Golü",
+  penalty_miss: "❌ Penaltı Kaçtı",
+  own_goal: "🥴 Kendi Kalesine",
   assist: "🅰️ Asist",
   yellow_card: "🟨 Sarı Kart",
   red_card: "🟥 Kırmızı Kart",
@@ -43,15 +45,19 @@ function isGoalEvent(event) {
   return ["goal", "penalty_goal", "scorer_record"].includes(event?.type);
 }
 
-function goalCountForTeam(events, teamName) {
-  return (Array.isArray(events) ? events : []).filter(
-    (event) => isGoalEvent(event) && event?.team === teamName
-  ).length;
+function scoreCountForSide(events, match, side) {
+  const scoringTeam = side === "home" ? match.home : match.away;
+  const opponentTeam = side === "home" ? match.away : match.home;
+  return (Array.isArray(events) ? events : []).filter((event) => {
+    if (isGoalEvent(event)) return event?.team === scoringTeam;
+    if (event?.type === "own_goal") return event?.team === opponentTeam;
+    return false;
+  }).length;
 }
 
 function applyGoalEventScoreDelta(match, beforeEvents, afterEvents) {
-  const homeDelta = goalCountForTeam(afterEvents, match.home) - goalCountForTeam(beforeEvents, match.home);
-  const awayDelta = goalCountForTeam(afterEvents, match.away) - goalCountForTeam(beforeEvents, match.away);
+  const homeDelta = scoreCountForSide(afterEvents, match, "home") - scoreCountForSide(beforeEvents, match, "home");
+  const awayDelta = scoreCountForSide(afterEvents, match, "away") - scoreCountForSide(beforeEvents, match, "away");
 
   return {
     homeScore: Math.max(0, (Number(match.homeScore) || 0) + homeDelta),
@@ -80,6 +86,7 @@ export default function CompletedMatches({
 }) {
   const [openedIndex, setOpenedIndex] = useState(null);
   const [editingId, setEditingId] = useState(null);
+  const [isClearingEvents, setIsClearingEvents] = useState(false);
   const [draft, setDraft] = useState({
     type: "scorer_record",
     side: "home",
@@ -341,6 +348,7 @@ export default function CompletedMatches({
   }
 
   async function clearMatchEvents() {
+    if (isClearingEvents) return;
     const match = fixtures[openedIndex];
     if (!match) return;
 
@@ -361,38 +369,84 @@ export default function CompletedMatches({
     );
     if (!confirmed) return;
 
-    // Daha önce buluta yazılmış tüm olayları tombstone listesine ekle ki geri gelmesinler.
-    const allKnownIds = [
-      ...(Array.isArray(match?.events) ? match.events : []),
-      ...(Array.isArray(match?.goals) ? match.goals : []),
-    ].map((event, index) => String(event?.id || `event-${index}`));
+    setIsClearingEvents(true);
+    try {
+      // Yerelde görünmeyen ama daha önce buluta yazılmış olaylar da olabilir.
+      // Önce bu maçın TÜM uzak olay satırlarını bulup tombstone yapıyoruz;
+      // böylece sonraki realtime/yenilemede eski olaylar geri dirilemez.
+      const matchKey = match?.id !== undefined && match?.id !== null && String(match.id) !== ""
+        ? `id:${String(match.id)}`
+        : match?.knockoutKey
+          ? `ko:${String(match.knockoutKey)}`
+          : `fallback:${String(match?.home || "")}|${String(match?.away || "")}|${String(match?.date || "")}|${String(match?.time || "")}|${openedIndex}`;
 
-    const deletedEventIds = [...new Set([
-      ...(Array.isArray(match?.deletedEventIds) ? match.deletedEventIds.map(String) : []),
-      ...allKnownIds,
-    ])];
+      const { data: remoteRows, error: remoteReadError } = await supabase
+        .from("app_state")
+        .select("id,value")
+        .like("id", "match_event::%");
+      if (remoteReadError) throw remoteReadError;
 
-    const runtimeUpdatedAt = new Date().toISOString();
-    const updatedFixtures = fixtures.map((fixture, index) =>
-      index === openedIndex
-        ? {
-            ...fixture,
-            // Temizleme sonrası tek gerçek kaynak: yeniden girilecek maç olayları.
-            homeScore: 0,
-            awayScore: 0,
-            events: [],
-            goals: [],
-            deletedEventIds,
-            runtimeUpdatedAt,
-          }
-        : fixture
-    );
+      const matchingRemoteRows = (Array.isArray(remoteRows) ? remoteRows : []).filter(
+        (row) => String(row?.value?.matchKey || "") === matchKey
+      );
+      const remoteIds = matchingRemoteRows
+        .map((row) => String(row?.value?.eventId || row?.value?.event?.id || ""))
+        .filter(Boolean);
 
-    const ok = await persist(updatedFixtures);
-    if (ok === false) return;
-    rebuildScorers(updatedFixtures);
-    resetDraft();
-    alert("Maç olayları ve skor temizlendi. Maç 0 - 0 oldu; şimdi olayları yeniden girebilirsiniz.");
+      if (matchingRemoteRows.length > 0) {
+        const now = new Date().toISOString();
+        const tombstones = matchingRemoteRows.map((row) => ({
+          id: row.id,
+          value: {
+            ...(row.value || {}),
+            deleted: true,
+            updatedAt: now,
+          },
+          updated_at: now,
+        }));
+        const { error: tombstoneError } = await supabase
+          .from("app_state")
+          .upsert(tombstones, { onConflict: "id" });
+        if (tombstoneError) throw tombstoneError;
+      }
+
+      const allKnownIds = [
+        ...(Array.isArray(match?.events) ? match.events : []),
+        ...(Array.isArray(match?.goals) ? match.goals : []),
+      ].map((event, index) => String(event?.id || `event-${index}`));
+
+      const deletedEventIds = [...new Set([
+        ...(Array.isArray(match?.deletedEventIds) ? match.deletedEventIds.map(String) : []),
+        ...allKnownIds,
+        ...remoteIds,
+      ])];
+
+      const runtimeUpdatedAt = new Date().toISOString();
+      const updatedFixtures = fixtures.map((fixture, index) =>
+        index === openedIndex
+          ? {
+              ...fixture,
+              homeScore: 0,
+              awayScore: 0,
+              events: [],
+              goals: [],
+              deletedEventIds,
+              runtimeUpdatedAt,
+            }
+          : fixture
+      );
+
+      const ok = await persist(updatedFixtures);
+      if (ok === false) return;
+      rebuildScorers(updatedFixtures);
+      resetDraft();
+      alert("Maç olayları ve skor tek seferde temizlendi. Maç 0 - 0 oldu; şimdi olayları yeniden girebilirsiniz.");
+    } catch (error) {
+      console.error("Maç olayları tamamen temizlenemedi:", error);
+      alert("Maç olayları temizlenirken bulut kaydı tamamlanamadı. Veri geri gelmesin diye işlem durduruldu; tekrar deneyin.");
+    } finally {
+      setIsClearingEvents(false);
+    }
   }
 
   async function reopenMatch() {
@@ -489,6 +543,8 @@ export default function CompletedMatches({
                 }
               >
                 <option value="scorer_record">⚽ Golcü Kaydı</option>
+                <option value="own_goal">🥴 Kendi Kalesine</option>
+                <option value="penalty_miss">❌ Penaltı Kaçtı</option>
                 <option value="assist">🅰️ Asist</option>
                 <option value="yellow_card">🟨 Sarı Kart</option>
                 <option value="red_card">🟥 Kırmızı Kart</option>
@@ -558,8 +614,8 @@ export default function CompletedMatches({
                 Vazgeç
               </button>
             )}
-            <button type="button" className="danger-button" onClick={clearMatchEvents}>
-              🧹 Maç Olaylarını Temizle ve Yeniden Gir
+            <button type="button" className="danger-button" onClick={clearMatchEvents} disabled={isClearingEvents}>
+              {isClearingEvents ? "⏳ Temizleniyor..." : "🧹 Maç Olaylarını Temizle ve Yeniden Gir"}
             </button>
             <button type="button" className="danger-button" onClick={reopenMatch}>
               🔓 Maçı Yeniden Aç

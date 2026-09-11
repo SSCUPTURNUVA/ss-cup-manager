@@ -4,11 +4,13 @@ import "./PublicTournament.css";
 import { normalizeFixtureDate, fixtureTimeMinutes, sortFixturesBySchedule } from "../utils/fixtureOrder";
 import { MATCH_EVENT_PREFIX, applyMatchEventRowsToFixtures, fetchMatchEventRows } from "../utils/matchEventSync";
 
-const GOAL_EVENT_TYPES = new Set(["goal", "penalty_goal", "penalty_shootout_goal", "scorer_record"]);
+const GOAL_EVENT_TYPES = new Set(["goal", "own_goal", "penalty_goal", "penalty_shootout_goal", "scorer_record"]);
+const SCORER_EVENT_TYPES = new Set(["goal", "penalty_goal", "scorer_record"]);
 
 const EVENT_META = {
   goal: { icon: "⚽", label: "GOL" },
   penalty_goal: { icon: "🥅", label: "PENALTI GOLÜ" },
+  own_goal: { icon: "🥴", label: "KENDİ KALESİNE" },
   penalty_shootout_goal: { icon: "⚽", label: "PENALTI GOLÜ" },
   penalty_shootout_miss: { icon: "❌", label: "PENALTI KAÇTI" },
   scorer_record: { icon: "⚽", label: "GOL" },
@@ -150,7 +152,7 @@ function deriveScorers(fixtures) {
     if (!countsForStats) return;
 
     getEvents(match)
-      .filter((event) => GOAL_EVENT_TYPES.has(event.type))
+      .filter((event) => SCORER_EVENT_TYPES.has(event.type))
       .forEach((event) => {
         const playerName = event.playerName || event.name || event.player;
         const team = canonicalTeamName(event.team || event.teamName);
@@ -663,6 +665,73 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     return calculated.length > 0 ? calculated : goalScorers;
   }, [displayFixtures, goalScorers, remoteFixtures]);
 
+  const ensureAudioReady = useCallback(async () => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return null;
+      let ctx = audioContextRef.current;
+      if (!ctx || ctx.state === "closed") {
+        ctx = new AudioCtx();
+        audioContextRef.current = ctx;
+      }
+      if (ctx.state === "suspended") await ctx.resume();
+
+      // iOS/Chrome için ilk kullanıcı dokunuşunda sessiz tampon ile ses motorunu gerçekten aç.
+      if (ctx.state === "running") {
+        const buffer = ctx.createBuffer(1, 1, 22050);
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
+        source.start(0);
+      }
+      return ctx;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const playGoalSound = useCallback(async () => {
+    const ctx = await ensureAudioReady();
+    if (!ctx || ctx.state !== "running") return;
+
+    const start = ctx.currentTime + 0.015;
+    // Net duyulan kısa stadyum tipi gol uyarısı: iki yükselen siren + final vuruşu.
+    const notes = [
+      { at: 0.00, from: 360, to: 760, duration: 0.42, volume: 0.34 },
+      { at: 0.46, from: 430, to: 900, duration: 0.46, volume: 0.36 },
+      { at: 0.98, from: 620, to: 620, duration: 0.30, volume: 0.42 },
+    ];
+    notes.forEach(({ at, from, to, duration, volume }) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(from, start + at);
+      osc.frequency.exponentialRampToValueAtTime(to, start + at + duration);
+      gain.gain.setValueAtTime(0.0001, start + at);
+      gain.gain.exponentialRampToValueAtTime(volume, start + at + 0.025);
+      gain.gain.setValueAtTime(volume, start + at + Math.max(0.04, duration - 0.10));
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + at + duration);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(start + at);
+      osc.stop(start + at + duration + 0.02);
+    });
+  }, [ensureAudioReady]);
+
+  useEffect(() => {
+    // Mobil tarayıcılar sesi otomatik başlatmayı engeller. Canlı sayfaya ilk dokunuş/klik
+    // ses motorunu açar; bundan sonraki goller kullanıcı tekrar dokunmadan çalar.
+    const unlock = () => { ensureAudioReady(); };
+    window.addEventListener("pointerdown", unlock, { passive: true });
+    window.addEventListener("touchstart", unlock, { passive: true });
+    window.addEventListener("keydown", unlock);
+    return () => {
+      window.removeEventListener("pointerdown", unlock);
+      window.removeEventListener("touchstart", unlock);
+      window.removeEventListener("keydown", unlock);
+    };
+  }, [ensureAudioReady]);
+
   useEffect(() => {
     const currentGoalIds = new Set();
     displayFixtures.forEach((match) => {
@@ -671,7 +740,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       });
     });
 
-    // İlk yüklemede geçmiş golleri sessizce tanı; yalnız sayfa açıkken SONRADAN gelen gol çalsın.
+    // İlk yüklemedeki eski goller ses çıkarmaz. Sayfa açıkken sonradan eklenen her gol çalar.
     if (knownGoalIdsRef.current === null) {
       knownGoalIdsRef.current = currentGoalIds;
       return;
@@ -679,29 +748,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     const hasNewGoal = [...currentGoalIds].some((id) => !knownGoalIdsRef.current.has(id));
     knownGoalIdsRef.current = currentGoalIds;
     if (!hasNewGoal || document.visibilityState !== "visible") return;
-
-    try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = audioContextRef.current || new AudioCtx();
-      audioContextRef.current = ctx;
-      if (ctx.state === "suspended") ctx.resume();
-      const nowAt = ctx.currentTime;
-      [392, 523.25, 659.25].forEach((frequency, index) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.frequency.value = frequency;
-        osc.type = "square";
-        gain.gain.setValueAtTime(0.0001, nowAt + index * 0.08);
-        gain.gain.exponentialRampToValueAtTime(0.16, nowAt + index * 0.08 + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, nowAt + index * 0.08 + 0.28);
-        osc.connect(gain); gain.connect(ctx.destination);
-        osc.start(nowAt + index * 0.08); osc.stop(nowAt + index * 0.08 + 0.3);
-      });
-    } catch {
-      // Tarayıcı ses izni vermediyse canlı takip sessizce çalışmaya devam eder.
-    }
-  }, [displayFixtures]);
+    playGoalSound();
+  }, [displayFixtures, playGoalSound]);
 
   const leader = liveStandings[0];
   const topScorer = liveScorers[0];
