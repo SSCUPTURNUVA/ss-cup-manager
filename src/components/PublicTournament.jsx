@@ -315,8 +315,6 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const [now, setNow] = useState(Date.now());
   const [lastSync, setLastSync] = useState(null);
   const [selectedMatch, setSelectedMatch] = useState(null);
-  const knownGoalIdsRef = useRef(null);
-  const audioContextRef = useRef(null);
 
   const refreshSequence = useRef(0);
   const refreshInFlight = useRef(false);
@@ -645,6 +643,45 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       });
   }, [displayFixtures, todayKey]);
 
+  const byeTeamByWeek = useMemo(() => {
+    const teamNames = displayTeams
+      .map((team) => typeof team === "string" ? team : (team?.name || team?.teamName || ""))
+      .map((name) => String(name || "").trim())
+      .filter(Boolean);
+    const leagueOnly = displayFixtures.filter((match) => !match?.isKnockout && match?.week);
+    const byWeek = new Map();
+
+    leagueOnly.forEach((match) => {
+      const week = String(match.week);
+      if (!byWeek.has(week)) byWeek.set(week, new Set());
+      const playedTeams = byWeek.get(week);
+      if (match?.home) playedTeams.add(String(match.home).trim());
+      if (match?.away) playedTeams.add(String(match.away).trim());
+    });
+
+    const result = new Map();
+    byWeek.forEach((playedTeams, week) => {
+      const missing = teamNames.filter((name) => !playedTeams.has(name));
+      // Eksik fikstürü yanlışlıkla BAY saymamak için yalnız tam 1 takım eksikse göster.
+      if (missing.length === 1) result.set(week, missing[0]);
+    });
+    return result;
+  }, [displayTeams, displayFixtures]);
+
+  const upcomingByWeek = useMemo(() => {
+    const groups = [];
+    const indexByWeek = new Map();
+    upcoming.slice(0, 40).forEach((match, index) => {
+      const weekKey = match?.week ? String(match.week) : `other-${index}`;
+      if (!indexByWeek.has(weekKey)) {
+        indexByWeek.set(weekKey, groups.length);
+        groups.push({ weekKey, week: match?.week || null, matches: [] });
+      }
+      groups[indexByWeek.get(weekKey)].matches.push(match);
+    });
+    return groups;
+  }, [upcoming]);
+
   const liveStandings = useMemo(() => {
     // Takip sayfasında eski tarayıcı/localStorage verisine geri düşme.
     // Bulut fikstürü geldiyse puan durumu yalnızca güncel turnuvadan hesaplanır.
@@ -664,92 +701,6 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     const calculated = deriveScorers(displayFixtures);
     return calculated.length > 0 ? calculated : goalScorers;
   }, [displayFixtures, goalScorers, remoteFixtures]);
-
-  const ensureAudioReady = useCallback(async () => {
-    try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return null;
-      let ctx = audioContextRef.current;
-      if (!ctx || ctx.state === "closed") {
-        ctx = new AudioCtx();
-        audioContextRef.current = ctx;
-      }
-      if (ctx.state === "suspended") await ctx.resume();
-
-      // iOS/Chrome için ilk kullanıcı dokunuşunda sessiz tampon ile ses motorunu gerçekten aç.
-      if (ctx.state === "running") {
-        const buffer = ctx.createBuffer(1, 1, 22050);
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(ctx.destination);
-        source.start(0);
-      }
-      return ctx;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  const playGoalSound = useCallback(async () => {
-    const ctx = await ensureAudioReady();
-    if (!ctx || ctx.state !== "running") return;
-
-    const start = ctx.currentTime + 0.015;
-    // Net duyulan kısa stadyum tipi gol uyarısı: iki yükselen siren + final vuruşu.
-    const notes = [
-      { at: 0.00, from: 360, to: 760, duration: 0.42, volume: 0.34 },
-      { at: 0.46, from: 430, to: 900, duration: 0.46, volume: 0.36 },
-      { at: 0.98, from: 620, to: 620, duration: 0.30, volume: 0.42 },
-    ];
-    notes.forEach(({ at, from, to, duration, volume }) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(from, start + at);
-      osc.frequency.exponentialRampToValueAtTime(to, start + at + duration);
-      gain.gain.setValueAtTime(0.0001, start + at);
-      gain.gain.exponentialRampToValueAtTime(volume, start + at + 0.025);
-      gain.gain.setValueAtTime(volume, start + at + Math.max(0.04, duration - 0.10));
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + at + duration);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(start + at);
-      osc.stop(start + at + duration + 0.02);
-    });
-  }, [ensureAudioReady]);
-
-  useEffect(() => {
-    // Mobil tarayıcılar sesi otomatik başlatmayı engeller. Canlı sayfaya ilk dokunuş/klik
-    // ses motorunu açar; bundan sonraki goller kullanıcı tekrar dokunmadan çalar.
-    const unlock = () => { ensureAudioReady(); };
-    window.addEventListener("pointerdown", unlock, { passive: true });
-    window.addEventListener("touchstart", unlock, { passive: true });
-    window.addEventListener("keydown", unlock);
-    return () => {
-      window.removeEventListener("pointerdown", unlock);
-      window.removeEventListener("touchstart", unlock);
-      window.removeEventListener("keydown", unlock);
-    };
-  }, [ensureAudioReady]);
-
-  useEffect(() => {
-    const currentGoalIds = new Set();
-    displayFixtures.forEach((match) => {
-      getEvents(match).filter((event) => GOAL_EVENT_TYPES.has(event.type)).forEach((event) => {
-        currentGoalIds.add(String(event.id || `${match.id}-${event.type}-${event.playerId || event.playerName}-${event.minute}`));
-      });
-    });
-
-    // İlk yüklemedeki eski goller ses çıkarmaz. Sayfa açıkken sonradan eklenen her gol çalar.
-    if (knownGoalIdsRef.current === null) {
-      knownGoalIdsRef.current = currentGoalIds;
-      return;
-    }
-    const hasNewGoal = [...currentGoalIds].some((id) => !knownGoalIdsRef.current.has(id));
-    knownGoalIdsRef.current = currentGoalIds;
-    if (!hasNewGoal || document.visibilityState !== "visible") return;
-    playGoalSound();
-  }, [displayFixtures, playGoalSound]);
 
   const leader = liveStandings[0];
   const topScorer = liveScorers[0];
@@ -905,13 +856,24 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           <section className="public-section">
             <div className="public-section-head"><div><span>MAÇ MERKEZİ</span><h2>Fikstür</h2></div><b>{upcoming.length} karşılaşma</b></div>
             {upcoming.length === 0 ? <div className="public-empty-box">Planlanmış yeni maç bulunmuyor.</div> : (
-              <div className="public-fixture-grid">{upcoming.slice(0, 40).map((match, index) => (
-                <button className="public-fixture-card" key={match.id || index} onClick={() => setSelectedMatch(match)}>
-                  <div className="public-fixture-meta"><span>{stageText(match, index)}</span><b>{formatDate(match.date)} • {match.time || "Saat açıklanacak"}</b></div>
-                  <div className="public-fixture-teams"><strong>{match.home}</strong><span>VS</span><strong>{match.away}</strong></div>
-                  <div className="public-fixture-place">📍 {match.field || displaySettings.venue || "Gol Park Halı Saha"}<i>Detay ›</i></div>
-                </button>
-              ))}</div>
+              <div className="public-fixture-weeks">{upcomingByWeek.map((group, groupIndex) => {
+                const byeTeam = group.week ? byeTeamByWeek.get(String(group.week)) : "";
+                return (
+                  <div className="public-fixture-week" key={group.weekKey}>
+                    <div className="public-fixture-week-head">
+                      <strong>{group.week ? `${group.week}. HAFTA` : "FİKSTÜR"}</strong>
+                      {byeTeam && <span className="public-bye-team">BAY: {byeTeam}</span>}
+                    </div>
+                    <div className="public-fixture-grid">{group.matches.map((match, index) => (
+                      <button className="public-fixture-card" key={match.id || index} onClick={() => setSelectedMatch(match)}>
+                        <div className="public-fixture-meta"><span>{stageText(match, groupIndex + index)}</span><b>{formatDate(match.date)} • {match.time || "Saat açıklanacak"}</b></div>
+                        <div className="public-fixture-teams"><strong>{match.home}</strong><span>VS</span><strong>{match.away}</strong></div>
+                        <div className="public-fixture-place">📍 {match.field || displaySettings.venue || "Gol Park Halı Saha"}<i>Detay ›</i></div>
+                      </button>
+                    ))}</div>
+                  </div>
+                );
+              })}</div>
             )}
           </section>
         )}
