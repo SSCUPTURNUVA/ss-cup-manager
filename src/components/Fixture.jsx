@@ -154,6 +154,40 @@ export default function Fixture({
     }));
   }, [fixtures]);
 
+  const leagueTeams = useMemo(() => {
+    const names = new Set();
+    fixtures.forEach((match) => {
+      if (match?.isKnockout === true) return;
+      if (match?.home) names.add(String(match.home).trim());
+      if (match?.away) names.add(String(match.away).trim());
+    });
+    return [...names].filter(Boolean).sort((a, b) => a.localeCompare(b, "tr"));
+  }, [fixtures]);
+
+  const upcomingByWeek = useMemo(() => {
+    const groups = new Map();
+
+    sortedUpcomingFixtures.forEach((item) => {
+      const week = Number(item.match?.week) || 1;
+      if (!groups.has(week)) groups.set(week, []);
+      groups.get(week).push(item);
+    });
+
+    return [...groups.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([week, matches]) => {
+        const weekTeams = new Set();
+        fixtures.forEach((match) => {
+          if (match?.isKnockout === true || (Number(match?.week) || 1) !== week) return;
+          if (match?.home) weekTeams.add(String(match.home).trim());
+          if (match?.away) weekTeams.add(String(match.away).trim());
+        });
+
+        const bayTeams = leagueTeams.filter((team) => !weekTeams.has(team));
+        return { week, matches, bayTeams };
+      });
+  }, [sortedUpcomingFixtures, fixtures, leagueTeams]);
+
   function getMatchWeekPlanKey(match, index) {
     return String(match?.id ?? match?.knockoutKey ?? `${match?.home || ""}-${match?.away || ""}-${index}`);
   }
@@ -1675,17 +1709,41 @@ export default function Fixture({
             📅 Oynanacak Maçlar • {sortedUpcomingFixtures.length} Maç
           </h3>
 
-          <ul
-            className="teamList"
-            style={{
-              padding: 0,
-              listStyle: "none",
-            }}
-          >
-            {sortedUpcomingFixtures.map(({ match, index }) =>
-              renderMatch(match, index)
-            )}
-          </ul>
+          {upcomingByWeek.map(({ week, matches, bayTeams }) => (
+            <div key={week} style={{ marginBottom: "26px" }}>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                  flexWrap: "wrap",
+                  margin: "14px 0 10px",
+                  padding: "10px 12px",
+                  borderRadius: "10px",
+                  border: "1px solid rgba(212,175,55,0.55)",
+                  background: "rgba(212,175,55,0.08)",
+                }}
+              >
+                <b>📅 {week}. HAFTA</b>
+                {bayTeams.length > 0 && (
+                  <b style={{ color: "#d4af37" }}>
+                    BAY: {bayTeams.join(", ")}
+                  </b>
+                )}
+              </div>
+
+              <ul
+                className="teamList"
+                style={{
+                  padding: 0,
+                  listStyle: "none",
+                }}
+              >
+                {matches.map(({ match, index }) => renderMatch(match, index))}
+              </ul>
+            </div>
+          ))}
         </section>
       )}
     </div>
