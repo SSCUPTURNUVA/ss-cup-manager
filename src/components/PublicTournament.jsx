@@ -343,9 +343,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     const sequence = ++refreshSequence.current;
 
     try {
-      const [fixturesResult, teamsResult, appStateResult, eventRows] = await Promise.all([
+      const [fixturesResult, appStateResult, eventRows] = await Promise.all([
         supabase.from("fixtures").select("*").order("id"),
-        supabase.from("teams").select("id,name").order("id"),
         supabase.from("app_state")
           .select("id,value,updated_at")
           .in("id", ["squads", "knockout", "active_fixture_ids", "settings", "fixtures_snapshot", "public_match_center"]),
@@ -399,10 +398,6 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       if (Array.isArray(mappedFixtures)) {
         mappedFixtures = applyMatchEventRowsToFixtures(mappedFixtures, eventRows);
         setRemoteFixtures(mappedFixtures);
-      }
-
-      if (!teamsResult.error && Array.isArray(teamsResult.data)) {
-        setRemoteTeams(teamsResult.data.map((row) => row?.name).filter(Boolean));
       }
 
       const squadsRow = stateById.get("squads");
@@ -463,7 +458,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
   useEffect(() => {
     refreshTeams();
-    const teamPoll = window.setInterval(refreshTeams, 1500);
+    // Realtime ana kaynak. 60 sn yalnız bağlantı kopmasına karşı emniyet yenilemesidir.
+    const teamPoll = window.setInterval(refreshTeams, 60000);
 
     const teamChannel = supabase
       .channel(`sscup-public-teams-${Math.random().toString(36).slice(2)}`)
@@ -478,7 +474,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
   useEffect(() => {
     refresh();
-    const poll = window.setInterval(refresh, 1000);
+    // Egress koruması: Realtime değişiklikleri zaten anında refresh tetikliyor.
+    // Eski 1 sn polling her açık telefonda tüm fikstür/app_state verisini saniyede bir
+    // indiriyordu. 30 sn fallback, Realtime koparsa ekranın kendini toparlaması içindir.
+    const poll = window.setInterval(refresh, 30000);
 
     const onVisible = () => {
       if (document.visibilityState === "visible") refresh();
