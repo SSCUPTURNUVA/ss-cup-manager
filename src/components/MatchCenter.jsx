@@ -379,8 +379,8 @@ export default function MatchCenter({
 
   const liveMatchIndex = fixtures.findIndex(
     (match, index) =>
-      (match.live === true && ["first_half", "halftime", "second_half", "penalty"].includes(match.matchPhase || "waiting")) ||
-      (!stalePreparedSelection && activeMatchCenterKey && getMatchCenterKey(match, index) === activeMatchCenterKey)
+      (match.live === true && match.played !== true && ["first_half", "halftime", "second_half", "penalty"].includes(match.matchPhase || "waiting")) ||
+      (!stalePreparedSelection && match.played !== true && activeMatchCenterKey && getMatchCenterKey(match, index) === activeMatchCenterKey)
   );
 
   const liveMatch = liveMatchIndex >= 0 ? fixtures[liveMatchIndex] : null;
@@ -1375,7 +1375,11 @@ export default function MatchCenter({
     finishLockRef.current = true;
     setIsFinishingMatch(true);
     try {
+      // Maç bittiği anda hem kalıcı anahtarı hem React içindeki aktif seçim state'ini
+      // temizle. Sadece localStorage'ı silmek yetmiyordu; state eski maç anahtarını
+      // tuttuğu için tamamlanan maç Maç Merkezi'nde tekrar aktif görünebiliyordu.
       localStorage.removeItem("sscup-match-center-active");
+      setActiveMatchCenterKey("");
 
       const finishPatch = {
         played: true,
