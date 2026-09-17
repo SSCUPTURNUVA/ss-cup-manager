@@ -139,7 +139,7 @@ export default function Knockout({
         if (Array.isArray(value.drawPotOne)) setDrawPotOne(value.drawPotOne);
         if (Array.isArray(value.drawPotTwo)) setDrawPotTwo(value.drawPotTwo);
         if (typeof value.drawStarted === "boolean") setDrawStarted(value.drawStarted);
-        if (value.quarterMode === "draw" || value.quarterMode === "ranking") setQuarterMode(value.quarterMode);
+        if (["draw", "ranking", "free"].includes(value.quarterMode)) setQuarterMode(value.quarterMode);
       }
 
       setCloudReady(true);
@@ -163,7 +163,7 @@ export default function Knockout({
           if (Array.isArray(value.drawPotOne)) setDrawPotOne(value.drawPotOne);
           if (Array.isArray(value.drawPotTwo)) setDrawPotTwo(value.drawPotTwo);
           if (typeof value.drawStarted === "boolean") setDrawStarted(value.drawStarted);
-          if (value.quarterMode === "draw" || value.quarterMode === "ranking") setQuarterMode(value.quarterMode);
+          if (["draw", "ranking", "free"].includes(value.quarterMode)) setQuarterMode(value.quarterMode);
         }
       )
       .subscribe();
@@ -526,6 +526,70 @@ export default function Knockout({
         setIsDrawing(false);
       }, 700);
     }
+  }
+
+  async function prepareFreeQuarterDraw() {
+    if (isDrawing) return;
+
+    const latestFixtures = safeReadStorage("sscup-fixtures", []);
+    setLeagueFixtures(latestFixtures);
+    const table = {};
+    latestFixtures.forEach((match) => {
+      const homeTeam = match.home; const awayTeam = match.away;
+      if (homeTeam && !table[homeTeam]) table[homeTeam] = { team: homeTeam, goalsFor: 0, goalsAgainst: 0, points: 0 };
+      if (awayTeam && !table[awayTeam]) table[awayTeam] = { team: awayTeam, goalsFor: 0, goalsAgainst: 0, points: 0 };
+      if (match.played !== true || !homeTeam || !awayTeam) return;
+      const hs = Number(match.homeScore); const as = Number(match.awayScore);
+      if (!Number.isInteger(hs) || !Number.isInteger(as)) return;
+      table[homeTeam].goalsFor += hs; table[homeTeam].goalsAgainst += as;
+      table[awayTeam].goalsFor += as; table[awayTeam].goalsAgainst += hs;
+      if (hs > as) table[homeTeam].points += 3; else if (as > hs) table[awayTeam].points += 3; else { table[homeTeam].points += 1; table[awayTeam].points += 1; }
+    });
+    const ranked = Object.values(table).map((t) => ({ ...t, goalDifference: t.goalsFor - t.goalsAgainst }))
+      .sort((a,b) => b.points-a.points || b.goalDifference-a.goalDifference || b.goalsFor-a.goalsFor || a.team.localeCompare(b.team,"tr"))
+      .slice(0,8);
+    if (ranked.length < 8) { alert("Serbest kura için lig sıralamasında ilk 8 takım oluşmalıdır."); return; }
+    if (drawStarted || completedQuarterMatches > 0) {
+      if (!window.confirm("Mevcut çeyrek final kurası, skorlar ve sonraki turlar silinip SERBEST KURA hazırlanacak. Devam edilsin mi?")) return;
+    }
+    setIsDrawing(true); cloudWriteLockRef.current = true;
+    const allTeams = shuffleArray(ranked.map((team) => team.team));
+    const nextQuarter = createEmptyQuarter(); const nextSemi = createEmptySemi(); const nextFinal = createEmptyFinal(); const nextThirdPlace = createEmptyFinal();
+    const value = { quarter: nextQuarter, semi: nextSemi, finalMatch: nextFinal, thirdPlace: nextThirdPlace, drawPotOne: allTeams, drawPotTwo: [], drawStarted: true, quarterMode: "free" };
+    try {
+      const { error } = await supabase.from("app_state").upsert({ id: "knockout", value, updated_at: new Date().toISOString() });
+      if (error) throw error;
+      const remainingFixtures = fixtures.filter((match) => match?.isKnockout !== true);
+      if (typeof setFixtures === "function") setFixtures(remainingFixtures);
+      localStorage.setItem("sscup-fixtures", JSON.stringify(remainingFixtures));
+      setQuarter(nextQuarter); setSemi(nextSemi); setFinalMatch(nextFinal); setThirdPlace(nextThirdPlace);
+      setDrawPotOne(allTeams); setDrawPotTwo([]); setDrawStarted(true); setQuarterMode("free"); setLastDrawnMatch(null);
+      alert("🔥 SERBEST KURA hazır! İlk 8 tek torbada. Şimdi TAKIM ÇEK butonuna her basışta bir takım yerleşecek.");
+    } catch (error) { console.error("Serbest kura hazırlanamadı:", error); alert("Serbest kura kaydedilemedi. İnternet bağlantısını kontrol edin."); }
+    finally { window.setTimeout(() => { cloudWriteLockRef.current = false; setIsDrawing(false); }, 700); }
+  }
+
+  async function drawNextFreeTeam() {
+    if (!drawStarted || quarterMode !== "free") return;
+    if (isDrawing || drawPotOne.length === 0) return;
+    const filled = quarter.reduce((count, match) => count + (match.home ? 1 : 0) + (match.away ? 1 : 0), 0);
+    if (filled >= 8) { alert("Çeyrek final serbest kurası tamamlandı."); return; }
+    // İlk 4 çekiliş ÇF1-2-3-4'ün ilk takımını, sonraki 4 çekiliş rakiplerini doldurur.
+    const slotIndex = filled < 4 ? filled : filled - 4;
+    const field = filled < 4 ? "home" : "away";
+    const team = drawPotOne[0];
+    const nextQuarter = quarter.map((match, index) => index === slotIndex ? { ...match, [field]: team, homeScore: "", awayScore: "", homePen: "", awayPen: "" } : { ...match });
+    const nextPot = drawPotOne.slice(1);
+    setIsDrawing(true); cloudWriteLockRef.current = true;
+    try {
+      await new Promise((resolve) => window.setTimeout(resolve, 650));
+      const value = { quarter: nextQuarter, semi, finalMatch, thirdPlace, drawPotOne: nextPot, drawPotTwo: [], drawStarted: true, quarterMode: "free" };
+      const { error } = await supabase.from("app_state").upsert({ id: "knockout", value, updated_at: new Date().toISOString() });
+      if (error) throw error;
+      setQuarter(nextQuarter); setDrawPotOne(nextPot);
+      setLastDrawnMatch({ number: slotIndex + 1, home: field === "home" ? team : nextQuarter[slotIndex].home, away: field === "away" ? team : "", drawnTeam: team, slot: `ÇEYREK FİNAL ${slotIndex + 1}`, role: field === "home" ? "İLK TAKIM" : "RAKİP" });
+    } catch (error) { console.error("Serbest kura çekimi kaydedilemedi:", error); alert("Takım çekimi kaydedilemedi. Tekrar deneyin."); }
+    finally { window.setTimeout(() => { cloudWriteLockRef.current = false; setIsDrawing(false); }, 500); }
   }
 
   async function prepareRankedQuarter() {
@@ -1030,6 +1094,15 @@ export default function Knockout({
           <div style={{ display: "flex", justifyContent: "center", gap: "10px", flexWrap: "wrap" }}>
             <button
               type="button"
+              onClick={prepareFreeQuarterDraw}
+              disabled={isDrawing || topEight.length < 8}
+              title={topEight.length < 8 ? "Çeyrek final için ilk 8 takım oluşmalı" : "İlk 8 tek torba, tamamen serbest kura"}
+              style={{ fontWeight: 900 }}
+            >
+              🔥 Tek Torba Serbest Kura
+            </button>
+            <button
+              type="button"
               onClick={prepareQuarterDraw}
               disabled={isDrawing || topEight.length < 8}
               title={topEight.length < 8 ? "Çeyrek final için ilk 8 takım oluşmalı" : "Mevcut torbalı kura sistemi"}
@@ -1051,7 +1124,7 @@ export default function Knockout({
             </p>
           ) : drawStarted ? (
             <p style={{ margin: "12px 0 0", color: "#ffe07b", fontWeight: 800 }}>
-              Aktif sistem: {quarterMode === "ranking" ? "1-8 / 2-7 / 3-6 / 4-5" : "Torbalı Kura"}
+              Aktif sistem: {quarterMode === "ranking" ? "1-8 / 2-7 / 3-6 / 4-5" : quarterMode === "free" ? "🔥 TEK TORBA SERBEST KURA" : "Torbalı Kura"}
             </p>
           ) : (
             <p style={{ margin: "12px 0 0", opacity: 0.72 }}>İlk 8 hazır. Yukarıdan eşleşme sistemini seçin.</p>
@@ -1066,7 +1139,7 @@ export default function Knockout({
         </p>
       ) : (
         <>
-          {quarterMode !== "ranking" && (
+          {quarterMode === "draw" && (
           <div
             style={{
               display: "grid",
@@ -1133,6 +1206,25 @@ export default function Knockout({
               ))}
             </div>
           </div>
+          )}
+
+          {quarterMode === "free" && drawStarted && (
+            <div style={{ marginTop: "18px", padding: "18px", borderRadius: "16px", background: "linear-gradient(135deg,#151515,#3a2b00)", color: "white", textAlign: "center" }}>
+              <h3 style={{ marginTop: 0 }}>🔥 İLK 8 • TEK TORBA • KİM KİME DUM DUMA</h3>
+              <p style={{ opacity: .85 }}>İlk 4 çekiliş ÇF1 → ÇF4'e birer takım koyar. Sonraki 4 çekiliş aynı maçların rakiplerini belirler.</p>
+              {lastDrawnMatch?.drawnTeam ? (
+                <div style={{ padding: "14px", margin: "12px auto", maxWidth: "520px", border: "2px solid #d4af37", borderRadius: "12px" }}>
+                  <b>{lastDrawnMatch.slot} • {lastDrawnMatch.role}</b>
+                  <div style={{ fontSize: "24px", fontWeight: 1000, marginTop: "7px" }}>{lastDrawnMatch.drawnTeam}</div>
+                </div>
+              ) : null}
+              <div style={{ marginBottom: "10px", fontWeight: 800 }}>Torbadaki takım: {drawPotOne.length}</div>
+              {!drawCompleted ? (
+                <button type="button" onClick={drawNextFreeTeam} disabled={isDrawing || drawPotOne.length === 0}>
+                  {isDrawing ? "⏳ TAKIM ÇEKİLİYOR..." : `🎲 TAKIM ÇEK • Sıradaki: ${quarter.filter(m => m.home).length < 4 ? `ÇF${quarter.filter(m => m.home).length + 1}` : `ÇF${quarter.filter(m => m.away).length + 1} RAKİBİ`}`}
+                </button>
+              ) : <p><b>✅ Serbest kura tamamlandı.</b></p>}
+            </div>
           )}
 
           <div style={{ textAlign: "center", marginTop: "20px" }}>

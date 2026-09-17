@@ -23,6 +23,7 @@ export default function Fixture({
   setFixtures,
 }) {
   const [fixtureTab, setFixtureTab] = useState("upcoming");
+  const [draftDates, setDraftDates] = useState({});
   const [scores, setScores] = useState(() => {
     try {
       const saved =
@@ -127,31 +128,21 @@ export default function Fixture({
       .map((week) => ({
         week,
         // Gerçek fixture index/ID değişmez; yalnızca ekrandaki görünüm kronolojiktir.
-        matches: [...groups[week]].sort((a, b) => {
-          const scheduleDiff = compareFixturesBySchedule(a.match, b.match);
-          return scheduleDiff !== 0 ? scheduleDiff : a.index - b.index;
-        }),
+        // Düzenleme ekranında maçların yeri sabit kalsın. Tarih değiştirirken
+        // kartın başka sıraya sıçramaması için fixture sırasını koru.
+        matches: [...groups[week]].sort((a, b) => a.index - b.index),
       }))
-      // Hafta numarası yanlış/karışık gelse bile ekranda önce en erken tarih-saat görünür.
-      .sort((a, b) => {
-        const firstA = a.matches[0]?.match;
-        const firstB = b.matches[0]?.match;
-        const scheduleDiff = compareFixturesBySchedule(firstA, firstB);
-        return scheduleDiff !== 0 ? scheduleDiff : a.week - b.week;
-      });
+      // Haftalar düzenleme sırasında yer değiştirmesin.
+      .sort((a, b) => a.week - b.week);
   }, [fixtures]);
 
   const sortedUpcomingFixtures = useMemo(() => {
-    const indexed = new Map(
-      fixtures.map((match, index) => [String(match?.id ?? `idx-${index}`), index])
-    );
-
-    return sortFixturesBySchedule(
-      fixtures.filter((match) => match.played !== true)
-    ).map((match) => ({
-      match,
-      index: indexed.get(String(match?.id)) ?? fixtures.indexOf(match),
-    }));
+    // Görsel sıralama için maçları önce gerçek state index'i ile paketle.
+    // ID üzerinden tekrar index aramak, eski/tekrarlı ID'lerde yanlış maçı
+    // düzenleyebiliyordu (ör. 1. maçtan tarih değiştirirken başka maça sıçrama).
+    return fixtures
+      .map((match, index) => ({ match, index }))
+      .filter(({ match }) => match.played !== true);
   }, [fixtures]);
 
   const leagueTeams = useMemo(() => {
@@ -566,6 +557,24 @@ export default function Fixture({
   ) {
     const currentMatch = fixtures[index];
 
+    // Aynı takıma aynı takvim haftasında ikinci maç verilirse engellemek yerine
+    // yönetici onayıyla istisna tanı. Özellikle 5. haftadaki telafi/son maçlar için.
+    if (field === "date" && value && hasSameTeamInCalendarWeek(currentMatch, index, value)) {
+      const weekKey = getCalendarWeekKey(value);
+      const conflictingTeams = [currentMatch.home, currentMatch.away].filter((teamName) =>
+        fixtures.some((otherMatch, otherIndex) =>
+          otherIndex !== index &&
+          otherMatch?.date &&
+          getCalendarWeekKey(otherMatch.date) === weekKey &&
+          (otherMatch.home === teamName || otherMatch.away === teamName)
+        )
+      );
+      const confirmed = window.confirm(
+        `⚠️ ${conflictingTeams.join(" / ")} bu hafta zaten maç oynuyor.\n\n` +
+        `Bu maçı aynı haftaya İSTİSNA olarak eklemek istiyor musunuz?`
+      );
+      if (!confirmed) return;
+    }
 
     const runtimeUpdatedAt = new Date().toISOString();
     const updatedFixtures =
@@ -593,28 +602,23 @@ export default function Fixture({
         }
       );
 
+    // Önce yerel state + kalıcı yerel kayıt birlikte güncellensin.
+    // Sadece setFixtures yapmak, App yeniden okuma/senkron yaptığında eski tarihi
+    // geri getirebiliyordu. Tarih kaydında tek gerçek kaynak updatedFixtures olsun.
     setFixtures(updatedFixtures);
+    localStorage.setItem("sscup-fixtures-v3", JSON.stringify(updatedFixtures));
+    localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));
+    window.dispatchEvent(new Event("sscup-fixtures-updated"));
+    window.dispatchEvent(new Event("sscup-group-fixtures-updated"));
 
-    // Manuel tarih/saat/saha değişikliği telefondaki canlı takipte de
-    // anında sabit kalsın diye Supabase'e kaydedilir.
+    // Tarih/saat/saha dahil TÜM fikstür alanları merkezi güvenli kuyruğa yazılır.
+    // Bu fonksiyon güncel maçı önce localStorage kuyruğuna alır, sonra Supabase'e
+    // gönderir ve gerçekten satır döndüğünü doğrular. Ağ kesilirse kuyruk korunur.
     const selectedMatch = updatedFixtures[index];
-    const cloudId = selectedMatch?.id;
-
-    if (selectedMatch?.isKnockout !== true && cloudId !== null && cloudId !== undefined && cloudId !== "") {
-      const cloudField = field === "field" ? "pitch" : field;
-      const cloudValue =
-        (field === "date" || field === "time") && value === ""
-          ? null
-          : value;
-
-      const { error } = await supabase
-        .from("fixtures")
-        .update({ [cloudField]: cloudValue })
-        .eq("id", cloudId);
-
-      if (error) {
-        console.error("Maç programı kaydedilemedi:", error);
-        alert("Tarih/saat buluta kaydedilemedi: " + error.message);
+    if (selectedMatch?.isKnockout !== true && selectedMatch?.id != null && selectedMatch?.id !== "") {
+      const synced = await syncLeagueFixtureWithRetry(selectedMatch);
+      if (!synced) {
+        alert("Değişiklik bu cihazda kaydedildi. Buluta gönderim beklemede; internet gelince otomatik tekrar denenecek.");
       }
     }
   }
@@ -1420,19 +1424,33 @@ export default function Fixture({
               Tarih
               <br />
 
-              <input
-                type="date"
-                value={
-                  match.date || ""
-                }
-                onChange={(event) =>
-                  updateMatchDetail(
-                    index,
-                    "date",
-                    event.target.value
-                  )
-                }
-              />
+              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                <input
+                  type="date"
+                  value={draftDates[getMatchWeekPlanKey(match, index)] ?? match.date ?? ""}
+                  onChange={(event) => {
+                    const key = getMatchWeekPlanKey(match, index);
+                    setDraftDates((current) => ({ ...current, [key]: event.target.value }));
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const key = getMatchWeekPlanKey(match, index);
+                    const nextDate = draftDates[key] ?? match.date ?? "";
+                    if (nextDate === (match.date || "")) return;
+                    await updateMatchDetail(index, "date", nextDate);
+                    setDraftDates((current) => {
+                      const next = { ...current };
+                      delete next[key];
+                      return next;
+                    });
+                  }}
+                  style={{ whiteSpace: "nowrap" }}
+                >
+                  Tarihi Kaydet
+                </button>
+              </div>
             </label>
 
             <label>

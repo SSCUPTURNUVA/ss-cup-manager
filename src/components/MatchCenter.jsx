@@ -462,12 +462,51 @@ export default function MatchCenter({
     };
   }
 
+  function isPlayerSuspendedForLiveMatch(side, player, playerIndex) {
+    if (!liveMatch || liveMatchIndex < 0) return false;
+    const teamName = side === "home" ? liveMatch.home : liveMatch.away;
+    const playerId = playerKey(player, playerIndex);
+    const playerName = String(getPlayerName(player) || "").trim();
+
+    // Kırmızı kart = takımın bir sonraki maçında 1 maç ceza. Arada oynanmış
+    // bir takım maçı varsa ceza çekilmiş kabul edilir.
+    let lastRedFixtureIndex = -1;
+    for (let fixtureIndex = 0; fixtureIndex < liveMatchIndex; fixtureIndex += 1) {
+      const fixture = fixtures[fixtureIndex];
+      if (fixture?.played !== true) continue;
+      if (fixture?.home !== teamName && fixture?.away !== teamName) continue;
+      const events = Array.isArray(fixture?.events) ? fixture.events : [];
+      const hasRed = events.some((event) => {
+        if (event?.type !== "red_card" && event?.eventType !== "red_card") return false;
+        const eventTeam = String(event?.team || event?.teamName || "");
+        if (eventTeam && eventTeam !== String(teamName)) return false;
+        const eventId = String(event?.playerId || "");
+        const eventName = String(event?.playerName || event?.name || "").trim();
+        return (eventId && eventId === playerId) || (playerName && eventName === playerName);
+      });
+      if (hasRed) lastRedFixtureIndex = fixtureIndex;
+    }
+    if (lastRedFixtureIndex < 0) return false;
+
+    for (let fixtureIndex = lastRedFixtureIndex + 1; fixtureIndex < liveMatchIndex; fixtureIndex += 1) {
+      const fixture = fixtures[fixtureIndex];
+      if (fixture?.played === true && (fixture?.home === teamName || fixture?.away === teamName)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   function setPlayerLineupStatus(side, player, index, status) {
     if (!liveMatch || matchPhase !== "waiting") return;
 
     const matchKey = getMatchLineupKey(liveMatch);
     const playerId = playerKey(player, index);
     const current = getSideLineup(side);
+    if (status !== "out" && isPlayerSuspendedForLiveMatch(side, player, index)) {
+      alert(`⛔ ${getPlayerName(player)} kırmızı kart cezalısı. Bu maçın kadrosuna seçilemez.`);
+      return;
+    }
     let starters = current.starters.filter((id) => id !== playerId);
     let bench = current.bench.filter((id) => id !== playerId);
 
@@ -1236,6 +1275,10 @@ export default function MatchCenter({
       if (lineup.starters.length !== 7) return `${teamName} için tam 7 AS oyuncu seçilmelidir.`;
       if (lineup.bench.length < 3 || lineup.bench.length > 5) return `${teamName} için en az 3, en fazla 5 YEDEK seçilmelidir.`;
       if (new Set(selectedIds).size !== selectedIds.length || selectedIds.some((id) => !validIds.has(id))) return `${teamName} maç kadrosunda geçersiz veya tekrarlanan oyuncu var.`;
+      const suspendedSelected = teamSquad.find((player, index) =>
+        selectedIds.includes(playerKey(player, index)) && isPlayerSuspendedForLiveMatch(side, player, index)
+      );
+      if (suspendedSelected) return `${teamName}: ${getPlayerName(suspendedSelected)} kırmızı kart cezalısı ve bu maçın kadrosuna alınamaz.`;
     }
     return "";
   }
@@ -1259,13 +1302,14 @@ export default function MatchCenter({
             {teamSquad.map((player, index) => {
               const id = playerKey(player, index);
               const status = lineup.starters.includes(id) ? "starter" : lineup.bench.includes(id) ? "bench" : "out";
+              const suspended = isPlayerSuspendedForLiveMatch(side, player, index);
               return (
                 <div key={id} style={{ display: "grid", gridTemplateColumns: "1fr 118px", gap: "8px", alignItems: "center", background: "rgba(255,255,255,.05)", padding: "7px", borderRadius: "8px" }}>
-                  <span><b>#{player.shirtNumber ?? player.number ?? "-"}</b> {getPlayerName(player)}</span>
+                  <span><b>#{player.shirtNumber ?? player.number ?? "-"}</b> {getPlayerName(player)} {suspended ? <b style={{ color: "#ff6b6b" }}> • CEZALI</b> : null}</span>
                   <select
                     value={status}
                     onChange={(event) => setPlayerLineupStatus(side, player, index, event.target.value)}
-                    disabled={matchPhase !== "waiting"}
+                    disabled={matchPhase !== "waiting" || suspended}
                     style={{ padding: "6px" }}
                   >
                     <option value="out">Kadro Dışı</option>
@@ -1378,9 +1422,7 @@ export default function MatchCenter({
       // Maç bittiği anda hem kalıcı anahtarı hem React içindeki aktif seçim state'ini
       // temizle. Sadece localStorage'ı silmek yetmiyordu; state eski maç anahtarını
       // tuttuğu için tamamlanan maç Maç Merkezi'nde tekrar aktif görünebiliyordu.
-      localStorage.removeItem("sscup-match-center-active");
-      setActiveMatchCenterKey("");
-
+      const finishingIndex = liveMatchIndex;
       const finishPatch = {
         played: true,
         live: false,
@@ -1393,6 +1435,20 @@ export default function MatchCenter({
       // Tek basış = tek persist/senkron. updateLiveMatch zaten yerel kaydı ve
       // ilgili bulut senkronunu yapıyor; burada ikinci kez sync çağırmıyoruz.
       await updateLiveMatch(finishPatch);
+
+      // Persist tamamlandıktan sonra aktif seçimi temizle. Özellikle eski CMT
+      // kayıtlarında seçim state'inin erken temizlenmesi bitiş kaydını yarışa sokabiliyordu.
+      localStorage.removeItem("sscup-match-center-active");
+      setActiveMatchCenterKey("");
+
+      // Yerel snapshot'ta bitişi son kez garanti et; bulut senkronu kuyruğu ayrıca çalışır.
+      const stored = JSON.parse(localStorage.getItem("sscup-fixtures") || "[]");
+      if (stored[finishingIndex] && stored[finishingIndex].played !== true) {
+        stored[finishingIndex] = { ...stored[finishingIndex], ...finishPatch };
+        localStorage.setItem("sscup-fixtures", JSON.stringify(stored));
+        localStorage.setItem("sscup-fixtures-v3", JSON.stringify(stored));
+        if (typeof setFixtures === "function") setFixtures(stored);
+      }
     } finally {
       finishLockRef.current = false;
       setIsFinishingMatch(false);

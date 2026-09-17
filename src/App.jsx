@@ -686,8 +686,20 @@ export default function App() {
         cloudFixtures = cloudFixtures.map((base) => {
           const runtime = runtimeById.get(String(base.id));
           if (!runtime) return base;
+          const runtimeTime = Date.parse(runtime?.runtimeUpdatedAt || "") || 0;
+          const baseTime = Date.parse(base?.cloudUpdatedAt || "") || 0;
+          const runtimeScheduleIsNewer = runtimeTime > baseTime;
           return {
             ...base,
+            // Snapshot yalnız daha yeniyse program alanlarını korur. Böylece
+            // yeni seçilmiş tarih/saat eski bulut satırı yüzünden geri dönmez;
+            // buna karşılık eski snapshot da daha yeni bulut verisini ezemez.
+            ...(runtimeScheduleIsNewer ? {
+              date: runtime.date ?? base.date,
+              time: runtime.time ?? base.time,
+              field: runtime.field ?? base.field,
+              week: runtime.week ?? base.week,
+            } : {}),
             live: base.played !== true && runtime.live === true,
             timerRunning: base.played !== true && runtime.timerRunning === true,
             timerStartedAt: base.played !== true ? (runtime.timerStartedAt ?? null) : null,
@@ -792,16 +804,23 @@ export default function App() {
             const runtime = snapById.get(String(match?.id));
             if (!row && !runtime) return match;
             const played = row ? row.played === true : match.played === true;
+            // Yönetim ekranı canlı refresh olduğunda eski fixtures satırı, bu cihazda
+            // az önce kaydedilmiş daha yeni program bilgisini geri çevirmesin.
+            // runtimeUpdatedAt maç bazında gerçek yerel değişiklik zamanıdır;
+            // row.updated_at ise fixtures tablosundaki bulut zamanıdır.
+            const runtimeTime = Date.parse(runtime?.runtimeUpdatedAt || match?.runtimeUpdatedAt || "") || 0;
+            const rowTime = Date.parse(row?.updated_at || match?.cloudUpdatedAt || "") || 0;
+            const keepRuntimeSchedule = runtimeTime > rowTime;
             return {
               ...match,
               ...(runtime || {}),
               ...(row ? {
                 home: row.home ?? match.home,
                 away: row.away ?? match.away,
-                date: row.date ?? match.date,
-                time: row.time ?? match.time,
-                field: row.pitch ?? match.field,
-                week: row.week ?? match.week,
+                date: keepRuntimeSchedule ? (runtime?.date ?? match.date) : (row.date ?? match.date),
+                time: keepRuntimeSchedule ? (runtime?.time ?? match.time) : (row.time ?? match.time),
+                field: keepRuntimeSchedule ? (runtime?.field ?? match.field) : (row.pitch ?? match.field),
+                week: keepRuntimeSchedule ? (runtime?.week ?? match.week) : (row.week ?? match.week),
                 homeScore: Number(row.home_score ?? runtime?.homeScore ?? match.homeScore ?? 0),
                 awayScore: Number(row.away_score ?? runtime?.awayScore ?? match.awayScore ?? 0),
                 played,

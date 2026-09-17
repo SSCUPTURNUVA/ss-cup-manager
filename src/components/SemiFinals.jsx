@@ -241,8 +241,8 @@ export default function SemiFinals({
     }
 
     setSemi([
-      { ...semi[0], home: q0Winner, away: q1Winner },
-      { ...semi[1], home: q2Winner, away: q3Winner },
+      { ...semi[0], home: q0Winner, away: q2Winner },
+      { ...semi[1], home: q1Winner, away: q3Winner },
     ]);
 
     alert("Yarı final eşleşmeleri otomatik olarak yerleştirildi.");
@@ -392,8 +392,10 @@ export default function SemiFinals({
         </div>
 
         {semi.map((match, index) => {
-          const qWinnerA = getQuarterWinner(index * 2);
-          const qWinnerB = getQuarterWinner(index * 2 + 1);
+          const semiQuarterPairs = [[0, 2], [1, 3]];
+          const [quarterA, quarterB] = semiQuarterPairs[index] || [];
+          const qWinnerA = getQuarterWinner(quarterA);
+          const qWinnerB = getQuarterWinner(quarterB);
           const defaultHome = match.home || qWinnerA || "";
           const defaultAway = match.away || qWinnerB || "";
 

@@ -16,6 +16,12 @@ export function fixtureCloudPayload(match) {
     home_score: match?.homeScore ?? 0,
     away_score: match?.awayScore ?? 0,
     played: match?.played === true,
+    // Program bilgileri de aynı güvenli kuyruğa girsin. Böylece tarih/saat
+    // değişikliği uygulama kapanıp açılsa bile eski bulut değeriyle geri dönmez.
+    date: match?.date || null,
+    time: match?.time || null,
+    pitch: match?.field || null,
+    week: Number(match?.week) || 1,
   };
 }
 
@@ -79,7 +85,15 @@ export async function flushPendingFixtureSync() {
     try {
       const { data, error } = await supabase
         .from("fixtures")
-        .update({ home_score: entry.payload.home_score ?? 0, away_score: entry.payload.away_score ?? 0, played: entry.payload.played === true })
+        .update({
+          home_score: entry.payload.home_score ?? 0,
+          away_score: entry.payload.away_score ?? 0,
+          played: entry.payload.played === true,
+          date: entry.payload.date || null,
+          time: entry.payload.time || null,
+          pitch: entry.payload.pitch || null,
+          week: Number(entry.payload.week) || 1,
+        })
         .eq("id", entry.id)
         .select("id")
         .maybeSingle();
