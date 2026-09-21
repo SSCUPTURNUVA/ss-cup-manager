@@ -428,7 +428,7 @@ export default function App() {
       .subscribe();
 
     // Realtime bağlantısı bir cihazda kaçarsa güvenli yedek.
-    const poll = window.setInterval(loadTeams, 1500);
+    const poll = window.setInterval(loadTeams, 60000);
 
     // Telefon uygulamaya geri dönünce / PC penceresi odaklanınca da yenile.
     const onFocus = () => loadTeams();
@@ -575,7 +575,7 @@ export default function App() {
     };
 
     refreshShared();
-    const timer = window.setInterval(refreshShared, 1500);
+    const timer = window.setInterval(refreshShared, 60000);
     const channel = supabase.channel(`shared-admin-${Math.random().toString(36).slice(2)}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state" }, (payload) => {
         if (["settings", "tournament_format", "draw_order"].includes(payload?.new?.id)) refreshShared();
