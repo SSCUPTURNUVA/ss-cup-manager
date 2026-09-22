@@ -52,7 +52,8 @@ export default function DisciplineBoard({ fixtures = [], teams = [] }) {
     }
 
     refreshCloudEvents();
-    const poll = window.setInterval(refreshCloudEvents, 1200);
+    // Realtime ana senkronizasyon kaynağıdır; 60 sn polling yalnızca emniyet ağıdır.
+    const poll = window.setInterval(refreshCloudEvents, 60000);
     const onVisible = () => {
       if (document.visibilityState === "visible") refreshCloudEvents();
     };
