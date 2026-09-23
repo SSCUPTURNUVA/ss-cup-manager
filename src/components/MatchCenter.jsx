@@ -1432,23 +1432,19 @@ export default function MatchCenter({
         elapsedSeconds,
       };
 
-      // Tek basış = tek persist/senkron. updateLiveMatch zaten yerel kaydı ve
-      // ilgili bulut senkronunu yapıyor; burada ikinci kez sync çağırmıyoruz.
-      await updateLiveMatch(finishPatch);
-
-      // Persist tamamlandıktan sonra aktif seçimi temizle. Özellikle eski CMT
-      // kayıtlarında seçim state'inin erken temizlenmesi bitiş kaydını yarışa sokabiliyordu.
+      // Maç biter bitmez aktif Maç Merkezi seçimini ÖNCE temizle. Böylece kullanıcı
+      // Supabase cevabını beklemeden fikstüre geçip sıradaki maçı seçse bile biten maç
+      // yeniden Maç Merkezi'ne dönemez.
       localStorage.removeItem("sscup-match-center-active");
       setActiveMatchCenterKey("");
 
-      // Yerel snapshot'ta bitişi son kez garanti et; bulut senkronu kuyruğu ayrıca çalışır.
-      const stored = JSON.parse(localStorage.getItem("sscup-fixtures") || "[]");
-      if (stored[finishingIndex] && stored[finishingIndex].played !== true) {
-        stored[finishingIndex] = { ...stored[finishingIndex], ...finishPatch };
-        localStorage.setItem("sscup-fixtures", JSON.stringify(stored));
-        localStorage.setItem("sscup-fixtures-v3", JSON.stringify(stored));
-        if (typeof setFixtures === "function") setFixtures(stored);
-      }
+      // Bitiş durumunu tek işlemde doğrudan fixtures'a yaz. persistFixtures önce React
+      // state + localStorage'u günceller, ardından Supabase senkronunu yapar. Bu sayede
+      // "Maçı Bitir" denildiği anda maç played:true olur ve Tamamlanan Maçlar'a geçer.
+      const finishedFixtures = fixtures.map((match, index) =>
+        index === finishingIndex ? { ...match, ...finishPatch } : match
+      );
+      await persistFixtures(finishedFixtures);
     } finally {
       finishLockRef.current = false;
       setIsFinishingMatch(false);
