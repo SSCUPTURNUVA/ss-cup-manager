@@ -91,6 +91,11 @@ export default function Knockout({
     safeReadStorage("sscup-fixtures", [])
   );
 
+  useEffect(() => {
+    const currentLeague = (fixtures || []).filter((match) => match?.isKnockout !== true);
+    if (currentLeague.length > 0) setLeagueFixtures(currentLeague);
+  }, [fixtures]);
+
   const [drawPotOne, setDrawPotOne] = useState(() =>
     safeReadStorage("sscup-quarter-pot-one", [])
   );
@@ -397,6 +402,87 @@ export default function Knockout({
   const topEight = standings.slice(0, 8);
   const firstPot = topEight.slice(0, 4);
   const secondPot = topEight.slice(4, 8);
+
+  // Tur tebrik mesajlari: bir etap tamamen bittiginde bir sonraki etaba
+  // katilacak takimlar icin yonetimde WhatsApp butonlari acilir.
+  const leagueMatches = leagueFixtures.filter((match) => match?.isKnockout !== true && match?.home && match?.away);
+  const leagueFinished = leagueMatches.length > 0 && leagueMatches.every((match) => match.played === true);
+  const quarterFinished = quarter.length === 4 && quarter.every((match) => match?.home && match?.away && match?.played === true);
+  const semiFinished = semi.length === 2 && semi.every((match) => match?.played === true);
+
+  const [teamContacts, setTeamContacts] = useState(() => safeReadStorage("sscup-team-contacts", {}));
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadTeamContacts() {
+      const { data, error } = await supabase.from("app_state").select("value").eq("id", "team_contacts").maybeSingle();
+      if (cancelled || error) return;
+      if (data?.value && typeof data.value === "object" && !Array.isArray(data.value)) {
+        setTeamContacts(data.value);
+        localStorage.setItem("sscup-team-contacts", JSON.stringify(data.value));
+      }
+    }
+    loadTeamContacts();
+    const channel = supabase.channel(`sscup-knockout-contacts-${Math.random().toString(36).slice(2)}`).on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "app_state", filter: "id=eq.team_contacts" },
+      (payload) => {
+        const value = payload?.new?.value;
+        if (value && typeof value === "object" && !Array.isArray(value)) {
+          setTeamContacts(value);
+          localStorage.setItem("sscup-team-contacts", JSON.stringify(value));
+        }
+      }
+    ).subscribe();
+    return () => { cancelled = true; supabase.removeChannel(channel); };
+  }, []);
+
+  function normalizeWhatsappPhone(phone) {
+    const clean = String(phone || "").replace(/\D/g, "");
+    if (!clean) return "";
+    if (clean.startsWith("90")) return clean;
+    return `90${clean.replace(/^0/, "")}`;
+  }
+
+  function buildStageMessage(stage, teamName) {
+    const messages = {
+      quarter: `🏆 *TEBRİKLER!*\n\n${teamName} göstermiş olduğu mücadele ve başarılı performans sonucunda *S&S CUP ÇEYREK FİNAL* etabına yükselmeye hak kazanmıştır. ⚽🔥\n\nBu güzel başarıdan dolayı takımınızı, oyuncularınızı ve emeği geçen herkesi tebrik ediyor; çeyrek final mücadelenizde başarılar diliyoruz.\n\n*S&S CUP Organizasyon*\n*Serkan Toy & Soner Özkan*`,
+      semi: `🏆 *TEBRİKLER, YARI FİNALDESİNİZ!*\n\n${teamName}, S&S CUP'taki başarılı mücadelesini sürdürerek *YARI FİNAL* etabına yükselmeye hak kazanmıştır. ⚽🔥\n\nArtık finale sadece *bir adım* kaldı!\n\nTakımınızı ve tüm oyuncularınızı tebrik ediyor, yarı final mücadelenizde başarılar diliyoruz.\n\n*S&S CUP Organizasyon*\n*Serkan Toy & Soner Özkan*`,
+      final: `🏆 *TEBRİKLER, FİNALDESİNİZ!*\n\nBüyük mücadele, büyük emek ve artık *BÜYÜK FİNAL!* 🔥🏆\n\n${teamName}, S&S CUP'ta finale yükselerek şampiyonluk mücadelesi vermeye hak kazanmıştır.\n\nTurnuva boyunca göstermiş olduğunuz mücadeleden dolayı takımınızı ve tüm oyuncularınızı tebrik ediyoruz.\n\nŞimdi sırada son maç, son mücadele ve *S&S CUP ŞAMPİYONLUĞU* var! 🏆⚽\n\nFinalde başarılar diliyoruz.\n\n*S&S CUP Organizasyon*\n*Serkan Toy & Soner Özkan*`,
+      third: `🏆 *S&S CUP 3.'LÜK MAÇI*\n\n${teamName}, turnuva boyunca göstermiş olduğu mücadeleyle *3.'LÜK MAÇI* oynamaya hak kazanmıştır. ⚽🔥\n\nTakımınızı ve tüm oyuncularınızı tebrik ediyor, S&S CUP üçüncülük mücadelesinde başarılar diliyoruz.\n\n*S&S CUP Organizasyon*\n*Serkan Toy & Soner Özkan*`,
+    };
+    return messages[stage] || "";
+  }
+
+  function sendStageWhatsapp(teamName, stage, managerKey) {
+    const info = teamContacts?.[teamName] || {};
+    const phone = normalizeWhatsappPhone(info[managerKey === "manager2" ? "phone2" : "phone1"]);
+    if (!phone) { alert("Bu sorumlu için telefon numarası kayıtlı değil."); return; }
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(buildStageMessage(stage, teamName))}`, "_blank", "noopener,noreferrer");
+  }
+
+  function StageMessagePanel({ title, stage, teams, ready, waitingText }) {
+    const cleanTeams = [...new Set((teams || []).filter((name) => name && name !== "PENALTY_WAIT"))];
+    return (
+      <div style={{ margin: "18px 0", padding: "18px", borderRadius: "16px", background: ready ? "linear-gradient(135deg,#102518,#173b24)" : "#151922", border: ready ? "1px solid #2f7d48" : "1px solid #303746", color: "white" }}>
+        <div style={{ fontWeight: 900, fontSize: "17px", marginBottom: "6px" }}>{title}</div>
+        {!ready ? <div style={{ opacity: .72, fontSize: "13px" }}>🔒 {waitingText}</div> : cleanTeams.length === 0 ? <div style={{ opacity: .72 }}>Takımlar henüz belirlenmedi.</div> : (
+          <div style={{ display: "grid", gap: "10px", marginTop: "12px" }}>
+            {cleanTeams.map((teamName) => {
+              const info = teamContacts?.[teamName] || {};
+              return <div key={`${stage}-${teamName}`} style={{ padding: "12px", borderRadius: "12px", background: "rgba(255,255,255,.06)", display: "flex", gap: "10px", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+                <strong>{teamName}</strong>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  <button type="button" disabled={!normalizeWhatsappPhone(info.phone1)} onClick={() => sendStageWhatsapp(teamName, stage, "manager1")}>📲 {info.manager1 || "Sorumlu 1"}</button>
+                  <button type="button" disabled={!normalizeWhatsappPhone(info.phone2)} onClick={() => sendStageWhatsapp(teamName, stage, "manager2")}>📲 {info.manager2 || "Sorumlu 2"}</button>
+                </div>
+              </div>;
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   const completedQuarterMatches = quarter.filter(
     (match) => match.home && match.away
@@ -1063,6 +1149,17 @@ export default function Knockout({
       >
         Eleme Sistemini Sıfırla
       </button>
+
+      <hr />
+
+      <div style={{ marginBottom: "26px" }}>
+        <h3>📲 Tur Tebrik Mesajları</h3>
+        <p style={{ color: "#64748b", marginTop: "-6px" }}>Her etap tamamen bittiğinde ilgili takım sorumlularının WhatsApp butonları otomatik açılır.</p>
+        <StageMessagePanel title="🏆 Çeyrek Final Tebrik Mesajları" stage="quarter" teams={topEight.map((row) => row.team)} ready={leagueFinished && topEight.length === 8} waitingText="Lig aşamasında oynanacak maçlar bitince ilk 8 takım için açılacak." />
+        <StageMessagePanel title="🔥 Yarı Final Tebrik Mesajları" stage="semi" teams={quarterWinners} ready={quarterFinished} waitingText="4 çeyrek final maçı tamamlanınca kazanan 4 takım için açılacak." />
+        <StageMessagePanel title="👑 Final Tebrik Mesajları" stage="final" teams={semiWinners} ready={semiFinished} waitingText="2 yarı final maçı tamamlanınca finalistler için açılacak." />
+        <StageMessagePanel title="🥉 3.'lük Maçı Mesajları" stage="third" teams={semiLosers} ready={semiFinished} waitingText="2 yarı final maçı tamamlanınca 3.'lük maçı oynayacak takımlar için açılacak." />
+      </div>
 
       <hr />
 
