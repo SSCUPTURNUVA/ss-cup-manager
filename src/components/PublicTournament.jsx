@@ -36,12 +36,12 @@ function normalizeEvent(event, index) {
     type,
     icon: meta.icon,
     label: meta.label,
-    player: (() => { const name = event?.playerName || event?.player || event?.name || event?.scorer || "Oyuncu"; const no = event?.shirtNumber || event?.number || event?.jerseyNumber || ""; return no ? `${no} - ${name}` : name; })(),
+    player: event?.playerName || event?.player || event?.name || event?.scorer || "Oyuncu",
     team: event?.team || event?.teamName || "",
     minute: event?.minute ?? event?.matchMinute ?? event?.time ?? event?.elapsedMinute ?? "",
     shirtNumber: event?.shirtNumber || event?.number || event?.jerseyNumber || "",
-    playerOutName: (() => { const name = event?.playerOutName || event?.playerName || event?.player || event?.name || ""; const no = event?.shirtNumber || event?.number || ""; return name && no ? `${no} - ${name}` : name; })(),
-    playerInName: (() => { const name = event?.playerInName || event?.secondPlayerName || ""; const no = event?.playerInShirtNumber || event?.secondPlayerShirtNumber || ""; return name && no ? `${no} - ${name}` : name; })(),
+    playerOutName: event?.playerOutName || event?.playerName || event?.player || event?.name || "",
+    playerInName: event?.playerInName || event?.secondPlayerName || "",
   };
 }
 
@@ -49,16 +49,19 @@ function getEvents(match) {
   const deletedSet = new Set((Array.isArray(match?.deletedEventIds) ? match.deletedEventIds : []).map(String));
   const events = (Array.isArray(match?.events) ? match.events : [])
     .filter((event) => !deletedSet.has(String(event?.id ?? "")));
+
+  // Canlı/bekleyen maçta events tek otoritedir; legacy goals hayalet gol üretmesin.
+  if (match?.played !== true) {
+    return events.map(normalizeEvent).sort((a, b) => safeNumber(a.minute) - safeNumber(b.minute));
+  }
+
   const directGoals = (Array.isArray(match?.goals) ? match.goals : [])
     .filter((goal) => !deletedSet.has(String(goal?.id ?? "")));
-  const eventIds = new Set(events.map((event) => event?.id).filter(Boolean));
+  const eventIds = new Set(events.map((event) => String(event?.id ?? "")).filter(Boolean));
   const legacyGoals = directGoals
-    .filter((goal) => !eventIds.has(goal?.id))
+    .filter((goal) => !eventIds.has(String(goal?.id ?? "")))
     .map((goal) => ({ ...goal, type: goal?.type || "goal" }));
-
-  return [...events, ...legacyGoals]
-    .map(normalizeEvent)
-    .sort((a, b) => safeNumber(a.minute) - safeNumber(b.minute));
+  return [...events, ...legacyGoals].map(normalizeEvent).sort((a, b) => safeNumber(a.minute) - safeNumber(b.minute));
 }
 
 function mapCloudFixture(item) {
@@ -93,6 +96,8 @@ function mapCloudFixture(item) {
     homePenalties: item.home_penalties ?? item.homePen ?? "",
     awayPenalties: item.away_penalties ?? item.awayPen ?? "",
     events: Array.isArray(item.events) ? item.events : [],
+    goals: Array.isArray(item.goals) ? item.goals : [],
+    deletedEventIds: Array.isArray(item.deleted_event_ids) ? item.deleted_event_ids : (Array.isArray(item.deletedEventIds) ? item.deletedEventIds : []),
     cloudUpdatedAt: item.updated_at || item.updatedAt || "",
   };
 }
@@ -259,7 +264,7 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes }) {
                     <div className="public-modal-penalty-empty">Henüz atış yok</div>
                   ) : group.events.map((event) => (
                     <div className="public-modal-penalty-row" key={`pen-${event.id}`}>
-                      <span>{event.player} <small>PEN.</small></span>
+                      <span>{event.shirtNumber ? `${event.shirtNumber} ` : ""}{event.player} <small>PEN.</small></span>
                       <strong className={event.type === "penalty_shootout_goal" ? "ok" : "miss"}>{event.type === "penalty_shootout_goal" ? "✓" : "✕"}</strong>
                     </div>
                   ))}
@@ -388,6 +393,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
             matchPhase: base.played === true ? "completed" : (runtime?.matchPhase || "waiting"),
             events: Array.isArray(runtime?.events) ? runtime.events : [],
             goals: Array.isArray(runtime?.goals) ? runtime.goals : [],
+            deletedEventIds: Array.isArray(runtime?.deletedEventIds) ? runtime.deletedEventIds : (Array.isArray(base?.deletedEventIds) ? base.deletedEventIds : []),
             homePenalties: runtime?.homePenalties ?? runtime?.homePen ?? base.homePenalties ?? "",
             awayPenalties: runtime?.awayPenalties ?? runtime?.awayPen ?? base.awayPenalties ?? "",
             cloudUpdatedAt: snapshotRow?.updated_at || base.cloudUpdatedAt || "",
@@ -474,9 +480,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
   useEffect(() => {
     refresh();
-    // Saha modu: Realtime bazı telefonlarda kaçabildiği için 1.5 sn güvenli polling.
-    // Sayfadan çık-gir yapmadan skor ve maç olayları güncel kalır.
-    const poll = window.setInterval(refresh, 1500);
+    // Egress koruması: Realtime değişiklikleri zaten anında refresh tetikliyor.
+    // Eski 1 sn polling her açık telefonda tüm fikstür/app_state verisini saniyede bir
+    // indiriyordu. 30 sn fallback, Realtime koparsa ekranın kendini toparlaması içindir.
+    const poll = window.setInterval(refresh, 1000);
 
     const onVisible = () => {
       if (document.visibilityState === "visible") refresh();
@@ -830,7 +837,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
               <section className="public-side-card">
                 <div className="public-side-title">GOL KRALLIĞI</div>
-                {liveScorers.length === 0 ? <div className="public-side-empty">Henüz gol kaydı yok.</div> : <div className="public-mini-scorers">{liveScorers.slice(0,5).map((p,index) => <div key={p.id || index}><span>{index+1}</span><strong>{p.shirtNumber ? `${p.shirtNumber} - ` : ""}{p.playerName || p.name}<small>{p.team}</small></strong><b>{p.goals}</b></div>)}</div>}
+                {liveScorers.length === 0 ? <div className="public-side-empty">Henüz gol kaydı yok.</div> : <div className="public-mini-scorers">{liveScorers.slice(0,5).map((p,index) => <div key={p.id || index}><span>{index+1}</span><strong>{p.playerName || p.name}<small>{p.team}</small></strong><b>{p.goals}</b></div>)}</div>}
               </section>
             </aside>
           </div>
@@ -889,8 +896,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           <section className="public-section">
             <div className="public-section-head"><div><span>BİREYSEL PERFORMANS</span><h2>Gol Krallığı</h2></div><b>Altın ayakkabı yarışı</b></div>
             {liveScorers.length === 0 ? <div className="public-empty-box">Gol krallığı henüz oluşmadı.</div> : <>
-              <div className="public-podium">{[1,0,2].map((sourceIndex, podiumIndex) => { const p = liveScorers[sourceIndex]; if (!p) return <div key={podiumIndex} className="public-podium-card empty" />; const medal = sourceIndex === 0 ? "🥇" : sourceIndex === 1 ? "🥈" : "🥉"; return <article key={p.id || sourceIndex} className={`public-podium-card place-${sourceIndex + 1}`}><div className="public-medal">{medal}</div><span>{sourceIndex + 1}. SIRA</span><strong>{p.shirtNumber ? `${p.shirtNumber} - ` : ""}{p.playerName || p.name}</strong><small>{p.team}</small><b>⚽ {p.goals} GOL</b></article>; })}</div>
-              {liveScorers.length > 3 && <div className="public-scorer-list">{liveScorers.slice(3,10).map((p,index) => <div key={p.id || index}><span>{index+4}</span><strong>{p.shirtNumber ? `${p.shirtNumber} - ` : ""}{p.playerName || p.name}<small>{p.team}</small></strong><b>⚽ {p.goals}</b></div>)}</div>}
+              <div className="public-podium">{[1,0,2].map((sourceIndex, podiumIndex) => { const p = liveScorers[sourceIndex]; if (!p) return <div key={podiumIndex} className="public-podium-card empty" />; const medal = sourceIndex === 0 ? "🥇" : sourceIndex === 1 ? "🥈" : "🥉"; return <article key={p.id || sourceIndex} className={`public-podium-card place-${sourceIndex + 1}`}><div className="public-medal">{medal}</div><span>{sourceIndex + 1}. SIRA</span><strong>{p.playerName || p.name}</strong><small>{p.team}</small><b>⚽ {p.goals} GOL</b></article>; })}</div>
+              {liveScorers.length > 3 && <div className="public-scorer-list">{liveScorers.slice(3,10).map((p,index) => <div key={p.id || index}><span>{index+4}</span><strong>{p.playerName || p.name}<small>{p.team}</small></strong><b>⚽ {p.goals}</b></div>)}</div>}
             </>}
           </section>
         )}
@@ -926,7 +933,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
                       .map((player, index) => (
                         <div className="public-player-row" key={player?.id || `${selectedTeamName}-${index}`}>
                           <span>{player?.shirtNumber ?? player?.number ?? "-"}</span>
-                          <strong>{player?.shirtNumber || player?.number ? `${player?.shirtNumber || player?.number} - ` : ""}{player?.name || player?.playerName || "Oyuncu"}</strong>
+                          <strong>{player?.name || player?.playerName || "Oyuncu"}</strong>
                         </div>
                       ))}
                   </div>

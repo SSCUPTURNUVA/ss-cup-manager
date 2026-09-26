@@ -512,8 +512,8 @@ export default function CompletedMatches({
                     <strong>{EVENT_LABELS[event.type] || "• Maç Olayı"}</strong>
                     <p>
                       {event.type === "substitution"
-                        ? `Çıktı: ${event.shirtNumber ? `${event.shirtNumber} - ` : ""}${event.playerOutName || event.playerName || event.name} • Girdi: ${event.playerInShirtNumber || event.secondPlayerShirtNumber ? `${event.playerInShirtNumber || event.secondPlayerShirtNumber} - ` : ""}${event.playerInName || "Oyuncu"} • ${event.team}`
-                        : `${event.shirtNumber ? `${event.shirtNumber} - ` : ""}${event.playerName || event.name} • ${event.team}`}
+                        ? `Çıktı: ${event.playerOutName || event.playerName || event.name} • Girdi: ${event.playerInName || "Oyuncu"} • ${event.team}`
+                        : `${event.playerName || event.name} • ${event.team}`}
                       {event.minute !== "" ? ` • ${event.minute}'` : ""}
                     </p>
                   </div>

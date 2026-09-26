@@ -144,7 +144,7 @@ export default function Knockout({
         if (Array.isArray(value.drawPotOne)) setDrawPotOne(value.drawPotOne);
         if (Array.isArray(value.drawPotTwo)) setDrawPotTwo(value.drawPotTwo);
         if (typeof value.drawStarted === "boolean") setDrawStarted(value.drawStarted);
-        if (["draw", "ranking", "free", "manual"].includes(value.quarterMode)) setQuarterMode(value.quarterMode);
+        if (["draw", "ranking", "free"].includes(value.quarterMode)) setQuarterMode(value.quarterMode);
       }
 
       setCloudReady(true);
@@ -161,14 +161,40 @@ export default function Knockout({
           if (cloudWriteLockRef.current) return;
           const value = payload.new?.value;
           if (!value || typeof value !== "object") return;
-          if (Array.isArray(value.quarter)) setQuarter(value.quarter);
-          if (Array.isArray(value.semi)) setSemi(value.semi);
-          if (value.finalMatch) setFinalMatch(value.finalMatch);
-          if (value.thirdPlace) setThirdPlace(value.thirdPlace);
+          const preserveRunningRuntime = (current, incoming) => {
+            if (!incoming) return current;
+            const phase = current?.matchPhase || "waiting";
+            const running = current?.played !== true && current?.live === true &&
+              ["first_half", "halftime", "second_half", "penalty"].includes(phase);
+            const incomingPhase = incoming?.matchPhase || "waiting";
+            const incomingWouldReset = running && (incoming?.live !== true || incomingPhase === "waiting");
+            if (!incomingWouldReset) return incoming;
+            return {
+              ...incoming,
+              live: current.live,
+              matchPhase: current.matchPhase,
+              timerRunning: current.timerRunning,
+              timerStartedAt: current.timerStartedAt,
+              elapsedSeconds: current.elapsedSeconds,
+              homeScore: current.homeScore,
+              awayScore: current.awayScore,
+              events: Array.isArray(current.events) ? current.events : [],
+              goals: Array.isArray(current.goals) ? current.goals : [],
+              deletedEventIds: Array.isArray(current.deletedEventIds) ? current.deletedEventIds : [],
+            };
+          };
+          if (Array.isArray(value.quarter)) setQuarter((current) =>
+            value.quarter.map((incoming, i) => preserveRunningRuntime(current?.[i], incoming))
+          );
+          if (Array.isArray(value.semi)) setSemi((current) =>
+            value.semi.map((incoming, i) => preserveRunningRuntime(current?.[i], incoming))
+          );
+          if (value.finalMatch) setFinalMatch((current) => preserveRunningRuntime(current, value.finalMatch));
+          if (value.thirdPlace) setThirdPlace((current) => preserveRunningRuntime(current, value.thirdPlace));
           if (Array.isArray(value.drawPotOne)) setDrawPotOne(value.drawPotOne);
           if (Array.isArray(value.drawPotTwo)) setDrawPotTwo(value.drawPotTwo);
           if (typeof value.drawStarted === "boolean") setDrawStarted(value.drawStarted);
-          if (["draw", "ranking", "free", "manual"].includes(value.quarterMode)) setQuarterMode(value.quarterMode);
+          if (["draw", "ranking", "free"].includes(value.quarterMode)) setQuarterMode(value.quarterMode);
         }
       )
       .subscribe();
@@ -183,41 +209,11 @@ export default function Knockout({
     if (!cloudReady) return;
 
     const timeout = window.setTimeout(async () => {
-      // KRİTİK: Maç Merkezi eleme maçını başlattıktan hemen sonra bu effect
-      // eski quarter/semi state'ini buluta geri yazıp canlı maç durumunu
-      // "waiting"e çevirmesin. Her bulut yazısından önce en güncel fixture
-      // runtime alanlarını eleme ağacına bindiriyoruz.
-      const runtimeFields = (base, key) => {
-        const runtime = fixtures.find((m) => m?.isKnockout === true && m?.knockoutKey === key);
-        if (!runtime) return base;
-        return {
-          ...(base || {}),
-          id: runtime.id ?? base?.id,
-          homeScore: runtime.homeScore ?? base?.homeScore ?? 0,
-          awayScore: runtime.awayScore ?? base?.awayScore ?? 0,
-          homePen: runtime.homePen ?? base?.homePen ?? "",
-          awayPen: runtime.awayPen ?? base?.awayPen ?? "",
-          date: runtime.date ?? base?.date ?? "",
-          time: runtime.time ?? base?.time ?? "",
-          field: runtime.field ?? runtime.pitch ?? base?.field ?? "Saha 1",
-          played: runtime.played === true,
-          live: runtime.live === true,
-          matchPhase: runtime.matchPhase || base?.matchPhase || "waiting",
-          timerRunning: runtime.timerRunning === true,
-          timerStartedAt: runtime.timerStartedAt ?? null,
-          elapsedSeconds: runtime.elapsedSeconds ?? base?.elapsedSeconds ?? 0,
-          runtimeUpdatedAt: runtime.runtimeUpdatedAt || base?.runtimeUpdatedAt || new Date().toISOString(),
-          events: Array.isArray(runtime.events) ? runtime.events : (base?.events || []),
-          homeSquadSnapshot: Array.isArray(runtime.homeSquadSnapshot) ? runtime.homeSquadSnapshot : (base?.homeSquadSnapshot || []),
-          awaySquadSnapshot: Array.isArray(runtime.awaySquadSnapshot) ? runtime.awaySquadSnapshot : (base?.awaySquadSnapshot || []),
-        };
-      };
-
       const value = {
-        quarter: quarter.map((m, i) => runtimeFields(m, `quarter-${i}`)),
-        semi: semi.map((m, i) => runtimeFields(m, `semi-${i}`)),
-        finalMatch: runtimeFields(finalMatch, "final-0"),
-        thirdPlace: runtimeFields(thirdPlace, "third-place-0"),
+        quarter,
+        semi,
+        finalMatch,
+        thirdPlace,
         drawPotOne,
         drawPotTwo,
         drawStarted,
@@ -234,7 +230,7 @@ export default function Knockout({
     }, 250);
 
     return () => window.clearTimeout(timeout);
-  }, [cloudReady, quarter, semi, finalMatch, thirdPlace, drawPotOne, drawPotTwo, drawStarted, quarterMode, fixtures]);
+  }, [cloudReady, quarter, semi, finalMatch, thirdPlace, drawPotOne, drawPotTwo, drawStarted, quarterMode]);
 
   useEffect(() => {
     localStorage.setItem("sscup-quarter", JSON.stringify(quarter));
@@ -708,77 +704,54 @@ export default function Knockout({
     finally { window.setTimeout(() => { cloudWriteLockRef.current = false; setIsDrawing(false); }, 500); }
   }
 
-  async function prepareManualQuarterDraw() {
+  async function prepareManualQuarter() {
     if (isDrawing) return;
-    if (topEight.length < 8) {
-      alert("Manuel kura için lig sıralamasında ilk 8 takım oluşmalıdır.");
-      return;
-    }
+    const teams = topEight.map((team) => team.team).filter(Boolean);
+    if (teams.length < 8) { alert("Manuel kura için ilk 8 takım oluşmalıdır."); return; }
     if (drawStarted || completedQuarterMatches > 0) {
-      const confirmed = window.confirm("Mevcut çeyrek final eşleşmeleri, skorlar ve sonraki turlar silinip MANUEL KURA hazırlanacak. Devam edilsin mi?");
-      if (!confirmed) return;
+      if (!window.confirm("Mevcut çeyrek final kurası, skorlar ve sonraki turlar silinip MANUEL KURA hazırlanacak. Devam edilsin mi?")) return;
     }
-
-    setIsDrawing(true);
-    cloudWriteLockRef.current = true;
+    setIsDrawing(true); cloudWriteLockRef.current = true;
     const nextQuarter = createEmptyQuarter();
     const nextSemi = createEmptySemi();
     const nextFinal = createEmptyFinal();
     const nextThirdPlace = createEmptyFinal();
-    const allTeams = topEight.map((row) => row.team);
-    const value = { quarter: nextQuarter, semi: nextSemi, finalMatch: nextFinal, thirdPlace: nextThirdPlace, drawPotOne: allTeams, drawPotTwo: [], drawStarted: true, quarterMode: "manual" };
-
+    const value = { quarter: nextQuarter, semi: nextSemi, finalMatch: nextFinal, thirdPlace: nextThirdPlace, drawPotOne: teams, drawPotTwo: [], drawStarted: true, quarterMode: "manual" };
     try {
       const { error } = await supabase.from("app_state").upsert({ id: "knockout", value, updated_at: new Date().toISOString() });
       if (error) throw error;
       const remainingFixtures = fixtures.filter((match) => match?.isKnockout !== true);
       if (typeof setFixtures === "function") setFixtures(remainingFixtures);
       localStorage.setItem("sscup-fixtures", JSON.stringify(remainingFixtures));
+      // Eski eleme maçına ait kadro seçimini yeni kuraya taşımıyoruz.
+      try {
+        const allLineups = JSON.parse(localStorage.getItem("sscup-match-lineups") || "{}");
+        const clean = Object.fromEntries(Object.entries(allLineups).filter(([key]) => !String(key).startsWith("knockout:")));
+        localStorage.setItem("sscup-match-lineups", JSON.stringify(clean));
+        await supabase.from("app_state").upsert({ id: "match_lineups", value: clean, updated_at: new Date().toISOString() });
+      } catch {}
       setQuarter(nextQuarter); setSemi(nextSemi); setFinalMatch(nextFinal); setThirdPlace(nextThirdPlace);
-      setDrawPotOne(allTeams); setDrawPotTwo([]); setDrawStarted(true); setQuarterMode("manual"); setLastDrawnMatch(null);
-      alert("✍️ Manuel kura hazır. Önce ÇF1-ÇF4 ilk takımları, sonra rakiplerini sırayla seçebilirsiniz.");
-    } catch (error) {
-      console.error("Manuel kura hazırlanamadı:", error);
-      alert("Manuel kura hazırlanamadı. İnternet bağlantısını kontrol edin.");
-    } finally {
-      window.setTimeout(() => { cloudWriteLockRef.current = false; setIsDrawing(false); }, 500);
-    }
+      setDrawPotOne(teams); setDrawPotTwo([]); setDrawStarted(true); setQuarterMode("manual"); setLastDrawnMatch(null);
+    } catch (error) { console.error("Manuel kura hazırlanamadı:", error); alert("Manuel kura kaydedilemedi. İnternet bağlantısını kontrol edin."); }
+    finally { window.setTimeout(() => { cloudWriteLockRef.current = false; setIsDrawing(false); }, 500); }
   }
 
-  async function setManualQuarterTeam(slotIndex, field, team) {
-    if (!drawStarted || quarterMode !== "manual" || isDrawing) return;
-    const previousTeam = quarter?.[slotIndex]?.[field] || "";
-    const alreadyUsed = quarter.some((match, index) =>
-      ((index !== slotIndex || field !== "home") && match.home === team) ||
-      ((index !== slotIndex || field !== "away") && match.away === team)
-    );
-    if (team && alreadyUsed && team !== previousTeam) {
-      alert("Bu takım zaten başka bir çeyrek final alanında seçildi.");
-      return;
-    }
-
-    const nextQuarter = quarter.map((match, index) => index === slotIndex
-      ? { ...match, [field]: team, homeScore: "", awayScore: "", homePen: "", awayPen: "" }
-      : { ...match });
-    const usedTeams = new Set(nextQuarter.flatMap((match) => [match.home, match.away]).filter(Boolean));
-    const allTeams = topEight.map((row) => row.team);
-    const remainingTeams = allTeams.filter((name) => !usedTeams.has(name));
-
-    setIsDrawing(true);
+  async function setManualQuarterTeam(matchIndex, field, team) {
+    if (quarterMode !== "manual" || !drawStarted || isDrawing) return;
+    const usedElsewhere = quarter.some((m, i) => i !== matchIndex && (m.home === team || m.away === team));
+    const sameMatchOther = field === "home" ? quarter[matchIndex]?.away : quarter[matchIndex]?.home;
+    if (team && (usedElsewhere || sameMatchOther === team)) { alert("Bu takım zaten kurada seçildi."); return; }
+    const nextQuarter = quarter.map((m, i) => i === matchIndex ? { ...m, [field]: team, homeScore: "", awayScore: "", homePen: "", awayPen: "", played: false, live: false, matchPhase: "waiting", timerRunning: false, timerStartedAt: null, elapsedSeconds: 0, events: [] } : m);
+    const used = new Set(nextQuarter.flatMap(m => [m.home, m.away]).filter(Boolean));
+    const remaining = topEight.map(t => t.team).filter(name => name && !used.has(name));
     cloudWriteLockRef.current = true;
     try {
-      const value = { quarter: nextQuarter, semi, finalMatch, thirdPlace, drawPotOne: remainingTeams, drawPotTwo: [], drawStarted: true, quarterMode: "manual" };
+      const value = { quarter: nextQuarter, semi: createEmptySemi(), finalMatch: createEmptyFinal(), thirdPlace: createEmptyFinal(), drawPotOne: remaining, drawPotTwo: [], drawStarted: true, quarterMode: "manual" };
       const { error } = await supabase.from("app_state").upsert({ id: "knockout", value, updated_at: new Date().toISOString() });
       if (error) throw error;
-      setQuarter(nextQuarter);
-      setDrawPotOne(remainingTeams);
-      setLastDrawnMatch(team ? { number: slotIndex + 1, drawnTeam: team, slot: `ÇEYREK FİNAL ${slotIndex + 1}`, role: field === "home" ? "İLK TAKIM" : "RAKİP" } : null);
-    } catch (error) {
-      console.error("Manuel kura seçimi kaydedilemedi:", error);
-      alert("Seçim kaydedilemedi. Tekrar deneyin.");
-    } finally {
-      window.setTimeout(() => { cloudWriteLockRef.current = false; setIsDrawing(false); }, 250);
-    }
+      setQuarter(nextQuarter); setSemi(createEmptySemi()); setFinalMatch(createEmptyFinal()); setThirdPlace(createEmptyFinal()); setDrawPotOne(remaining);
+    } catch (error) { console.error("Manuel kura kaydedilemedi:", error); alert("Seçim kaydedilemedi."); }
+    finally { window.setTimeout(() => { cloudWriteLockRef.current = false; }, 250); }
   }
 
   async function prepareRankedQuarter() {
@@ -988,9 +961,10 @@ export default function Knockout({
 
     const existingIndex = fixtures.findIndex((item) => item.knockoutKey === key);
 
-    // Eleme maçları fixtures tablosuna yazılmaz; app_state içinde tutulur.
-    // Bu yüzden Supabase bigint ID üretmek yerine cihazlar arasında sabit bir anahtar kullanılır.
-    const stableId = `knockout:${key}`;
+    // Aynı ÇF/YF slotu yeni takımlarla tekrar kullanıldığında eski event/kadro kayıtları
+    // yeni maça yapışmasın. Kimlik slot + gerçek katılımcılardan oluşur.
+    const participantToken = `${encodeURIComponent(String(home))}::${encodeURIComponent(String(away))}`;
+    const stableId = `knockout:${key}:${participantToken}`;
 
     const baseMatch = {
       id: stableId,
@@ -1008,8 +982,7 @@ export default function Knockout({
       field: match.field || "Saha 1",
       pitch: match.field || "Saha 1",
       played: false,
-      live: false,
-      matchPhase: "waiting",
+      live: true,
       timerRunning: false,
       timerStartedAt: null,
       elapsedSeconds: 0,
@@ -1026,30 +999,44 @@ export default function Knockout({
 
       if (!restart) return;
 
+      const sameParticipants = String(existing.home || "") === String(home) && String(existing.away || "") === String(away);
       updatedFixtures = fixtures.map((item, index) =>
         index === existingIndex
-          ? existing.played === true
-            ? {
-                ...existing,
-                ...baseMatch,
-                id: existing.id || baseMatch.id,
-                // Tamamlanmış maçı bilinçli yeniden açarken temiz başlat.
-                events: [],
-                homeScore: 0,
-                awayScore: 0,
-              }
-            : {
-                // Devam eden/hazırlanmış eleme maçını tekrar Maç Merkezi'ne açmak
-                // ASLA süreyi, skoru, olayları veya kadroyu sıfırlamasın.
-                ...baseMatch,
-                ...existing,
-                id: existing.id || baseMatch.id,
-                knockoutKey: key,
-                isKnockout: true,
-                stageLabel,
-                home,
-                away,
-              }
+          ? (sameParticipants
+              ? (existing.played === true
+                  ? {
+                      ...baseMatch,
+                      id: stableId,
+                      events: [],
+                      goals: [],
+                      deletedEventIds: [],
+                      homeScore: 0,
+                      awayScore: 0,
+                      elapsedSeconds: 0,
+                      matchPhase: "waiting",
+                    }
+                  : {
+                      ...baseMatch,
+                      ...existing,
+                      id: stableId,
+                      home,
+                      away,
+                      knockoutKey: key,
+                      isKnockout: true,
+                      stageLabel,
+                      // DEVAM EDEN MAÇ: runtime kesinlikle sıfırlanmaz.
+                      live: existing.live === true,
+                      timerRunning: existing.timerRunning === true,
+                      timerStartedAt: existing.timerStartedAt ?? null,
+                      elapsedSeconds: Number(existing.elapsedSeconds || 0),
+                      matchPhase: existing.matchPhase || "waiting",
+                      events: Array.isArray(existing.events) ? existing.events : [],
+                      goals: Array.isArray(existing.goals) ? existing.goals : [],
+                      deletedEventIds: Array.isArray(existing.deletedEventIds) ? existing.deletedEventIds : [],
+                      homeScore: Number(existing.homeScore || 0),
+                      awayScore: Number(existing.awayScore || 0),
+                    })
+              : { ...baseMatch, goals: [], deletedEventIds: [] })
           : item
       );
     } else {
@@ -1059,9 +1046,11 @@ export default function Knockout({
     setFixtures(updatedFixtures);
     localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));
 
-    // Eleme ekranındaki buton doğrudan bu maçı Maç Merkezi'nde seçsin.
-    // Sadece sayfayı değiştirmek yeterli değildi; waiting durumundaki maç görünmüyordu.
+    // Maç Merkezi seçimi yalnız React ekranında kalmasın. Kullanıcı başka sekmeye
+    // geçse veya yönetim ekranını yeniden açsa da bu maç, bitirilene/çıkarılana kadar seçili kalır.
     localStorage.setItem("sscup-match-center-active", stableId);
+    window.dispatchEvent(new CustomEvent("sscup-match-center-active-changed", { detail: stableId }));
+    syncAppStateWithRetry("public_match_center", { matchId: stableId, updatedAt: new Date().toISOString() });
 
     window.dispatchEvent(
       new CustomEvent("sscup-fixtures-updated", {
@@ -1142,7 +1131,7 @@ export default function Knockout({
 
     const isRealTeam = (name) => Boolean(name) && !/(Galibi|Mağlubu|PENALTY_WAIT)/i.test(String(name));
     const makeMatch = (key, stageLabel, home, away, source) => ({
-      id: `knockout:${key}`,
+      id: `knockout:${key}:${encodeURIComponent(String(home))}::${encodeURIComponent(String(away))}`,
       knockoutKey: key,
       isKnockout: true,
       stageLabel,
@@ -1180,6 +1169,8 @@ export default function Knockout({
       const merged = bracket.map((fresh) => {
         const old = oldKo.get(fresh.knockoutKey);
         if (!old) return fresh;
+        const sameParticipants = String(old.home || "") === String(fresh.home || "") && String(old.away || "") === String(fresh.away || "");
+        if (!sameParticipants) return fresh;
         return {
           ...fresh,
           ...old,
@@ -1223,6 +1214,13 @@ export default function Knockout({
     const remainingFixtures = fixtures.filter((match) => match?.isKnockout !== true);
     if (typeof setFixtures === "function") setFixtures(remainingFixtures);
     localStorage.setItem("sscup-fixtures", JSON.stringify(remainingFixtures));
+    try {
+      const allLineups = JSON.parse(localStorage.getItem("sscup-match-lineups") || "{}");
+      const cleanLineups = Object.fromEntries(Object.entries(allLineups).filter(([key]) => !String(key).startsWith("knockout:")));
+      localStorage.setItem("sscup-match-lineups", JSON.stringify(cleanLineups));
+      await supabase.from("app_state").upsert({ id: "match_lineups", value: cleanLineups, updated_at: new Date().toISOString() });
+      await supabase.from("app_state").upsert({ id: "public_match_center", value: { matchId: "", updatedAt: new Date().toISOString() }, updated_at: new Date().toISOString() });
+    } catch (error) { console.warn("Eleme kadro/aktif maç temizliği:", error); }
 
     [
       "sscup-quarter",
@@ -1322,20 +1320,20 @@ export default function Knockout({
             </button>
             <button
               type="button"
-              onClick={prepareManualQuarterDraw}
-              disabled={isDrawing || topEight.length < 8}
-              title={topEight.length < 8 ? "Çeyrek final için ilk 8 takım oluşmalı" : "Fiziksel torbadan çekilen takımları sırayla elle gir"}
-              style={{ fontWeight: 900 }}
-            >
-              ✍️ Manuel Kura Girişi
-            </button>
-            <button
-              type="button"
               onClick={prepareQuarterDraw}
               disabled={isDrawing || topEight.length < 8}
               title={topEight.length < 8 ? "Çeyrek final için ilk 8 takım oluşmalı" : "Mevcut torbalı kura sistemi"}
             >
               🎱 Torbalı Kura
+            </button>
+            <button
+              type="button"
+              onClick={prepareManualQuarter}
+              disabled={isDrawing || topEight.length < 8}
+              title={topEight.length < 8 ? "Çeyrek final için ilk 8 takım oluşmalı" : "Takımları sorumluların çektiği sırayla elle yerleştir"}
+              style={{ fontWeight: 900 }}
+            >
+              ✍️ Manuel Kura
             </button>
             <button
               type="button"
@@ -1352,7 +1350,7 @@ export default function Knockout({
             </p>
           ) : drawStarted ? (
             <p style={{ margin: "12px 0 0", color: "#ffe07b", fontWeight: 800 }}>
-              Aktif sistem: {quarterMode === "ranking" ? "1-8 / 2-7 / 3-6 / 4-5" : quarterMode === "free" ? "🔥 TEK TORBA SERBEST KURA" : quarterMode === "manual" ? "✍️ MANUEL KURA GİRİŞİ" : "Torbalı Kura"}
+              Aktif sistem: {quarterMode === "ranking" ? "1-8 / 2-7 / 3-6 / 4-5" : quarterMode === "free" ? "🔥 TEK TORBA SERBEST KURA" : quarterMode === "manual" ? "✍️ MANUEL KURA" : "Torbalı Kura"}
             </p>
           ) : (
             <p style={{ margin: "12px 0 0", opacity: 0.72 }}>İlk 8 hazır. Yukarıdan eşleşme sistemini seçin.</p>
@@ -1436,35 +1434,6 @@ export default function Knockout({
           </div>
           )}
 
-          {quarterMode === "manual" && drawStarted && (
-            <div style={{ marginTop: "18px", padding: "18px", borderRadius: "16px", background: "linear-gradient(135deg,#151515,#3a2b00)", color: "white" }}>
-              <h3 style={{ marginTop: 0, textAlign: "center" }}>✍️ MANUEL ÇEYREK FİNAL KURASI</h3>
-              <p style={{ opacity: .85, textAlign: "center" }}>Önce ÇF1 → ÇF4 ilk takımları, ardından ÇF1 → ÇF4 rakiplerini gir. Seçilen takım diğer listelerden otomatik düşer.</p>
-              <div style={{ display: "grid", gap: "12px", maxWidth: "760px", margin: "16px auto 0" }}>
-                {[0,1,2,3].map((slotIndex) => {
-                  const selected = new Set(quarter.flatMap((m) => [m.home, m.away]).filter(Boolean));
-                  const optionsFor = (current) => topEight.map((row) => row.team).filter((name) => name === current || !selected.has(name));
-                  return (
-                    <div key={slotIndex} style={{ display: "grid", gridTemplateColumns: "70px 1fr 44px 1fr", gap: "8px", alignItems: "center", padding: "10px", border: "1px solid rgba(255,255,255,.16)", borderRadius: "12px", background: "rgba(255,255,255,.05)" }}>
-                      <b>ÇF{slotIndex + 1}</b>
-                      <select value={quarter[slotIndex]?.home || ""} onChange={(e) => setManualQuarterTeam(slotIndex, "home", e.target.value)} disabled={isDrawing || (slotIndex > 0 && !quarter[slotIndex - 1]?.home)} style={{ padding: "9px", minWidth: 0 }}>
-                        <option value="">İlk takımı seç</option>
-                        {optionsFor(quarter[slotIndex]?.home).map((name) => <option key={name} value={name}>{name}</option>)}
-                      </select>
-                      <b style={{ textAlign: "center" }}>VS</b>
-                      <select value={quarter[slotIndex]?.away || ""} onChange={(e) => setManualQuarterTeam(slotIndex, "away", e.target.value)} disabled={isDrawing || quarter.filter((m) => m.home).length < 4 || (slotIndex > 0 && !quarter[slotIndex - 1]?.away)} style={{ padding: "9px", minWidth: 0 }}>
-                        <option value="">Rakibi seç</option>
-                        {optionsFor(quarter[slotIndex]?.away).map((name) => <option key={name} value={name}>{name}</option>)}
-                      </select>
-                    </div>
-                  );
-                })}
-              </div>
-              <div style={{ textAlign: "center", marginTop: "14px", fontWeight: 800 }}>Kalan takım: {drawPotOne.length}</div>
-              {drawCompleted ? <p style={{ textAlign: "center" }}><b>✅ Manuel kura tamamlandı ve eleme ağacına kaydedildi.</b></p> : null}
-            </div>
-          )}
-
           {quarterMode === "free" && drawStarted && (
             <div style={{ marginTop: "18px", padding: "18px", borderRadius: "16px", background: "linear-gradient(135deg,#151515,#3a2b00)", color: "white", textAlign: "center" }}>
               <h3 style={{ marginTop: 0 }}>🔥 İLK 8 • TEK TORBA • KİM KİME DUM DUMA</h3>
@@ -1496,6 +1465,28 @@ export default function Knockout({
             ) : null}
           </div>
         </>
+      )}
+
+      {quarterMode === "manual" && drawStarted && topEight.length >= 8 && (
+        <div style={{ marginTop: "20px", padding: "18px", borderRadius: "16px", background: "#111", color: "white" }}>
+          <h3 style={{ marginTop: 0 }}>✍️ Manuel Çeyrek Final Kurası</h3>
+          <p style={{ opacity: .8 }}>Önce ÇF1-ÇF4 ilk takımlarını, sonra rakiplerini seçebilirsin. Seçilen takım diğer listelerden otomatik düşer.</p>
+          {[0,1,2,3].map((i) => {
+            const used = new Set(quarter.flatMap((m, idx) => idx === i ? [] : [m.home, m.away]).filter(Boolean));
+            const options = topEight.map(t => t.team).filter(Boolean);
+            return <div key={`manual-${i}`} style={{ display:"grid", gridTemplateColumns:"120px 1fr 1fr", gap:"10px", marginBottom:"10px", alignItems:"center" }}>
+              <b>ÇF{i+1}</b>
+              <select value={quarter[i]?.home || ""} onChange={(e)=>setManualQuarterTeam(i,"home",e.target.value)}>
+                <option value="">İlk takım</option>
+                {options.filter(t => !used.has(t) && t !== quarter[i]?.away).map(t => <option key={`h-${i}-${t}`} value={t}>{t}</option>)}
+              </select>
+              <select value={quarter[i]?.away || ""} onChange={(e)=>setManualQuarterTeam(i,"away",e.target.value)}>
+                <option value="">Rakip</option>
+                {options.filter(t => !used.has(t) && t !== quarter[i]?.home).map(t => <option key={`a-${i}-${t}`} value={t}>{t}</option>)}
+              </select>
+            </div>;
+          })}
+        </div>
       )}
 
       {/* Çeyrek Final Maçları Listesi ve Skor/Penaltı Yönetimi */}

@@ -1334,7 +1334,11 @@ export default function Fixture({
                     key={player.id}
                     value={player.id}
                   >
-                    {player.shirtNumber || player.number ? `${player.shirtNumber || player.number} - ` : ""}{player.name}
+                    #
+                    {
+                      player.shirtNumber
+                    }{" "}
+                    {player.name}
                   </option>
                 )
               )}
