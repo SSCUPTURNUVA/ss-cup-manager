@@ -1072,7 +1072,45 @@ export default function Knockout({
     localStorage.setItem("sscup-match-center-active", stableId);
     // MatchCenter henüz mount değilse event'i kaçırabilir. Seçilen maçın kendisini de
     // taşı; ilk render'da fixtures gecikse bile tek tıkta açılabilsin.
-    const selectedMatchForCenter = updatedFixtures.find((item) => String(item?.id || "") === String(stableId)) || baseMatch;
+    const selectedMatchForCenterRaw = updatedFixtures.find((item) => String(item?.id || "") === String(stableId)) || baseMatch;
+
+    // Yeni/waiting eleme maçı açılırken başka maçtan kalmış event/skor/runtime taşınamaz.
+    // Temizlik takım adına özel değildir; HER yeni eleme maçı için aynı kural geçerlidir.
+    const isFreshWaitingMatch =
+      selectedMatchForCenterRaw?.played !== true &&
+      !["first_half", "halftime", "second_half", "penalty"].includes(selectedMatchForCenterRaw?.matchPhase || "waiting");
+
+    const selectedMatchForCenter = isFreshWaitingMatch ? {
+      ...selectedMatchForCenterRaw,
+      live: false,
+      matchPhase: "waiting",
+      timerRunning: false,
+      timerStartedAt: null,
+      elapsedSeconds: 0,
+      homeScore: 0,
+      awayScore: 0,
+      homePen: "",
+      awayPen: "",
+      events: [],
+      goals: [],
+      deletedEventIds: [],
+    } : selectedMatchForCenterRaw;
+
+    // Eski runtime yalnız AYNI maç gerçekten çalışıyorsa korunur. Yeni maça geçerken
+    // önceki maçın gol/kart/skor/süresi kesin olarak taşınmaz.
+    try {
+      const oldRuntime = JSON.parse(localStorage.getItem("sscup-active-match-runtime") || "null");
+      const oldKey = String(oldRuntime?.key || "");
+      const oldPhase = oldRuntime?.match?.matchPhase || "waiting";
+      const sameRunningMatch =
+        oldKey === String(stableId) &&
+        oldRuntime?.match?.played !== true &&
+        ["first_half", "halftime", "second_half", "penalty"].includes(oldPhase);
+      if (!sameRunningMatch) localStorage.removeItem("sscup-active-match-runtime");
+    } catch {
+      localStorage.removeItem("sscup-active-match-runtime");
+    }
+
     localStorage.setItem("sscup-match-center-pending", JSON.stringify(selectedMatchForCenter));
     // Tek basışta Maç Merkezi aynı sekmede anında seçilsin; Realtime beklenmez.
     window.dispatchEvent(new CustomEvent("sscup-match-center-active-changed", {
