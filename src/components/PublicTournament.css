@@ -459,3 +459,20 @@
 .public-modal-events::-webkit-scrollbar-thumb{background:#ffc400;border-radius:10px;border:2px solid #162331;}
 .public-modal-events:focus{outline:1px solid rgba(255,196,0,.35);outline-offset:-1px;}
 @media(max-width:560px){.public-modal-events{height:38vh !important;max-height:38vh !important;}}
+
+
+/* V27: Maç olayları scroll'u modal içinde kilitle; arka sayfaya wheel kaçmasın. */
+.public-modal-backdrop{overflow:hidden !important;overscroll-behavior:none !important;}
+.public-match-modal{max-height:92vh !important;overflow:hidden !important;}
+.public-modal-events{
+  box-sizing:border-box;
+  height:320px !important;
+  max-height:36vh !important;
+  min-height:120px !important;
+  flex:none !important;
+  overflow-y:scroll !important;
+  overflow-x:hidden !important;
+  overscroll-behavior:contain !important;
+  touch-action:pan-y !important;
+}
+@media(max-width:560px){.public-modal-events{height:34vh !important;max-height:34vh !important;}}

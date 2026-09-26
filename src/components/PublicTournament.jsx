@@ -236,6 +236,27 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes, squads }) 
     return () => window.cancelAnimationFrame(frame);
   }, [match?.id, match?.knockoutKey, matchEvents.length, latestEventId]);
 
+  // Canlı maç detayı açıkken arka sayfanın kaymasını engelle.
+  useEffect(() => {
+    if (!match) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    const previousOverscroll = document.body.style.overscrollBehavior;
+    document.body.style.overflow = "hidden";
+    document.body.style.overscrollBehavior = "none";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.overscrollBehavior = previousOverscroll;
+    };
+  }, [match]);
+
+  const handleEventsWheel = (event) => {
+    const container = eventsContainerRef.current;
+    if (!container) return;
+    event.stopPropagation();
+    event.preventDefault();
+    container.scrollTop += event.deltaY;
+  };
+
   if (!match) return null;
   const liveMinute = getMinute(match, now, halfDurationMinutes);
   const showScore = match.live === true || match.played === true;
@@ -284,7 +305,7 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes, squads }) 
         {matchEvents.length === 0 ? (
           <div className="public-modal-empty">{match.played ? "Bu maç için kayıtlı gol/kart olayı bulunmuyor." : "Maç başladığında goller ve kartlar burada görünecek."}</div>
         ) : (
-          <div className="public-modal-events" ref={eventsContainerRef} tabIndex={0} onWheel={(event) => event.stopPropagation()} onTouchMove={(event) => event.stopPropagation()}>
+          <div className="public-modal-events" ref={eventsContainerRef} tabIndex={0} onWheel={handleEventsWheel} onTouchMove={(event) => event.stopPropagation()}>
             {matchEvents.map((event) => (
               <div className="public-modal-event" key={event.id}>
                 <span className="public-modal-event-minute">{event.minute !== "" ? `${event.minute}'` : "•"}</span>
