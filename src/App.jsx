@@ -1031,7 +1031,7 @@ export default function App() {
         );
 
       case "knockoutmessages":
-        return <KnockoutMessages settings={settings} />;
+        return <KnockoutMessages settings={settings} standings={standings} />;
 
       case "teamcontacts":
         return (
@@ -1246,3 +1246,4 @@ export default function App() {
     </div>
   );
 }
+
