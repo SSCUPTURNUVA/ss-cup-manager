@@ -331,6 +331,7 @@ export default function MatchCenter({
     );
   }
 
+  const ACTIVE_RUNTIME_KEY = "sscup-active-match-runtime";
   const [activeMatchCenterKey, setActiveMatchCenterKey] = useState(() =>
     localStorage.getItem("sscup-match-center-active") || ""
   );
@@ -393,6 +394,32 @@ export default function MatchCenter({
   );
 
   const liveMatch = liveMatchIndex >= 0 ? fixtures[liveMatchIndex] : null;
+
+  // Çık-gir kurtarma: aynı aktif maçın son yerel snapshot'ını yalnızca girişte
+  // fixture'a geri koy. Runtime ekran açıkken ikinci veri kaynağı değildir.
+  useEffect(() => {
+    if (!activeMatchCenterKey || typeof setFixtures !== "function") return;
+    try {
+      const saved = JSON.parse(localStorage.getItem(ACTIVE_RUNTIME_KEY) || "null");
+      if (String(saved?.key || "") !== String(activeMatchCenterKey) || !saved?.match) return;
+      const savedMatch = saved.match;
+      const phase = savedMatch.matchPhase || "waiting";
+      if (savedMatch.played === true || !["first_half", "halftime", "second_half", "penalty"].includes(phase)) return;
+
+      setFixtures((current) => {
+        const list = Array.isArray(current) ? current : [];
+        let found = false;
+        const next = list.map((match, index) => {
+          if (getMatchCenterKey(match, index) !== String(activeMatchCenterKey)) return match;
+          found = true;
+          const cloudStamp = Date.parse(match?.runtimeUpdatedAt || match?.updatedAt || 0) || 0;
+          const localStamp = Date.parse(saved?.savedAt || 0) || 0;
+          return localStamp >= cloudStamp ? { ...match, ...savedMatch } : match;
+        });
+        return found ? next : list;
+      });
+    } catch { /* bozuk snapshot yok sayılır */ }
+  }, [activeMatchCenterKey, setFixtures]);
 
   const playedMatches = fixtures.filter(
     (match) => match.played === true
@@ -726,16 +753,26 @@ export default function MatchCenter({
   }
 
   async function updateLiveMatch(patch) {
-    if (liveMatchIndex < 0) return;
+    if (liveMatchIndex < 0 || !liveMatch) return;
+
+    const nextMatch = { ...liveMatch, ...patch };
+    const phase = nextMatch.matchPhase || "waiting";
+    if (
+      activeMatchCenterKey &&
+      nextMatch.played !== true &&
+      ["first_half", "halftime", "second_half", "penalty"].includes(phase)
+    ) {
+      localStorage.setItem(ACTIVE_RUNTIME_KEY, JSON.stringify({
+        key: activeMatchCenterKey,
+        match: nextMatch,
+        savedAt: new Date().toISOString(),
+      }));
+    }
 
     const updatedFixtures = fixtures.map((match, index) =>
-      index === liveMatchIndex
-        ? { ...match, ...patch }
-        : match
+      index === liveMatchIndex ? nextMatch : match
     );
-
     await persistFixtures(updatedFixtures);
-
   }
 
   function getPlayerById(playerId) {
@@ -975,8 +1012,16 @@ export default function MatchCenter({
       index === liveMatchIndex ? { ...match, ...patch } : match
     );
 
-    await persistFixtures(updatedFixtures);
     const updatedMatch = updatedFixtures[liveMatchIndex];
+    if (activeMatchCenterKey && updatedMatch?.played !== true) {
+      localStorage.setItem(ACTIVE_RUNTIME_KEY, JSON.stringify({
+        key: activeMatchCenterKey,
+        match: updatedMatch,
+        savedAt: new Date().toISOString(),
+      }));
+    }
+
+    await persistFixtures(updatedFixtures);
 
     // Lig maçı persistFixtures içinde skor + event + kart + timer tek payload olarak
     // yazılır. Burada ikinci, eksik bir UPDATE çalıştırmak aynı maçın yeni eventlerini
@@ -1455,6 +1500,7 @@ export default function MatchCenter({
         index === finishingIndex ? { ...match, ...finishPatch } : match
       );
       await persistFixtures(finishedFixtures);
+      localStorage.removeItem(ACTIVE_RUNTIME_KEY);
     } finally {
       finishLockRef.current = false;
       setIsFinishingMatch(false);
