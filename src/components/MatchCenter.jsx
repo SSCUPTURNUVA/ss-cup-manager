@@ -331,18 +331,16 @@ export default function MatchCenter({
     );
   }
 
-  const ACTIVE_RUNTIME_KEY = "sscup-active-match-runtime";
   const [activeMatchCenterKey, setActiveMatchCenterKey] = useState(() =>
     localStorage.getItem("sscup-match-center-active") || ""
   );
 
   useEffect(() => {
-    const handler = (event) => {
-      const key = String(event?.detail || localStorage.getItem("sscup-match-center-active") || "");
-      setActiveMatchCenterKey(key);
+    const handleActiveMatchChanged = (event) => {
+      setActiveMatchCenterKey(String(event?.detail || localStorage.getItem("sscup-match-center-active") || ""));
     };
-    window.addEventListener("sscup-match-center-active-changed", handler);
-    return () => window.removeEventListener("sscup-match-center-active-changed", handler);
+    window.addEventListener("sscup-match-center-active-changed", handleActiveMatchChanged);
+    return () => window.removeEventListener("sscup-match-center-active-changed", handleActiveMatchChanged);
   }, []);
 
   // Maç Merkezi'ne hazırlanıp sonra geri çekilmiş eski bir maç localStorage'da
@@ -376,6 +374,7 @@ export default function MatchCenter({
 
   const stalePreparedSelection = Boolean(
     activeKeyMatch &&
+      activeKeyMatch?.isKnockout !== true &&
       !activeKeyIsRunning &&
       activeKeyPhase === "waiting" &&
       earlierUnplayedMatchExists
@@ -393,21 +392,7 @@ export default function MatchCenter({
       (!stalePreparedSelection && match.played !== true && activeMatchCenterKey && getMatchCenterKey(match, index) === activeMatchCenterKey)
   );
 
-  let runtimeMatch = null;
-  if (activeMatchCenterKey) {
-    try {
-      const saved = JSON.parse(localStorage.getItem(ACTIVE_RUNTIME_KEY) || "null");
-      const phase = saved?.match?.matchPhase || "waiting";
-      if (
-        String(saved?.key || "") === String(activeMatchCenterKey) &&
-        saved?.match?.played !== true &&
-        ["first_half", "halftime", "second_half", "penalty"].includes(phase)
-      ) runtimeMatch = saved.match;
-    } catch { runtimeMatch = null; }
-  }
-
-  const fixtureLiveMatch = liveMatchIndex >= 0 ? fixtures[liveMatchIndex] : null;
-  const liveMatch = runtimeMatch || fixtureLiveMatch;
+  const liveMatch = liveMatchIndex >= 0 ? fixtures[liveMatchIndex] : null;
 
   const playedMatches = fixtures.filter(
     (match) => match.played === true
@@ -741,25 +726,16 @@ export default function MatchCenter({
   }
 
   async function updateLiveMatch(patch) {
-    if (liveMatchIndex < 0 || !liveMatch) return;
-
-    const nextMatch = { ...liveMatch, ...patch };
-    const nextPhase = nextMatch.matchPhase || "waiting";
-    if (
-      nextMatch.played !== true &&
-      ["first_half", "halftime", "second_half", "penalty"].includes(nextPhase)
-    ) {
-      localStorage.setItem(ACTIVE_RUNTIME_KEY, JSON.stringify({
-        key: activeMatchCenterKey,
-        match: nextMatch,
-        savedAt: new Date().toISOString(),
-      }));
-    }
+    if (liveMatchIndex < 0) return;
 
     const updatedFixtures = fixtures.map((match, index) =>
-      index === liveMatchIndex ? { ...match, ...patch } : match
+      index === liveMatchIndex
+        ? { ...match, ...patch }
+        : match
     );
+
     await persistFixtures(updatedFixtures);
+
   }
 
   function getPlayerById(playerId) {
@@ -1002,12 +978,8 @@ export default function MatchCenter({
     await persistFixtures(updatedFixtures);
     const updatedMatch = updatedFixtures[liveMatchIndex];
 
-    // Lig maçı persistFixtures içinde skor + event + kart + timer tek payload olarak
-    // yazılır. Burada ikinci, eksik bir UPDATE çalıştırmak aynı maçın yeni eventlerini
-    // eski/eksik veriyle yarıştırıyordu. Eleme maçı ise kendi app_state kaydını kullanır.
-    if (updatedMatch.isKnockout) {
-      await syncKnockoutStateToCloud(updatedMatch);
-    }
+    // persistFixtures eleme maçını da tam snapshot olarak zaten bir kez buluta yazar.
+    // Burada ikinci yazım yapılmaz; event ekle/sil sırasında yarış ve hayalet kayıt oluşmaz.
 
     if (EVENT_TYPES[eventType]?.countsGoal === true) {
       rebuildGoalScorers(updatedFixtures);
@@ -1483,7 +1455,6 @@ export default function MatchCenter({
         index === finishingIndex ? { ...match, ...finishPatch } : match
       );
       await persistFixtures(finishedFixtures);
-      localStorage.removeItem(ACTIVE_RUNTIME_KEY);
     } finally {
       finishLockRef.current = false;
       setIsFinishingMatch(false);
@@ -1984,7 +1955,7 @@ export default function MatchCenter({
               {eventType === "substitution" && (
                 <div style={{ width: "100%", marginTop: "8px", fontSize: "12px" }}>
                   <b>As Kadro ({selectedSubstitutionState.starters.length})</b>:{" "}
-                  {selectedSubstitutionState.starters.map((p) => `${p.shirtNumber ?? p.number ?? "-"} - ${getPlayerName(p)}`).join(", ") || "-"}
+                  {selectedSubstitutionState.starters.map(getPlayerName).join(", ") || "-"}
                   <br />
                   <b>Yedekler ({selectedSubstitutionState.bench.length})</b>:{" "}
                   {selectedSubstitutionState.bench.map((player) => {
