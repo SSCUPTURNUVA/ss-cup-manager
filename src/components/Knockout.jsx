@@ -1153,6 +1153,13 @@ export default function Knockout({
   useEffect(() => {
     if (!drawStarted || typeof setFixtures !== "function") return;
 
+    // Manuel kurada 8 slot tamamlanana kadar fixtures üretme.
+    // Böylece her seçimde App/fixtures/realtime zinciri çalışıp seçimi geri silemez.
+    const manualQuarterComplete =
+      quarterMode !== "manual" ||
+      quarter.every((match) => Boolean(match?.home) && Boolean(match?.away));
+    if (!manualQuarterComplete) return;
+
     const isRealTeam = (name) => Boolean(name) && !/(Galibi|Mağlubu|PENALTY_WAIT)/i.test(String(name));
     const makeMatch = (key, stageLabel, home, away, source) => ({
       id: `knockout:${key}:${encodeURIComponent(String(home))}::${encodeURIComponent(String(away))}`,
@@ -1213,7 +1220,7 @@ export default function Knockout({
       window.dispatchEvent(new CustomEvent("sscup-fixtures-updated", { detail: next }));
       return next;
     });
-  }, [drawStarted, quarter, semi, finalMatch, thirdPlace, semiTeams[0].home, semiTeams[0].away, semiTeams[1].home, semiTeams[1].away, semiWinners[0], semiWinners[1], semiLosers[0], semiLosers[1], setFixtures]);
+  }, [drawStarted, quarterMode, quarter, semi, finalMatch, thirdPlace, semiTeams[0].home, semiTeams[0].away, semiTeams[1].home, semiTeams[1].away, semiWinners[0], semiWinners[1], semiLosers[0], semiLosers[1], setFixtures]);
 
   const champion = getWinner(semiWinners[0], semiWinners[1], finalMatch);
   const thirdPlaceWinner = getWinner(semiLosers[0], semiLosers[1], thirdPlace);
