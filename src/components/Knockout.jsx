@@ -1496,19 +1496,27 @@ export default function Knockout({
       )}
 
       {quarterMode === "manual" && drawStarted && topEight.length >= 8 && (
-        <div style={{ marginTop: "20px", padding: "18px", borderRadius: "16px", background: "#111", color: "white" }}>
+        <div style={{ marginTop: "20px", padding: "14px", borderRadius: "16px", background: "#111", color: "white", width:"100%", maxWidth:"100%", boxSizing:"border-box", overflow:"hidden" }}>
           <h3 style={{ marginTop: 0 }}>✍️ Manuel Çeyrek Final Kurası</h3>
           <p style={{ opacity: .8 }}>Önce ÇF1-ÇF4 ilk takımlarını, sonra rakiplerini seçebilirsin. Seçilen takım diğer listelerden otomatik düşer.</p>
           {[0,1,2,3].map((i) => {
             const used = new Set(quarter.flatMap((m, idx) => idx === i ? [] : [m.home, m.away]).filter(Boolean));
             const options = topEight.map(t => t.team).filter(Boolean);
-            return <div key={`manual-${i}`} style={{ display:"grid", gridTemplateColumns:"120px 1fr 1fr", gap:"10px", marginBottom:"10px", alignItems:"center" }}>
-              <b>ÇF{i+1}</b>
-              <select value={quarter[i]?.home || ""} onChange={(e)=>setManualQuarterTeam(i,"home",e.target.value)}>
+            return <div key={`manual-${i}`} style={{ display:"grid", gridTemplateColumns:"minmax(0,1fr) minmax(0,1fr)", gap:"8px", marginBottom:"14px", alignItems:"center", width:"100%", maxWidth:"100%", minWidth:0 }}>
+              <b style={{ gridColumn:"1 / -1", fontSize:"15px", marginBottom:"-2px" }}>ÇF{i+1}</b>
+              <select
+                value={quarter[i]?.home || ""}
+                onChange={(e)=>setManualQuarterTeam(i,"home",e.target.value)}
+                style={{ width:"100%", minWidth:0, maxWidth:"100%", fontSize:"14px", padding:"10px 8px" }}
+              >
                 <option value="">İlk takım</option>
                 {options.filter(t => !used.has(t) && t !== quarter[i]?.away).map(t => <option key={`h-${i}-${t}`} value={t}>{t}</option>)}
               </select>
-              <select value={quarter[i]?.away || ""} onChange={(e)=>setManualQuarterTeam(i,"away",e.target.value)}>
+              <select
+                value={quarter[i]?.away || ""}
+                onChange={(e)=>setManualQuarterTeam(i,"away",e.target.value)}
+                style={{ width:"100%", minWidth:0, maxWidth:"100%", fontSize:"14px", padding:"10px 8px" }}
+              >
                 <option value="">Rakip</option>
                 {options.filter(t => !used.has(t) && t !== quarter[i]?.home).map(t => <option key={`a-${i}-${t}`} value={t}>{t}</option>)}
               </select>
