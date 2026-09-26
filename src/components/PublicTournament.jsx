@@ -347,7 +347,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         supabase.from("fixtures").select("*").order("id"),
         supabase.from("app_state")
           .select("id,value,updated_at")
-          .in("id", ["squads", "knockout", "active_fixture_ids", "settings", "fixtures_snapshot", "public_match_center"]),
+          .in("id", ["squads", "knockout", "knockout_match_center_v1", "active_fixture_ids", "settings", "fixtures_snapshot", "public_match_center"]),
         fetchMatchEventRows(),
       ]);
 
@@ -433,6 +433,46 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         field: m.field || m.pitch || "Saha 1",
         cloudUpdatedAt: m.updated_at || m.updatedAt || cloudUpdatedAt,
       }));
+      // Eleme Maç Merkezi bağımsız tutulduğu için canlı ekran aktif eleme maçını
+      // doğrudan onun kendi app_state kaydından da okur. Böylece knockout aynası
+      // gecikse bile gol/skor/olay değişikliği canlı ekrana anında düşer.
+      const knockoutCenterRow = stateById.get("knockout_match_center_v1");
+      const activeKnockout = knockoutCenterRow?.value?.activeMatch;
+      if (activeKnockout?.id && activeKnockout?.home && activeKnockout?.away) {
+        // Yeni bağımsız Eleme Maç Merkezi quarter-1..4 / semi-1..2 kullanıyor.
+        // Canlı eleme ağacı ise quarter-0..3 / semi-0..1 anahtarlarıyla çalışıyor.
+        // Aynı maçı iki farklı slot sanmaması için burada yalnız CANLI görünüm anahtarını normalize et.
+        const rawActiveKey = String(activeKnockout.knockoutKey || "");
+        const quarterKeyMatch = rawActiveKey.match(/^quarter-(\d+)$/);
+        const semiKeyMatch = rawActiveKey.match(/^semi-(\d+)$/);
+        const publicKnockoutKey = quarterKeyMatch
+          ? `quarter-${Math.max(0, Number(quarterKeyMatch[1]) - 1)}`
+          : semiKeyMatch
+            ? `semi-${Math.max(0, Number(semiKeyMatch[1]) - 1)}`
+            : rawActiveKey;
+        const activeMapped = {
+          ...activeKnockout,
+          knockoutKey: publicKnockoutKey,
+          isKnockout: true,
+          played: activeKnockout.played === true,
+          live: activeKnockout.live === true && activeKnockout.played !== true && activeKnockout.matchPhase !== "completed" && activeKnockout.matchPhase !== "waiting",
+          homeScore: Number(activeKnockout.homeScore || 0),
+          awayScore: Number(activeKnockout.awayScore || 0),
+          homePenalties: activeKnockout.homePenalties ?? activeKnockout.homePen ?? "",
+          awayPenalties: activeKnockout.awayPenalties ?? activeKnockout.awayPen ?? "",
+          events: Array.isArray(activeKnockout.events) ? activeKnockout.events : [],
+          cloudUpdatedAt: knockoutCenterRow?.updated_at || activeKnockout.updatedAt || "",
+        };
+        const activeId = String(activeMapped.id);
+        const activeKey = String(activeMapped.knockoutKey || "");
+        const index = stagedKnockout.findIndex((m) =>
+          String(m?.id || "") === activeId ||
+          (activeKey && String(m?.knockoutKey || "") === activeKey)
+        );
+        if (index >= 0) stagedKnockout[index] = { ...stagedKnockout[index], ...activeMapped };
+        else stagedKnockout.push(activeMapped);
+      }
+
       stagedKnockout = applyMatchEventRowsToFixtures(stagedKnockout, eventRows);
       setRemoteKnockout(stagedKnockout);
 
@@ -474,10 +514,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
   useEffect(() => {
     refresh();
-    // Egress koruması: Realtime değişiklikleri zaten anında refresh tetikliyor.
-    // Eski 1 sn polling her açık telefonda tüm fikstür/app_state verisini saniyede bir
-    // indiriyordu. 30 sn fallback, Realtime koparsa ekranın kendini toparlaması içindir.
-    const poll = window.setInterval(refresh, 30000);
+    // Eleme canlı maçında Realtime/Broadcast kaçırılırsa bile açık canlı ekran
+    // en geç 1 saniye içinde Supabase'deki güncel skor/olay kaydını yeniden okur.
+    // Böylece gol ekleme ve geri alma için çık-gir/F5 gerekmez.
+    const poll = window.setInterval(refresh, 1000);
 
     const onVisible = () => {
       if (document.visibilityState === "visible") refresh();
@@ -495,6 +535,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       .on("postgres_changes", { event: "*", schema: "public", table: "fixtures" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.squads" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout_match_center_v1" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.active_fixture_ids" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.settings" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.fixtures_snapshot" }, refresh)
@@ -502,6 +543,22 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state" }, (payload) => {
         const id = String(payload?.new?.id || payload?.old?.id || "");
         if (id.startsWith(MATCH_EVENT_PREFIX)) refresh();
+      })
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") refresh();
+      });
+
+    // Eleme Maç Merkezi ayrı tutulduğu için ayrıca Broadcast sinyali dinlenir.
+    // Bu, app_state tablosunda postgres_changes yayını kapalı olsa bile canlı
+    // sayfanın açıkken anında yeniden okuma yapmasını sağlar.
+    const knockoutBroadcast = supabase
+      .channel("sscup-knockout-live-broadcast")
+      .on("broadcast", { event: "knockout_changed" }, () => {
+        // İlk okuma anlık güncellemeyi sağlar. Olay geri alma gibi aynı anda
+        // Supabase yazısı tamamlanan işlemlerde kısa ikinci okuma, eski satırın
+        // ekranda kalmasını engeller.
+        refresh();
+        window.setTimeout(() => refresh(), 250);
       })
       .subscribe((status) => {
         if (status === "SUBSCRIBED") refresh();
@@ -515,8 +572,81 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       window.removeEventListener("online", onOnline);
       window.removeEventListener("pageshow", onPageShow);
       supabase.removeChannel(channel);
+      supabase.removeChannel(knockoutBroadcast);
     };
   }, [refresh]);
+
+  // Eleme canlı skoru için ağır genel refresh zincirinden bağımsız hızlı okuma.
+  // Genel refresh; fixtures + app_state + event satırlarını birlikte beklediği için
+  // yavaş bir istek bütün 1 sn polling çağrılarını kilitleyebiliyordu. Burada yalnız
+  // aktif Eleme Maç Merkezi satırını okur ve ekrandaki ilgili eleme slotunu güncelleriz.
+  useEffect(() => {
+    let disposed = false;
+    let inFlight = false;
+
+    const refreshActiveKnockoutFast = async () => {
+      if (disposed || inFlight) return;
+      inFlight = true;
+      try {
+        const { data, error } = await supabase
+          .from("app_state")
+          .select("value,updated_at")
+          .eq("id", "knockout_match_center_v1")
+          .maybeSingle();
+        if (error) throw error;
+        if (disposed) return;
+
+        const active = data?.value?.activeMatch;
+        if (!active?.id || !active?.home || !active?.away) return;
+
+        const rawKey = String(active.knockoutKey || "");
+        const quarterMatch = rawKey.match(/^quarter-(\d+)$/);
+        const semiMatch = rawKey.match(/^semi-(\d+)$/);
+        const publicKey = quarterMatch
+          ? `quarter-${Math.max(0, Number(quarterMatch[1]) - 1)}`
+          : semiMatch
+            ? `semi-${Math.max(0, Number(semiMatch[1]) - 1)}`
+            : rawKey;
+
+        const mapped = {
+          ...active,
+          knockoutKey: publicKey,
+          isKnockout: true,
+          played: active.played === true,
+          live: active.live === true && active.played !== true && active.matchPhase !== "completed" && active.matchPhase !== "waiting",
+          homeScore: Number(active.homeScore || 0),
+          awayScore: Number(active.awayScore || 0),
+          homePenalties: active.homePenalties ?? active.homePen ?? "",
+          awayPenalties: active.awayPenalties ?? active.awayPen ?? "",
+          events: Array.isArray(active.events) ? active.events : [],
+          cloudUpdatedAt: data?.updated_at || active.updatedAt || "",
+        };
+
+        setRemoteKnockout((current) => {
+          const next = Array.isArray(current) ? [...current] : [];
+          const id = String(mapped.id);
+          const key = String(mapped.knockoutKey || "");
+          const index = next.findIndex((m) =>
+            String(m?.id || "") === id || (key && String(m?.knockoutKey || "") === key)
+          );
+          if (index >= 0) next[index] = { ...next[index], ...mapped };
+          else next.push(mapped);
+          return next;
+        });
+      } catch (error) {
+        console.error("Eleme canlı hızlı yenileme hatası:", error);
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    refreshActiveKnockoutFast();
+    const timer = window.setInterval(refreshActiveKnockoutFast, 1000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);

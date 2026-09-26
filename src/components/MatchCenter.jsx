@@ -185,6 +185,9 @@ export default function MatchCenter({
   standings = [],
   goalScorers = [],
   setFixtures,
+  matchRulesOverride = null,
+  isolatedKnockout = false,
+  activeStorageKey = "sscup-match-center-active",
 }) {
   const [currentTime, setCurrentTime] = useState(Date.now());
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -194,7 +197,7 @@ export default function MatchCenter({
   const finishLockRef = useRef(false);
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
   const [secondPlayerId, setSecondPlayerId] = useState("");
-  const [matchRules, setMatchRules] = useState(readMatchRules);
+  const [matchRules, setMatchRules] = useState(() => matchRulesOverride || readMatchRules());
 
   // Penaltı Atışları Yönetimi
   const [penaltySide, setPenaltySide] = useState(() => readUiPreference("sscup-penalty-side", "home"));
@@ -232,11 +235,15 @@ export default function MatchCenter({
 
   useEffect(() => {
     function refreshRules() {
-      setMatchRules(readMatchRules());
+      if (!matchRulesOverride) setMatchRules(readMatchRules());
     }
     window.addEventListener("sscup-settings-updated", refreshRules);
     return () => window.removeEventListener("sscup-settings-updated", refreshRules);
-  }, []);
+  }, [matchRulesOverride]);
+
+  useEffect(() => {
+    if (matchRulesOverride) setMatchRules(matchRulesOverride);
+  }, [matchRulesOverride]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -333,7 +340,7 @@ export default function MatchCenter({
 
   const ACTIVE_RUNTIME_KEY = "sscup-active-match-runtime";
   const [activeMatchCenterKey, setActiveMatchCenterKey] = useState(() =>
-    localStorage.getItem("sscup-match-center-active") || ""
+    localStorage.getItem(activeStorageKey) || ""
   );
 
   useEffect(() => {
@@ -383,7 +390,7 @@ export default function MatchCenter({
 
   useEffect(() => {
     if (!stalePreparedSelection) return;
-    localStorage.removeItem("sscup-match-center-active");
+    localStorage.removeItem(activeStorageKey);
     setActiveMatchCenterKey("");
   }, [stalePreparedSelection, activeMatchCenterKey]);
 
@@ -705,6 +712,10 @@ export default function MatchCenter({
     if (typeof setFixtures === "function") {
       setFixtures(persistedFixtures);
     }
+
+    // Ayrı Eleme Maç Merkezi kendi Supabase kaydını üst component üzerinden yazar.
+    // Lig fixtures/localStorage/senkronuna kesinlikle dokunmaz.
+    if (isolatedKnockout) return;
 
     // Merkezi setter zaten kuyruğa alır; burada da maç olayı için gönderimi
     // çekirdek fixtures yazılarından önce başlat.
@@ -1212,7 +1223,7 @@ export default function MatchCenter({
     const nextIndex = fixtures.findIndex((match) => match === nextMatch || match?.id === nextMatch?.id);
     if (nextIndex >= 0) {
       const nextActiveKey = getMatchCenterKey(nextMatch, nextIndex);
-      localStorage.setItem("sscup-match-center-active", nextActiveKey);
+      localStorage.setItem(activeStorageKey, nextActiveKey);
       // Saha kenarında seçim Supabase/Realtime cevabını beklemeden anında ekrana yansısın.
       setActiveMatchCenterKey(nextActiveKey);
     }
@@ -1490,7 +1501,7 @@ export default function MatchCenter({
       // Maç biter bitmez aktif Maç Merkezi seçimini ÖNCE temizle. Böylece kullanıcı
       // Supabase cevabını beklemeden fikstüre geçip sıradaki maçı seçse bile biten maç
       // yeniden Maç Merkezi'ne dönemez.
-      localStorage.removeItem("sscup-match-center-active");
+      localStorage.removeItem(activeStorageKey);
       setActiveMatchCenterKey("");
 
       // Bitiş durumunu tek işlemde doğrudan fixtures'a yaz. persistFixtures önce React

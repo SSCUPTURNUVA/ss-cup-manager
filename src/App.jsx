@@ -4,13 +4,13 @@ import DailySchedule from "./components/DailySchedule";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
 import MatchCenter from "./components/MatchCenter";
+import KnockoutMatchCenter from "./components/KnockoutMatchCenter";
 import TeamManager from "./components/TeamManager";
 import SquadManager from "./components/SquadManager";
 import DrawCeremony from "./components/DrawCeremony";
 import DrawManager from "./components/DrawManager";
 import Fixture from "./components/Fixture";
 import Standings from "./components/Standings";
-import Knockout from "./components/Knockout";
 import GoalScorers from "./components/GoalScorers";
 import TournamentFormat from "./components/TournamentFormat";
 import GroupFixture from "./components/GroupFixture";
@@ -22,6 +22,7 @@ import Statistics from "./components/Statistics";
 import TeamContacts from "./components/TeamContacts";
 import DisciplineBoard from "./components/DisciplineBoard";
 import BackupManager from "./components/BackupManager";
+import KnockoutDraw from "./components/KnockoutDraw";
 import { sortFixturesBySchedule } from "./utils/fixtureOrder";
 import { MATCH_EVENT_PREFIX, applyMatchEventRowsToFixtures, fetchMatchEventRows, syncMatchEventChanges } from "./utils/matchEventSync";
 import { flushPendingFixtureSync, syncLeagueFixtureWithRetry } from "./utils/pendingFixtureSync";
@@ -38,11 +39,12 @@ const mobileMenuItems = [
 const menuItems = [
   { id: "home", icon: "🏠", label: "Ana Sayfa" },
   { id: "matchcenter", icon: "📺", label: "Maç Merkezi" },
+  { id: "knockout-matchcenter", icon: "🏆", label: "Eleme Maç Merkezi", format: "league" },
   { id: "fixture", icon: "📅", label: "Lig Fikstürü", format: "league" },
   { id: "group-fixture", icon: "🗓️", label: "Grup Fikstürü", format: "groups" },
   { id: "standings", icon: "📊", label: "Puan Durumu", format: "league" },
+  { id: "knockout", icon: "🏆", label: "Eleme Turu", format: "league" },
   { id: "group-standings", icon: "📊", label: "Grup Puan Durumu", format: "groups" },
-  { id: "knockout", icon: "🏆", label: "Eleme Turu" },
   { id: "teams", icon: "👥", label: "Takımlar" },
   { id: "teamcontacts", icon: "📲", label: "Takım Bilgileri" },
   { id: "draw", icon: "🎲", label: "Lig Kurası", format: "league" },
@@ -1051,21 +1053,17 @@ export default function App() {
           />
         );
 
+      case "knockout-matchcenter":
+        return <KnockoutMatchCenter />;
+
       case "standings":
         return <Standings teams={teams} fixtures={fixtures} />;
 
+      case "knockout":
+        return <KnockoutDraw standings={standings} fixtures={fixtures} setFixtures={setFixtures} onOpenKnockoutMatchCenter={() => changePage("knockout-matchcenter")} />;
+
       case "scorers":
         return <GoalScorers goalScorers={goalScorers} />;
-
-      case "knockout":
-        return (
-          <Knockout
-            teams={teams}
-            fixtures={fixtures}
-            setFixtures={setFixtures}
-            onOpenMatchCenter={() => changePage("matchcenter")}
-          />
-        );
 
       case "announcements":
         return (
