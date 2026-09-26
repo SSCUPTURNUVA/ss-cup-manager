@@ -492,3 +492,37 @@
     overscroll-behavior:contain !important;
   }
 }
+
+/* V29: MOBIL - Maç Merkezi modalının TAMAMI kayar; arka canlı sayfa sabit kalır. */
+@media (max-width: 680px) {
+  .public-modal-backdrop {
+    overflow: hidden !important;
+    overscroll-behavior: none !important;
+    touch-action: none;
+    align-items: center;
+  }
+
+  .public-match-modal {
+    display: block !important;
+    width: 100% !important;
+    max-height: calc(100dvh - 28px) !important;
+    height: auto !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    overscroll-behavior-y: contain !important;
+    -webkit-overflow-scrolling: touch !important;
+    touch-action: pan-y !important;
+  }
+
+  /* Mobilde olay listesi ayrı bir scroll alanı değildir; modal ile beraber akar. */
+  .public-modal-events {
+    display: flex !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    flex: none !important;
+    overflow: visible !important;
+    touch-action: auto !important;
+    overscroll-behavior: auto !important;
+  }
+}
