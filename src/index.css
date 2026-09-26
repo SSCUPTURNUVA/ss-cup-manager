@@ -109,3 +109,36 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+
+/* SS CUP MANUEL KURA MOBIL TASMA FIX V2 */
+.manual-quarter-row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin-bottom: 10px;
+  box-sizing: border-box;
+}
+.manual-quarter-select {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+@media (max-width: 600px) {
+  .manual-quarter-row {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    margin-bottom: 14px;
+  }
+  .manual-quarter-label {
+    grid-column: 1 / -1;
+  }
+  .manual-quarter-select {
+    font-size: 14px;
+    padding: 10px 6px;
+  }
+}
