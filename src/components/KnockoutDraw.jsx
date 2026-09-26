@@ -29,11 +29,6 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
   const [knockoutSchedule, setKnockoutSchedule] = useState({});
   const drawLoadedRef = useRef(false);
 
-  const scheduleSlots = [
-    ["quarter-0", "ÇF 1"], ["quarter-1", "ÇF 2"], ["quarter-2", "ÇF 3"], ["quarter-3", "ÇF 4"],
-    ["semi-0", "YF 1"], ["semi-1", "YF 2"], ["third-place-0", "3.'LÜK"], ["final-0", "FİNAL"],
-  ];
-
   useEffect(() => {
     let mounted = true;
     const loadSchedule = async () => {
@@ -417,20 +412,6 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
         {mode === "bag" && <div className="ko-action"><p>İlk 8 takım tek torbada karıştırılır ve her takım yalnızca bir kez çekilir.</p><button type="button" disabled={topEight.length !== 8} onClick={makeBagDraw}>🎲 KURAYI ÇEK</button></div>}
         {mode === "seeded" && <div className="ko-action"><p>Lig sıralamasına göre otomatik eşleşme: <b>1–8, 2–7, 3–6, 4–5</b>.</p><button type="button" disabled={topEight.length !== 8} onClick={makeSeededDraw}>🏅 SIRALAMAYA GÖRE EŞLEŞTİR</button></div>}
       </section>
-
-      <section className="ko-card ko-schedule-card">
-        <div className="ko-section-title"><div><span>04</span><h3>Eleme Maç Programı</h3></div><small>Tarih ve saati manuel gir</small></div>
-        <div className="ko-schedule-grid">
-          {scheduleSlots.map(([key, label]) => (
-            <div className="ko-schedule-row" key={key}>
-              <strong>{label}</strong>
-              <label><span>TARİH</span><input type="date" value={knockoutSchedule?.[key]?.date || ""} onChange={(e) => updateKnockoutSchedule(key, "date", e.target.value)} /></label>
-              <label><span>SAAT</span><input type="time" value={knockoutSchedule?.[key]?.time || ""} onChange={(e) => updateKnockoutSchedule(key, "time", e.target.value)} /></label>
-            </div>
-          ))}
-        </div>
-      </section>
-
       <section className="ko-card ko-bracket-card">
         <div className="ko-section-title"><div><span>05</span><h3>1/8 Final Eşleşmeleri</h3></div>{complete && <small className="done">KURA TAMAMLANDI ✓</small>}</div>
         <div className="ko-pairs">
@@ -448,7 +429,11 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
               <div className="pair-vs">{completed ? "-" : "VS"}</div>
               <div className="team"><span>{away || "Rakip bekleniyor"}</span>{completed && <b>{Number(playedMatch?.awayScore || 0)}</b>}</div>
               {completed && <div className="ko-result-note">✓ TAMAMLANDI{penaltyText}</div>}
-              {pair && !completed && <button type="button" className="ko-mc-button" onClick={() => sendQuarterToMatchCenter(index)}>🏟️ Maç Merkezine Al</button>}
+              <div className="ko-inline-schedule">
+  <label><span>📅 TARİH</span><input type="date" value={knockoutSchedule?.[`quarter-${index}`]?.date || ""} onChange={(e) => updateKnockoutSchedule(`quarter-${index}`, "date", e.target.value)} /></label>
+  <label><span>🕘 SAAT</span><input type="time" value={knockoutSchedule?.[`quarter-${index}`]?.time || ""} onChange={(e) => updateKnockoutSchedule(`quarter-${index}`, "time", e.target.value)} /></label>
+</div>
+{pair && !completed && <button type="button" className="ko-mc-button" onClick={() => sendQuarterToMatchCenter(index)}>🏟️ Maç Merkezine Al</button>}
             </div>;
           })}
         </div>
@@ -459,19 +444,20 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
         <div className="ko-pairs">
           {[0,1].map((i) => { const m=semiCloud[i]; return <div className={m?.home && m?.away ? "ko-pair filled" : "ko-pair"} key={`semi-${i}`}>
             <div className="match-no">YARI FİNAL {i+1}</div><div className="team"><span>{m?.home || (i===0 ? "ÇF1 Kazananı" : "ÇF2 Kazananı")}</span></div><div className="pair-vs">VS</div><div className="team"><span>{m?.away || (i===0 ? "ÇF3 Kazananı" : "ÇF4 Kazananı")}</span></div>
-            {m?.home && m?.away && m?.played !== true && <button type="button" className="ko-mc-button" onClick={() => sendExistingToMatchCenter(m, `semi-${i+1}`, `Yarı Final ${i+1}`, `semi-${i}`)}>🏟️ Maç Merkezine Al</button>}
+            <div className="ko-inline-schedule"><label><span>📅 TARİH</span><input type="date" value={knockoutSchedule?.[`semi-${i}`]?.date || ""} onChange={(e) => updateKnockoutSchedule(`semi-${i}`, "date", e.target.value)} /></label><label><span>🕘 SAAT</span><input type="time" value={knockoutSchedule?.[`semi-${i}`]?.time || ""} onChange={(e) => updateKnockoutSchedule(`semi-${i}`, "time", e.target.value)} /></label></div>
+{m?.home && m?.away && m?.played !== true && <button type="button" className="ko-mc-button" onClick={() => sendExistingToMatchCenter(m, `semi-${i+1}`, `Yarı Final ${i+1}`, `semi-${i}`)}>🏟️ Maç Merkezine Al</button>}
           </div>; })}
         </div>
       </section>
 
       <section className="ko-card ko-road-card">
         <div className="ko-section-title"><div><span>06</span><h3>Üçüncülük Maçı</h3></div></div>
-        <div className="ko-pairs"><div className={thirdCloud?.home && thirdCloud?.away ? "ko-pair filled" : "ko-pair"}><div className="match-no">3.'LÜK</div><div className="team"><span>{thirdCloud?.home || "YF1 Kaybedeni"}</span></div><div className="pair-vs">VS</div><div className="team"><span>{thirdCloud?.away || "YF2 Kaybedeni"}</span></div>{thirdCloud?.home && thirdCloud?.away && thirdCloud?.played !== true && <button type="button" className="ko-mc-button" onClick={() => sendExistingToMatchCenter(thirdCloud, "third-place-0", "3.'lük Maçı", "third-place-0")}>🏟️ Maç Merkezine Al</button>}</div></div>
+        <div className="ko-pairs"><div className={thirdCloud?.home && thirdCloud?.away ? "ko-pair filled" : "ko-pair"}><div className="match-no">3.'LÜK</div><div className="team"><span>{thirdCloud?.home || "YF1 Kaybedeni"}</span></div><div className="pair-vs">VS</div><div className="team"><span>{thirdCloud?.away || "YF2 Kaybedeni"}</span></div><div className="ko-inline-schedule"><label><span>📅 TARİH</span><input type="date" value={knockoutSchedule?.["third-place-0"]?.date || ""} onChange={(e) => updateKnockoutSchedule("third-place-0", "date", e.target.value)} /></label><label><span>🕘 SAAT</span><input type="time" value={knockoutSchedule?.["third-place-0"]?.time || ""} onChange={(e) => updateKnockoutSchedule("third-place-0", "time", e.target.value)} /></label></div>{thirdCloud?.home && thirdCloud?.away && thirdCloud?.played !== true && <button type="button" className="ko-mc-button" onClick={() => sendExistingToMatchCenter(thirdCloud, "third-place-0", "3.'lük Maçı", "third-place-0")}>🏟️ Maç Merkezine Al</button>}</div></div>
       </section>
 
       <section className="ko-card ko-road-card">
         <div className="ko-section-title"><div><span>07</span><h3>Final</h3></div></div>
-        <div className="ko-pairs"><div className={finalCloud?.home && finalCloud?.away ? "ko-pair filled" : "ko-pair"}><div className="match-no">FİNAL</div><div className="team"><span>{finalCloud?.home || "YF1 Kazananı"}</span></div><div className="pair-vs">VS</div><div className="team"><span>{finalCloud?.away || "YF2 Kazananı"}</span></div>{finalCloud?.home && finalCloud?.away && finalCloud?.played !== true && <button type="button" className="ko-mc-button" onClick={() => sendExistingToMatchCenter(finalCloud, "final-0", "Final", "final-0")}>🏟️ Maç Merkezine Al</button>}</div></div>
+        <div className="ko-pairs"><div className={finalCloud?.home && finalCloud?.away ? "ko-pair filled" : "ko-pair"}><div className="match-no">FİNAL</div><div className="team"><span>{finalCloud?.home || "YF1 Kazananı"}</span></div><div className="pair-vs">VS</div><div className="team"><span>{finalCloud?.away || "YF2 Kazananı"}</span></div><div className="ko-inline-schedule"><label><span>📅 TARİH</span><input type="date" value={knockoutSchedule?.["final-0"]?.date || ""} onChange={(e) => updateKnockoutSchedule("final-0", "date", e.target.value)} /></label><label><span>🕘 SAAT</span><input type="time" value={knockoutSchedule?.["final-0"]?.time || ""} onChange={(e) => updateKnockoutSchedule("final-0", "time", e.target.value)} /></label></div>{finalCloud?.home && finalCloud?.away && finalCloud?.played !== true && <button type="button" className="ko-mc-button" onClick={() => sendExistingToMatchCenter(finalCloud, "final-0", "Final", "final-0")}>🏟️ Maç Merkezine Al</button>}</div></div>
       </section>
 
       <section className="ko-card ko-road-card">
@@ -524,4 +510,5 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
     </div>
   );
 }
+
 

@@ -24,3 +24,10 @@
 .ko-schedule-row input:focus{outline:none;border-color:#f4c400}
 @media(max-width:700px){.ko-schedule-grid{grid-template-columns:1fr}.ko-schedule-row{grid-template-columns:62px 1fr 1fr}}
 @media(max-width:430px){.ko-schedule-row{grid-template-columns:1fr 1fr}.ko-schedule-row>strong{grid-column:1/-1}}
+
+/* V31B: tarih/saat ilgili mac kartinin icinde */
+.ko-inline-schedule{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0 8px;padding-top:9px;border-top:1px solid rgba(244,196,0,.16)}
+.ko-inline-schedule label span{display:block;margin:0 0 4px;color:#9a9a9a;font-size:9px;font-weight:900;letter-spacing:.7px}
+.ko-inline-schedule input{width:100%;box-sizing:border-box;height:36px;padding:0 8px;border:1px solid #343434;border-radius:8px;background:#0b1628;color:#fff;color-scheme:dark;font-size:12px}
+.ko-inline-schedule input:focus{outline:none;border-color:#f4c400}
+@media(max-width:430px){.ko-inline-schedule{gap:6px}.ko-inline-schedule input{height:34px;font-size:11px}}
