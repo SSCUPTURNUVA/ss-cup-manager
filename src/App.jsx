@@ -945,6 +945,17 @@ export default function App() {
     [teams, fixtures]
   );
 
+  // Eleme ekranından Maç Merkezi'ne geçiş component render sırasına bağlı kalmasın.
+  useEffect(() => {
+    const openMatchCenter = () => {
+      setActivePage("matchcenter");
+      setMobileMenuOpen(false);
+      window.setTimeout(() => window.scrollTo(0, 0), 0);
+    };
+    window.addEventListener("sscup-open-match-center", openMatchCenter);
+    return () => window.removeEventListener("sscup-open-match-center", openMatchCenter);
+  }, []);
+
   function changePage(pageId) {
     setActivePage(pageId);
     setMobileMenuOpen(false);

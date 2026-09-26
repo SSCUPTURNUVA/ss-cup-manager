@@ -1086,6 +1086,8 @@ export default function Knockout({
       })
     );
 
+    // Navigasyon callback kaçırılırsa bile App bu olayı yakalar.
+    window.dispatchEvent(new CustomEvent("sscup-open-match-center", { detail: stableId }));
     if (typeof onOpenMatchCenter === "function") {
       onOpenMatchCenter();
     }

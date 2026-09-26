@@ -571,6 +571,49 @@ export default function MatchCenter({
     ? getVisibleElapsedSeconds(liveMatch)
     : 0;
 
+  // Çalışan sayaç sadece React render'ında kalmaz. Her saniye runtime checkpoint
+  // alınır; sekmeden çıkıp geri gelince süre kaldığı yerden devam eder.
+  useEffect(() => {
+    if (!liveMatch || !activeMatchCenterKey) return;
+    const phase = liveMatch?.matchPhase || "waiting";
+    if (liveMatch?.played === true || !["first_half", "halftime", "second_half", "penalty"].includes(phase)) return;
+
+    const checkpoint = () => {
+      const visible = getVisibleElapsedSeconds(liveMatch);
+      const snapshot = {
+        ...liveMatch,
+        live: true,
+        matchPhase: phase,
+        elapsedSeconds: visible,
+        timerRunning: liveMatch.timerRunning === true,
+        // elapsedSeconds checkpoint anına taşındığı için başlangıç da checkpoint anına alınır.
+        timerStartedAt: liveMatch.timerRunning === true ? Date.now() : null,
+      };
+      localStorage.setItem(ACTIVE_RUNTIME_KEY, JSON.stringify({
+        key: activeMatchCenterKey,
+        savedAt: new Date().toISOString(),
+        match: snapshot,
+      }));
+    };
+
+    checkpoint();
+    const interval = window.setInterval(checkpoint, 1000);
+    return () => {
+      checkpoint();
+      window.clearInterval(interval);
+    };
+  }, [
+    activeMatchCenterKey,
+    liveMatch?.id,
+    liveMatch?.matchPhase,
+    liveMatch?.timerRunning,
+    liveMatch?.timerStartedAt,
+    liveMatch?.elapsedSeconds,
+    liveMatch?.homeScore,
+    liveMatch?.awayScore,
+    liveMatch?.events,
+  ]);
+
   const matchStatus = getMatchStatus(liveMatch);
   const matchPhase = liveMatch?.matchPhase || "waiting";
   // Sayaç ileri sayar; süre dolunca otomatik devre/maç bitmez.
