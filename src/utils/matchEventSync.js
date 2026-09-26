@@ -43,15 +43,6 @@ export function applyMatchEventRowsToFixtures(fixtures, rows) {
     const changes = grouped.get(matchKey);
     if (!changes?.length) return match;
 
-    // Eski app_state match_event satırları yeni/waiting maça geri enjekte edilmesin.
-    // Bu koruma takım adına özel değildir. Bir maç gerçekten başlamadan (veya bitmeden)
-    // canlı olay kaynağı yalnız fixture'ın kendi temiz events alanıdır.
-    const phase = match?.matchPhase || match?.match_phase || "waiting";
-    const matchHasActuallyStarted =
-      match?.played === true ||
-      (match?.live === true && ["first_half", "halftime", "second_half", "penalty"].includes(phase));
-    if (!matchHasActuallyStarted) return match;
-
     const deleted = new Set((Array.isArray(match?.deletedEventIds) ? match.deletedEventIds : []).map(String));
     const byId = new Map();
     (Array.isArray(match?.events) ? match.events : []).forEach((event) => {

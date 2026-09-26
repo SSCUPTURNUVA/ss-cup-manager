@@ -951,18 +951,12 @@ export default function Knockout({
   }
 
   function startKnockoutMatch({ key, stageLabel, home, away, match }) {
-    if (matchCenterStartLockRef.current) return;
-    matchCenterStartLockRef.current = true;
-    window.setTimeout(() => { matchCenterStartLockRef.current = false; }, 900);
-
     if (!home || !away) {
-      matchCenterStartLockRef.current = false;
       alert("Bu maçın takımları henüz belli değil.");
       return;
     }
 
     if (typeof setFixtures !== "function") {
-      matchCenterStartLockRef.current = false;
       alert("App.jsx bağlantısı bulunamadı.");
       return;
     }
@@ -972,17 +966,15 @@ export default function Knockout({
     );
 
     if (anotherLiveMatch) {
-      matchCenterStartLockRef.current = false;
       alert(`${anotherLiveMatch.home} - ${anotherLiveMatch.away} maçı hâlâ canlı. Önce o maçı bitirin.`);
       return;
     }
 
     const existingIndex = fixtures.findIndex((item) => item.knockoutKey === key);
 
-    // Aynı ÇF/YF slotu yeni takımlarla tekrar kullanıldığında eski event/kadro kayıtları
-    // yeni maça yapışmasın. Kimlik slot + gerçek katılımcılardan oluşur.
-    const participantToken = `${encodeURIComponent(String(home))}::${encodeURIComponent(String(away))}`;
-    const stableId = `knockout:${key}:${participantToken}`;
+    // Eleme maçları fixtures tablosuna yazılmaz; app_state içinde tutulur.
+    // Bu yüzden Supabase bigint ID üretmek yerine cihazlar arasında sabit bir anahtar kullanılır.
+    const stableId = `knockout:${key}`;
 
     const baseMatch = {
       id: stableId,
@@ -1000,7 +992,8 @@ export default function Knockout({
       field: match.field || "Saha 1",
       pitch: match.field || "Saha 1",
       played: false,
-      live: true,
+      live: false,
+      matchPhase: "waiting",
       timerRunning: false,
       timerStartedAt: null,
       elapsedSeconds: 0,
@@ -1015,49 +1008,18 @@ export default function Knockout({
         ? window.confirm("Bu maç daha önce tamamlanmış. Maç Merkezi'nde yeniden açmak istiyor musunuz?")
         : true;
 
-      if (!restart) {
-        matchCenterStartLockRef.current = false;
-        return;
-      }
+      if (!restart) return;
 
-      const sameParticipants = String(existing.home || "") === String(home) && String(existing.away || "") === String(away);
       updatedFixtures = fixtures.map((item, index) =>
         index === existingIndex
-          ? (sameParticipants
-              ? (existing.played === true
-                  ? {
-                      ...baseMatch,
-                      id: stableId,
-                      events: [],
-                      goals: [],
-                      deletedEventIds: [],
-                      homeScore: 0,
-                      awayScore: 0,
-                      elapsedSeconds: 0,
-                      matchPhase: "waiting",
-                    }
-                  : {
-                      ...baseMatch,
-                      ...existing,
-                      id: stableId,
-                      home,
-                      away,
-                      knockoutKey: key,
-                      isKnockout: true,
-                      stageLabel,
-                      // DEVAM EDEN MAÇ: runtime kesinlikle sıfırlanmaz.
-                      live: existing.live === true,
-                      timerRunning: existing.timerRunning === true,
-                      timerStartedAt: existing.timerStartedAt ?? null,
-                      elapsedSeconds: Number(existing.elapsedSeconds || 0),
-                      matchPhase: existing.matchPhase || "waiting",
-                      events: Array.isArray(existing.events) ? existing.events : [],
-                      goals: Array.isArray(existing.goals) ? existing.goals : [],
-                      deletedEventIds: Array.isArray(existing.deletedEventIds) ? existing.deletedEventIds : [],
-                      homeScore: Number(existing.homeScore || 0),
-                      awayScore: Number(existing.awayScore || 0),
-                    })
-              : { ...baseMatch, goals: [], deletedEventIds: [] })
+          ? {
+              ...existing,
+              ...baseMatch,
+              id: existing.id || baseMatch.id, // Sabit eleme kimliğini koru
+              events: existing.played === true ? [] : existing.events || [],
+              homeScore: existing.played === true ? 0 : Number(existing.homeScore || 0),
+              awayScore: existing.played === true ? 0 : Number(existing.awayScore || 0),
+            }
           : item
       );
     } else {
@@ -1067,56 +1029,20 @@ export default function Knockout({
     setFixtures(updatedFixtures);
     localStorage.setItem("sscup-fixtures", JSON.stringify(updatedFixtures));
 
-    // Maç Merkezi seçimi yalnız React ekranında kalmasın. Kullanıcı başka sekmeye
-    // geçse veya yönetim ekranını yeniden açsa da bu maç, bitirilene/çıkarılana kadar seçili kalır.
+    // Maç Merkezi seçimi tek ve sabit anahtarla taşınır.
     localStorage.setItem("sscup-match-center-active", stableId);
-    // MatchCenter henüz mount değilse event'i kaçırabilir. Seçilen maçın kendisini de
-    // taşı; ilk render'da fixtures gecikse bile tek tıkta açılabilsin.
-    const selectedMatchForCenterRaw = updatedFixtures.find((item) => String(item?.id || "") === String(stableId)) || baseMatch;
-
-    // Yeni/waiting eleme maçı açılırken başka maçtan kalmış event/skor/runtime taşınamaz.
-    // Temizlik takım adına özel değildir; HER yeni eleme maçı için aynı kural geçerlidir.
-    const isFreshWaitingMatch =
-      selectedMatchForCenterRaw?.played !== true &&
-      !["first_half", "halftime", "second_half", "penalty"].includes(selectedMatchForCenterRaw?.matchPhase || "waiting");
-
-    const selectedMatchForCenter = isFreshWaitingMatch ? {
-      ...selectedMatchForCenterRaw,
-      live: false,
-      matchPhase: "waiting",
-      timerRunning: false,
-      timerStartedAt: null,
-      elapsedSeconds: 0,
-      homeScore: 0,
-      awayScore: 0,
-      homePen: "",
-      awayPen: "",
-      events: [],
-      goals: [],
-      deletedEventIds: [],
-    } : selectedMatchForCenterRaw;
-
-    // Eski runtime yalnız AYNI maç gerçekten çalışıyorsa korunur. Yeni maça geçerken
-    // önceki maçın gol/kart/skor/süresi kesin olarak taşınmaz.
+    const selectedForCenter = updatedFixtures.find((item) => String(item?.id || "") === String(stableId)) || baseMatch;
+    localStorage.setItem("sscup-match-center-pending", JSON.stringify(selectedForCenter));
+    // Başka maçtan kalan çalışma kaydı yeni maça taşınmaz.
     try {
       const oldRuntime = JSON.parse(localStorage.getItem("sscup-active-match-runtime") || "null");
-      const oldKey = String(oldRuntime?.key || "");
-      const oldPhase = oldRuntime?.match?.matchPhase || "waiting";
-      const sameRunningMatch =
-        oldKey === String(stableId) &&
-        oldRuntime?.match?.played !== true &&
-        ["first_half", "halftime", "second_half", "penalty"].includes(oldPhase);
-      if (!sameRunningMatch) localStorage.removeItem("sscup-active-match-runtime");
+      if (String(oldRuntime?.key || "") !== String(stableId)) {
+        localStorage.removeItem("sscup-active-match-runtime");
+      }
     } catch {
       localStorage.removeItem("sscup-active-match-runtime");
     }
-
-    localStorage.setItem("sscup-match-center-pending", JSON.stringify(selectedMatchForCenter));
-    // Tek basışta Maç Merkezi aynı sekmede anında seçilsin; Realtime beklenmez.
-    window.dispatchEvent(new CustomEvent("sscup-match-center-active-changed", {
-      detail: stableId,
-    }));
-    syncAppStateWithRetry("public_match_center", { matchId: stableId, updatedAt: new Date().toISOString() });
+    window.dispatchEvent(new CustomEvent("sscup-match-center-active-changed", { detail: stableId }));
 
     window.dispatchEvent(
       new CustomEvent("sscup-fixtures-updated", {
@@ -1124,8 +1050,6 @@ export default function Knockout({
       })
     );
 
-    // Navigasyon callback kaçırılırsa bile App bu olayı yakalar.
-    window.dispatchEvent(new CustomEvent("sscup-open-match-center", { detail: stableId }));
     if (typeof onOpenMatchCenter === "function") {
       onOpenMatchCenter();
     }

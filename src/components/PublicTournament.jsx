@@ -49,19 +49,16 @@ function getEvents(match) {
   const deletedSet = new Set((Array.isArray(match?.deletedEventIds) ? match.deletedEventIds : []).map(String));
   const events = (Array.isArray(match?.events) ? match.events : [])
     .filter((event) => !deletedSet.has(String(event?.id ?? "")));
-
-  // Canlı/bekleyen maçta events tek otoritedir; legacy goals hayalet gol üretmesin.
-  if (match?.played !== true) {
-    return events.map(normalizeEvent).sort((a, b) => safeNumber(a.minute) - safeNumber(b.minute));
-  }
-
   const directGoals = (Array.isArray(match?.goals) ? match.goals : [])
     .filter((goal) => !deletedSet.has(String(goal?.id ?? "")));
-  const eventIds = new Set(events.map((event) => String(event?.id ?? "")).filter(Boolean));
+  const eventIds = new Set(events.map((event) => event?.id).filter(Boolean));
   const legacyGoals = directGoals
-    .filter((goal) => !eventIds.has(String(goal?.id ?? "")))
+    .filter((goal) => !eventIds.has(goal?.id))
     .map((goal) => ({ ...goal, type: goal?.type || "goal" }));
-  return [...events, ...legacyGoals].map(normalizeEvent).sort((a, b) => safeNumber(a.minute) - safeNumber(b.minute));
+
+  return [...events, ...legacyGoals]
+    .map(normalizeEvent)
+    .sort((a, b) => safeNumber(a.minute) - safeNumber(b.minute));
 }
 
 function mapCloudFixture(item) {
@@ -96,8 +93,6 @@ function mapCloudFixture(item) {
     homePenalties: item.home_penalties ?? item.homePen ?? "",
     awayPenalties: item.away_penalties ?? item.awayPen ?? "",
     events: Array.isArray(item.events) ? item.events : [],
-    goals: Array.isArray(item.goals) ? item.goals : [],
-    deletedEventIds: Array.isArray(item.deleted_event_ids) ? item.deleted_event_ids : (Array.isArray(item.deletedEventIds) ? item.deletedEventIds : []),
     cloudUpdatedAt: item.updated_at || item.updatedAt || "",
   };
 }
@@ -393,7 +388,6 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
             matchPhase: base.played === true ? "completed" : (runtime?.matchPhase || "waiting"),
             events: Array.isArray(runtime?.events) ? runtime.events : [],
             goals: Array.isArray(runtime?.goals) ? runtime.goals : [],
-            deletedEventIds: Array.isArray(runtime?.deletedEventIds) ? runtime.deletedEventIds : (Array.isArray(base?.deletedEventIds) ? base.deletedEventIds : []),
             homePenalties: runtime?.homePenalties ?? runtime?.homePen ?? base.homePenalties ?? "",
             awayPenalties: runtime?.awayPenalties ?? runtime?.awayPen ?? base.awayPenalties ?? "",
             cloudUpdatedAt: snapshotRow?.updated_at || base.cloudUpdatedAt || "",
@@ -483,7 +477,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     // Egress koruması: Realtime değişiklikleri zaten anında refresh tetikliyor.
     // Eski 1 sn polling her açık telefonda tüm fikstür/app_state verisini saniyede bir
     // indiriyordu. 30 sn fallback, Realtime koparsa ekranın kendini toparlaması içindir.
-    const poll = window.setInterval(refresh, 1000);
+    const poll = window.setInterval(refresh, 30000);
 
     const onVisible = () => {
       if (document.visibilityState === "visible") refresh();

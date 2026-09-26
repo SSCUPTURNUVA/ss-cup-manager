@@ -811,16 +811,9 @@ export default function App() {
             const runtimeTime = Date.parse(runtime?.runtimeUpdatedAt || match?.runtimeUpdatedAt || "") || 0;
             const rowTime = Date.parse(row?.updated_at || match?.cloudUpdatedAt || "") || 0;
             const keepRuntimeSchedule = runtimeTime > rowTime;
-            const localPhase = match?.matchPhase || "waiting";
-            const cloudPhase = runtime?.matchPhase || "waiting";
-            const localRunning = match?.played !== true && match?.live === true &&
-              ["first_half", "halftime", "second_half", "penalty"].includes(localPhase);
-            const cloudWouldResetRunningMatch = localRunning &&
-              (!runtime || runtime?.live !== true || cloudPhase === "waiting");
-            const effectiveRuntime = cloudWouldResetRunningMatch ? match : (runtime || match);
             return {
               ...match,
-              ...(effectiveRuntime || {}),
+              ...(runtime || {}),
               ...(row ? {
                 home: row.home ?? match.home,
                 away: row.away ?? match.away,
@@ -832,11 +825,10 @@ export default function App() {
                 awayScore: Number(row.away_score ?? runtime?.awayScore ?? match.awayScore ?? 0),
                 played,
               } : {}),
-              live: played ? false : effectiveRuntime?.live === true,
-              timerRunning: played ? false : effectiveRuntime?.timerRunning === true,
-              timerStartedAt: played ? null : (effectiveRuntime?.timerStartedAt ?? null),
-              elapsedSeconds: Number(effectiveRuntime?.elapsedSeconds ?? match.elapsedSeconds ?? 0),
-              matchPhase: played ? "completed" : (effectiveRuntime?.matchPhase || match.matchPhase || "waiting"),
+              live: played ? false : runtime?.live === true,
+              timerRunning: played ? false : runtime?.timerRunning === true,
+              timerStartedAt: played ? null : (runtime?.timerStartedAt ?? null),
+              matchPhase: played ? "completed" : (runtime?.matchPhase || match.matchPhase || "waiting"),
               deletedEventIds: [...new Set([
                 ...(Array.isArray(match?.deletedEventIds) ? match.deletedEventIds.map(String) : []),
                 ...(Array.isArray(runtime?.deletedEventIds) ? runtime.deletedEventIds.map(String) : []),
@@ -944,17 +936,6 @@ export default function App() {
     () => calculateStandings(teams, fixtures),
     [teams, fixtures]
   );
-
-  // Eleme ekranından Maç Merkezi'ne geçiş component render sırasına bağlı kalmasın.
-  useEffect(() => {
-    const openMatchCenter = () => {
-      setActivePage("matchcenter");
-      setMobileMenuOpen(false);
-      window.setTimeout(() => window.scrollTo(0, 0), 0);
-    };
-    window.addEventListener("sscup-open-match-center", openMatchCenter);
-    return () => window.removeEventListener("sscup-open-match-center", openMatchCenter);
-  }, []);
 
   function changePage(pageId) {
     setActivePage(pageId);
