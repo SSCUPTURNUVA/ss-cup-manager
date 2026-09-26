@@ -266,6 +266,10 @@ export default function Knockout({
   }, [quarterMode]);
 
   useEffect(() => {
+    // Manuel kura sırasında quarter state'inin tek sahibi manuel seçim ekranıdır.
+    // Eski knockout fixture'ları seçimi geri ezmesin / mobil select'i gecikmeli değiştirmesin.
+    if (quarterMode === "manual") return;
+
     const knockoutMatches = fixtures.filter(
       (match) => match?.isKnockout === true
     );
@@ -342,7 +346,7 @@ export default function Knockout({
         )
       )
     );
-  }, [fixtures]);
+  }, [fixtures, quarterMode]);
 
   const standings = useMemo(() => {
     const table = {};
