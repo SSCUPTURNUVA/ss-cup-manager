@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabase";
 import "./KnockoutDraw.css";
 
@@ -26,7 +26,43 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
   const [selectedResult, setSelectedResult] = useState(null);
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [notice, setNotice] = useState("");
+  const [knockoutSchedule, setKnockoutSchedule] = useState({});
   const drawLoadedRef = useRef(false);
+
+  const scheduleSlots = [
+    ["quarter-0", "ÇF 1"], ["quarter-1", "ÇF 2"], ["quarter-2", "ÇF 3"], ["quarter-3", "ÇF 4"],
+    ["semi-0", "YF 1"], ["semi-1", "YF 2"], ["third-place-0", "3.'LÜK"], ["final-0", "FİNAL"],
+  ];
+
+  useEffect(() => {
+    let mounted = true;
+    const loadSchedule = async () => {
+      const { data, error } = await supabase.from("app_state").select("value").eq("id", "knockout_schedule_v1").maybeSingle();
+      if (!error && mounted) setKnockoutSchedule(data?.value && typeof data.value === "object" ? data.value : {});
+    };
+    loadSchedule();
+    const channel = supabase.channel(`ko-schedule-${Math.random().toString(36).slice(2)}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout_schedule_v1" }, loadSchedule)
+      .subscribe();
+    return () => { mounted = false; supabase.removeChannel(channel); };
+  }, []);
+
+  async function updateKnockoutSchedule(slotKey, field, value) {
+    const next = {
+      ...knockoutSchedule,
+      [slotKey]: { ...(knockoutSchedule?.[slotKey] || {}), [field]: value },
+    };
+    setKnockoutSchedule(next);
+    const { error } = await supabase.from("app_state").upsert({
+      id: "knockout_schedule_v1",
+      value: next,
+      updated_at: new Date().toISOString(),
+    });
+    if (error) {
+      console.error("Eleme tarih/saat kaydedilemedi:", error);
+      setNotice("Tarih/saat kaydedilemedi. Tekrar deneyin.");
+    }
+  }
 
   // Eleme kurasını Supabase'den geri yükle. İlk boş render buluttaki kuranın
   // üstüne yazmasın diye kayıt, yükleme tamamlandıktan sonra başlar.
@@ -112,6 +148,7 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
     setFirstTeam("");
     setKnockoutCloud({});
     setKnockoutResults([]);
+    setKnockoutSchedule({});
 
     // Ayrı Eleme Maç Merkezi aktif seçimini tamamen kaldır.
     localStorage.removeItem("sscup-knockout-match-center-active");
@@ -168,6 +205,7 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
         supabase.from("app_state").upsert({ id: "knockout_results_v1", value: [], updated_at: now }),
         supabase.from("app_state").upsert({ id: "knockout_goal_scorers_v1", value: [], updated_at: now }),
         supabase.from("app_state").upsert({ id: "knockout_cards_v1", value: [], updated_at: now }),
+        supabase.from("app_state").upsert({ id: "knockout_schedule_v1", value: {}, updated_at: now }),
         supabase.from("app_state").upsert({
           id: "fixtures_snapshot",
           value: nextFixtures,
@@ -250,6 +288,8 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
       stageLabel: `Çeyrek Final ${index + 1}`,
       home: pair[0],
       away: pair[1],
+      date: knockoutSchedule?.[`quarter-${index}`]?.date || "",
+      time: knockoutSchedule?.[`quarter-${index}`]?.time || "",
       status: "waiting",
       isKnockout: true,
       played: false,
@@ -282,10 +322,12 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
     if (typeof onOpenKnockoutMatchCenter === "function") onOpenKnockoutMatchCenter();
   }
 
-  async function sendExistingToMatchCenter(source, fallbackKey, fallbackLabel) {
+  async function sendExistingToMatchCenter(source, fallbackKey, fallbackLabel, scheduleKey = fallbackKey) {
     if (!source?.home || !source?.away) return;
     const activeMatch = {
       ...source,
+      date: knockoutSchedule?.[scheduleKey]?.date || source.date || "",
+      time: knockoutSchedule?.[scheduleKey]?.time || source.time || "",
       id: source.id || `knockout:${drawId || "draw"}:${fallbackKey}`,
       drawId: source.drawId || drawId || "", knockoutKey: source.knockoutKey || fallbackKey, stageLabel: source.stageLabel || fallbackLabel,
       isKnockout: true, played: source.played === true, live: source.live === true, matchPhase: source.matchPhase || "waiting",
@@ -376,8 +418,21 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
         {mode === "seeded" && <div className="ko-action"><p>Lig sıralamasına göre otomatik eşleşme: <b>1–8, 2–7, 3–6, 4–5</b>.</p><button type="button" disabled={topEight.length !== 8} onClick={makeSeededDraw}>🏅 SIRALAMAYA GÖRE EŞLEŞTİR</button></div>}
       </section>
 
+      <section className="ko-card ko-schedule-card">
+        <div className="ko-section-title"><div><span>04</span><h3>Eleme Maç Programı</h3></div><small>Tarih ve saati manuel gir</small></div>
+        <div className="ko-schedule-grid">
+          {scheduleSlots.map(([key, label]) => (
+            <div className="ko-schedule-row" key={key}>
+              <strong>{label}</strong>
+              <label><span>TARİH</span><input type="date" value={knockoutSchedule?.[key]?.date || ""} onChange={(e) => updateKnockoutSchedule(key, "date", e.target.value)} /></label>
+              <label><span>SAAT</span><input type="time" value={knockoutSchedule?.[key]?.time || ""} onChange={(e) => updateKnockoutSchedule(key, "time", e.target.value)} /></label>
+            </div>
+          ))}
+        </div>
+      </section>
+
       <section className="ko-card ko-bracket-card">
-        <div className="ko-section-title"><div><span>04</span><h3>1/8 Final Eşleşmeleri</h3></div>{complete && <small className="done">KURA TAMAMLANDI ✓</small>}</div>
+        <div className="ko-section-title"><div><span>05</span><h3>1/8 Final Eşleşmeleri</h3></div>{complete && <small className="done">KURA TAMAMLANDI ✓</small>}</div>
         <div className="ko-pairs">
           {[0,1,2,3].map((index) => {
             const pair = pairs[index];
@@ -404,19 +459,19 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
         <div className="ko-pairs">
           {[0,1].map((i) => { const m=semiCloud[i]; return <div className={m?.home && m?.away ? "ko-pair filled" : "ko-pair"} key={`semi-${i}`}>
             <div className="match-no">YARI FİNAL {i+1}</div><div className="team"><span>{m?.home || (i===0 ? "ÇF1 Kazananı" : "ÇF2 Kazananı")}</span></div><div className="pair-vs">VS</div><div className="team"><span>{m?.away || (i===0 ? "ÇF3 Kazananı" : "ÇF4 Kazananı")}</span></div>
-            {m?.home && m?.away && m?.played !== true && <button type="button" className="ko-mc-button" onClick={() => sendExistingToMatchCenter(m, `semi-${i+1}`, `Yarı Final ${i+1}`)}>🏟️ Maç Merkezine Al</button>}
+            {m?.home && m?.away && m?.played !== true && <button type="button" className="ko-mc-button" onClick={() => sendExistingToMatchCenter(m, `semi-${i+1}`, `Yarı Final ${i+1}`, `semi-${i}`)}>🏟️ Maç Merkezine Al</button>}
           </div>; })}
         </div>
       </section>
 
       <section className="ko-card ko-road-card">
         <div className="ko-section-title"><div><span>06</span><h3>Üçüncülük Maçı</h3></div></div>
-        <div className="ko-pairs"><div className={thirdCloud?.home && thirdCloud?.away ? "ko-pair filled" : "ko-pair"}><div className="match-no">3.'LÜK</div><div className="team"><span>{thirdCloud?.home || "YF1 Kaybedeni"}</span></div><div className="pair-vs">VS</div><div className="team"><span>{thirdCloud?.away || "YF2 Kaybedeni"}</span></div>{thirdCloud?.home && thirdCloud?.away && thirdCloud?.played !== true && <button type="button" className="ko-mc-button" onClick={() => sendExistingToMatchCenter(thirdCloud, "third-place-0", "3.'lük Maçı")}>🏟️ Maç Merkezine Al</button>}</div></div>
+        <div className="ko-pairs"><div className={thirdCloud?.home && thirdCloud?.away ? "ko-pair filled" : "ko-pair"}><div className="match-no">3.'LÜK</div><div className="team"><span>{thirdCloud?.home || "YF1 Kaybedeni"}</span></div><div className="pair-vs">VS</div><div className="team"><span>{thirdCloud?.away || "YF2 Kaybedeni"}</span></div>{thirdCloud?.home && thirdCloud?.away && thirdCloud?.played !== true && <button type="button" className="ko-mc-button" onClick={() => sendExistingToMatchCenter(thirdCloud, "third-place-0", "3.'lük Maçı", "third-place-0")}>🏟️ Maç Merkezine Al</button>}</div></div>
       </section>
 
       <section className="ko-card ko-road-card">
         <div className="ko-section-title"><div><span>07</span><h3>Final</h3></div></div>
-        <div className="ko-pairs"><div className={finalCloud?.home && finalCloud?.away ? "ko-pair filled" : "ko-pair"}><div className="match-no">FİNAL</div><div className="team"><span>{finalCloud?.home || "YF1 Kazananı"}</span></div><div className="pair-vs">VS</div><div className="team"><span>{finalCloud?.away || "YF2 Kazananı"}</span></div>{finalCloud?.home && finalCloud?.away && finalCloud?.played !== true && <button type="button" className="ko-mc-button" onClick={() => sendExistingToMatchCenter(finalCloud, "final-0", "Final")}>🏟️ Maç Merkezine Al</button>}</div></div>
+        <div className="ko-pairs"><div className={finalCloud?.home && finalCloud?.away ? "ko-pair filled" : "ko-pair"}><div className="match-no">FİNAL</div><div className="team"><span>{finalCloud?.home || "YF1 Kazananı"}</span></div><div className="pair-vs">VS</div><div className="team"><span>{finalCloud?.away || "YF2 Kazananı"}</span></div>{finalCloud?.home && finalCloud?.away && finalCloud?.played !== true && <button type="button" className="ko-mc-button" onClick={() => sendExistingToMatchCenter(finalCloud, "final-0", "Final", "final-0")}>🏟️ Maç Merkezine Al</button>}</div></div>
       </section>
 
       <section className="ko-card ko-road-card">
@@ -469,3 +524,4 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
     </div>
   );
 }
+

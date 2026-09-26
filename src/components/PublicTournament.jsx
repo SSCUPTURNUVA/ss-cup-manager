@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabase";
 import "./PublicTournament.css";
 import { normalizeFixtureDate, fixtureTimeMinutes, sortFixturesBySchedule } from "../utils/fixtureOrder";
@@ -365,6 +365,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const [remoteSquads, setRemoteSquads] = useState(null);
   const [remoteKnockout, setRemoteKnockout] = useState([]);
   const [remoteKnockoutDraw, setRemoteKnockoutDraw] = useState([]);
+  const [remoteKnockoutSchedule, setRemoteKnockoutSchedule] = useState({});
   const [remoteSettings, setRemoteSettings] = useState(null);
   const [activeFixtureIds, setActiveFixtureIds] = useState(null);
   const [publicMatchCenterId, setPublicMatchCenterId] = useState("");
@@ -404,7 +405,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         supabase.from("fixtures").select("*").order("id"),
         supabase.from("app_state")
           .select("id,value,updated_at")
-          .in("id", ["squads", "knockout", "knockout_draw_v1", "knockout_match_center_v1", "active_fixture_ids", "settings", "fixtures_snapshot", "public_match_center"]),
+          .in("id", ["squads", "knockout", "knockout_draw_v1", "knockout_schedule_v1", "knockout_match_center_v1", "active_fixture_ids", "settings", "fixtures_snapshot", "public_match_center"]),
         fetchMatchEventRows(),
       ]);
 
@@ -473,6 +474,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       const drawRow = stateById.get("knockout_draw_v1");
       const drawPairs = Array.isArray(drawRow?.value?.pairs) ? drawRow.value.pairs.slice(0, 4) : [];
       setRemoteKnockoutDraw(drawPairs);
+      const scheduleRow = stateById.get("knockout_schedule_v1");
+      setRemoteKnockoutSchedule(scheduleRow?.value && typeof scheduleRow.value === "object" ? scheduleRow.value : {});
 
       const knockoutRow = stateById.get("knockout");
       const value = knockoutRow?.value && typeof knockoutRow.value === "object" ? knockoutRow.value : {};
@@ -597,6 +600,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.squads" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout_draw_v1" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout_schedule_v1" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout_match_center_v1" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.active_fixture_ids" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.settings" }, refresh)
@@ -798,7 +802,12 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     { ...(byKoKey.get("third-place-0") || {}), id: byKoKey.get("third-place-0")?.id || "ko-third-place-0", knockoutKey: "third-place-0", isKnockout: true, stageLabel: "3.'LÜK MAÇI", home: s0l || "YF 1 Mağlubu", away: s1l || "YF 2 Mağlubu" },
     { ...(byKoKey.get("final-0") || {}), id: byKoKey.get("final-0")?.id || "ko-final-0", knockoutKey: "final-0", isKnockout: true, stageLabel: "FİNAL", home: s0w || "YF 1 Galibi", away: s1w || "YF 2 Galibi" },
   ];
-  const knockoutKeys = new Set(knockoutMatches.map((m) => m.knockoutKey).filter(Boolean));
+  const scheduledKnockoutMatches = knockoutMatches.map((m) => ({
+    ...m,
+    date: remoteKnockoutSchedule?.[m.knockoutKey]?.date || m.date || "",
+    time: remoteKnockoutSchedule?.[m.knockoutKey]?.time || m.time || "",
+  }));
+  const knockoutKeys = new Set(scheduledKnockoutMatches.map((m) => m.knockoutKey).filter(Boolean));
   // TEK KAYNAK SIRASI:
   // Önce tarih, aynı tarihte saat. Bundan sonraki bütün Canlı Takip
   // bölümleri bu kronolojik listeyi kullanır.
@@ -808,7 +817,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     // olduğunda (quarter-1 / quarter-0) ikinci bir CANLI maç olarak seçilebiliyordu.
     // Bu da ekranda güncel eleme state'i yerine eski skoru göstermeye devam ediyordu.
     ...leagueFixtures.filter((m) => m?.isKnockout !== true),
-    ...knockoutMatches,
+    ...scheduledKnockoutMatches,
   ]);
   const liveMatches = displayFixtures
     .filter((match) => match?.live === true && match?.played !== true)
@@ -1150,10 +1159,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         {activeTab === "knockout" && (
           <section className="public-section public-knockout-section">
             <div className="public-section-head"><div><span>ŞAMPİYONLUK YOLU</span><h2>🏆 Eleme Turları</h2></div><b>Çeyrek Final • Yarı Final • 3.'lük • Final</b></div>
-            {knockoutMatches.length === 0 ? <div className="public-empty-box">Eleme eşleşmeleri henüz oluşmadı.</div> : (
+            {scheduledKnockoutMatches.length === 0 ? <div className="public-empty-box">Eleme eşleşmeleri henüz oluşmadı.</div> : (
               <div className="public-knockout-stages">
                 {["ÇEYREK FİNAL", "YARI FİNAL", "3.'LÜK MAÇI", "FİNAL"].map((stage) => {
-                  const matches = knockoutMatches.filter((m) => stageText(m) === stage);
+                  const matches = scheduledKnockoutMatches.filter((m) => stageText(m) === stage);
                   if (!matches.length) return null;
                   return <div className="public-knockout-stage" key={stage}><h3>{stage}</h3><div className="public-knockout-grid">{matches.map((match, index) => (
                     <button className={`public-knockout-card ${match.live ? "is-live" : ""}`} key={match.knockoutKey || match.id || index} onClick={() => setSelectedMatch(match)}>
@@ -1177,3 +1186,4 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     </div>
   );
 }
+
