@@ -745,14 +745,29 @@ export default function Knockout({
     const nextQuarter = quarter.map((m, i) => i === matchIndex ? { ...m, [field]: team, homeScore: "", awayScore: "", homePen: "", awayPen: "", played: false, live: false, matchPhase: "waiting", timerRunning: false, timerStartedAt: null, elapsedSeconds: 0, events: [] } : m);
     const used = new Set(nextQuarter.flatMap(m => [m.home, m.away]).filter(Boolean));
     const remaining = topEight.map(t => t.team).filter(name => name && !used.has(name));
+    // MOBİL: takım seçimi bulut cevabını beklemeden ekrana anında işlensin.
+    // Supabase yalnız kalıcılık içindir; UI onun dönüş süresine bağlı değildir.
+    const emptySemi = createEmptySemi();
+    const emptyFinal = createEmptyFinal();
+    const emptyThirdPlace = createEmptyFinal();
+    setQuarter(nextQuarter);
+    setSemi(emptySemi);
+    setFinalMatch(emptyFinal);
+    setThirdPlace(emptyThirdPlace);
+    setDrawPotOne(remaining);
+
     cloudWriteLockRef.current = true;
     try {
-      const value = { quarter: nextQuarter, semi: createEmptySemi(), finalMatch: createEmptyFinal(), thirdPlace: createEmptyFinal(), drawPotOne: remaining, drawPotTwo: [], drawStarted: true, quarterMode: "manual" };
+      const value = { quarter: nextQuarter, semi: emptySemi, finalMatch: emptyFinal, thirdPlace: emptyThirdPlace, drawPotOne: remaining, drawPotTwo: [], drawStarted: true, quarterMode: "manual" };
       const { error } = await supabase.from("app_state").upsert({ id: "knockout", value, updated_at: new Date().toISOString() });
       if (error) throw error;
-      setQuarter(nextQuarter); setSemi(createEmptySemi()); setFinalMatch(createEmptyFinal()); setThirdPlace(createEmptyFinal()); setDrawPotOne(remaining);
-    } catch (error) { console.error("Manuel kura kaydedilemedi:", error); alert("Seçim kaydedilemedi."); }
-    finally { window.setTimeout(() => { cloudWriteLockRef.current = false; }, 250); }
+    } catch (error) {
+      console.error("Manuel kura kaydedilemedi:", error);
+      // Ekranı geri sarmıyoruz; kullanıcı tekrar tekrar dokunmak zorunda kalmasın.
+      alert("Takım ekranda seçildi ancak buluta kaydedilemedi. İnterneti kontrol edip seçimi tekrar kaydedin.");
+    } finally {
+      window.setTimeout(() => { cloudWriteLockRef.current = false; }, 250);
+    }
   }
 
   async function prepareRankedQuarter() {
