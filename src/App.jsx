@@ -808,48 +808,56 @@ export default function App() {
             // az önce kaydedilmiş daha yeni program bilgisini geri çevirmesin.
             // runtimeUpdatedAt maç bazında gerçek yerel değişiklik zamanıdır;
             // row.updated_at ise fixtures tablosundaki bulut zamanıdır.
-            const runtimeTime = Date.parse(runtime?.runtimeUpdatedAt || match?.runtimeUpdatedAt || "") || 0;
+            // Buluttaki snapshot, bu cihazda az önce başlatılmış aktif eleme maçından
+            // daha eski olabilir. Özellikle knockout app_state yazısı realtime tetikleyip
+            // fixtures_snapshot henüz güncellenmeden döndüğünde first_half -> waiting
+            // geri sarıyordu. Maç bazında EN YENİ runtime kaynağını seç.
+            const localRuntimeTime = Date.parse(match?.runtimeUpdatedAt || "") || 0;
+            const cloudRuntimeTime = Date.parse(runtime?.runtimeUpdatedAt || "") || 0;
+            const effectiveRuntime = localRuntimeTime > cloudRuntimeTime ? match : runtime;
+            const runtimeTime = Math.max(localRuntimeTime, cloudRuntimeTime);
             const rowTime = Date.parse(row?.updated_at || match?.cloudUpdatedAt || "") || 0;
             const keepRuntimeSchedule = runtimeTime > rowTime;
             return {
               ...match,
-              ...(runtime || {}),
+              ...(effectiveRuntime || {}),
               ...(row ? {
                 home: row.home ?? match.home,
                 away: row.away ?? match.away,
-                date: keepRuntimeSchedule ? (runtime?.date ?? match.date) : (row.date ?? match.date),
-                time: keepRuntimeSchedule ? (runtime?.time ?? match.time) : (row.time ?? match.time),
-                field: keepRuntimeSchedule ? (runtime?.field ?? match.field) : (row.pitch ?? match.field),
-                week: keepRuntimeSchedule ? (runtime?.week ?? match.week) : (row.week ?? match.week),
-                homeScore: Number(row.home_score ?? runtime?.homeScore ?? match.homeScore ?? 0),
-                awayScore: Number(row.away_score ?? runtime?.awayScore ?? match.awayScore ?? 0),
+                date: keepRuntimeSchedule ? (effectiveRuntime?.date ?? match.date) : (row.date ?? match.date),
+                time: keepRuntimeSchedule ? (effectiveRuntime?.time ?? match.time) : (row.time ?? match.time),
+                field: keepRuntimeSchedule ? (effectiveRuntime?.field ?? match.field) : (row.pitch ?? match.field),
+                week: keepRuntimeSchedule ? (effectiveRuntime?.week ?? match.week) : (row.week ?? match.week),
+                homeScore: Number(effectiveRuntime?.homeScore ?? row.home_score ?? match.homeScore ?? 0),
+                awayScore: Number(effectiveRuntime?.awayScore ?? row.away_score ?? match.awayScore ?? 0),
                 played,
               } : {}),
-              live: played ? false : runtime?.live === true,
-              timerRunning: played ? false : runtime?.timerRunning === true,
-              timerStartedAt: played ? null : (runtime?.timerStartedAt ?? null),
-              matchPhase: played ? "completed" : (runtime?.matchPhase || match.matchPhase || "waiting"),
+              live: played ? false : effectiveRuntime?.live === true,
+              timerRunning: played ? false : effectiveRuntime?.timerRunning === true,
+              timerStartedAt: played ? null : (effectiveRuntime?.timerStartedAt ?? null),
+              elapsedSeconds: Number(effectiveRuntime?.elapsedSeconds ?? match.elapsedSeconds ?? 0),
+              matchPhase: played ? "completed" : (effectiveRuntime?.matchPhase || match.matchPhase || "waiting"),
               deletedEventIds: [...new Set([
                 ...(Array.isArray(match?.deletedEventIds) ? match.deletedEventIds.map(String) : []),
-                ...(Array.isArray(runtime?.deletedEventIds) ? runtime.deletedEventIds.map(String) : []),
+                ...(Array.isArray(effectiveRuntime?.deletedEventIds) ? effectiveRuntime.deletedEventIds.map(String) : []),
               ])],
               events: (() => {
                 const deleted = new Set([
                   ...(Array.isArray(match?.deletedEventIds) ? match.deletedEventIds.map(String) : []),
-                  ...(Array.isArray(runtime?.deletedEventIds) ? runtime.deletedEventIds.map(String) : []),
+                  ...(Array.isArray(effectiveRuntime?.deletedEventIds) ? effectiveRuntime.deletedEventIds.map(String) : []),
                 ]);
-                const source = Array.isArray(runtime?.events) ? runtime.events : (Array.isArray(match.events) ? match.events : []);
+                const source = Array.isArray(effectiveRuntime?.events) ? effectiveRuntime.events : (Array.isArray(match.events) ? match.events : []);
                 return source.filter((event) => !deleted.has(String(event?.id ?? "")));
               })(),
               goals: (() => {
                 const deleted = new Set([
                   ...(Array.isArray(match?.deletedEventIds) ? match.deletedEventIds.map(String) : []),
-                  ...(Array.isArray(runtime?.deletedEventIds) ? runtime.deletedEventIds.map(String) : []),
+                  ...(Array.isArray(effectiveRuntime?.deletedEventIds) ? effectiveRuntime.deletedEventIds.map(String) : []),
                 ]);
-                const source = Array.isArray(runtime?.goals) ? runtime.goals : (Array.isArray(match.goals) ? match.goals : []);
+                const source = Array.isArray(effectiveRuntime?.goals) ? effectiveRuntime.goals : (Array.isArray(match.goals) ? match.goals : []);
                 return source.filter((event) => !deleted.has(String(event?.id ?? "")));
               })(),
-              runtimeUpdatedAt: runtime?.runtimeUpdatedAt || match.runtimeUpdatedAt || "",
+              runtimeUpdatedAt: effectiveRuntime?.runtimeUpdatedAt || match.runtimeUpdatedAt || "",
               cloudUpdatedAt: snapshotResult.data?.updated_at || match.cloudUpdatedAt || "",
             };
           }));
@@ -857,7 +865,9 @@ export default function App() {
           merged = applyMatchEventRowsToFixtures(merged, eventRows);
 
           if (JSON.stringify(merged) === JSON.stringify(current)) return current;
+          fixturesRef.current = merged;
           localStorage.setItem(FIXTURE_CACHE_KEY, JSON.stringify(merged));
+          localStorage.setItem("sscup-fixtures", JSON.stringify(merged));
           return merged;
         });
       } catch (error) {

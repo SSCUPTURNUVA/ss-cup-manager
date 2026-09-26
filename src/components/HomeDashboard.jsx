@@ -317,7 +317,7 @@ export default function HomeDashboard({
 
       <section className="dashboard-mini-summary">
         <article><span>🥇</span><strong>{leader?.team || "—"}</strong><small>{leader ? `${leader.points} puanla lider` : "Lider bekleniyor"}</small></article>
-        <article><span>👑</span><strong>{topScorer?.playerName || topScorer?.name || "—"}</strong><small>{topScorer ? `${topScorer.goals || 0} gol` : "Golcü bekleniyor"}</small></article>
+        <article><span>👑</span><strong>{topScorer ? `${topScorer.shirtNumber ? `${topScorer.shirtNumber} - ` : ""}${topScorer.playerName || topScorer.name || "—"}` : "—"}</strong><small>{topScorer ? `${topScorer.goals || 0} gol` : "Golcü bekleniyor"}</small></article>
         <article><span>📈</span><strong>%{progress}</strong><small>Turnuva tamamlanma oranı</small></article>
       </section>
 

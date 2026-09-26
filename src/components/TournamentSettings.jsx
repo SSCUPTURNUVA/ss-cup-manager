@@ -12,7 +12,7 @@ const DEFAULT_SETTINGS = {
   mainSponsor: "",
   subSponsors: [],
   primaryColor: "#d4af37",
-  halfDurationMinutes: 30,
+  halfDurationMinutes: 25,
   halftimeDurationMinutes: 5,
 };
 
@@ -22,11 +22,7 @@ function readSettings() {
 
     if (!saved) return DEFAULT_SETTINGS;
     const parsed = JSON.parse(saved);
-    if (Number(parsed?.halfDurationMinutes) === 25) {
-      parsed.halfDurationMinutes = 30;
-      localStorage.setItem("sscup-settings", JSON.stringify(parsed));
-    }
-    return { ...DEFAULT_SETTINGS, ...parsed };
+    return { ...DEFAULT_SETTINGS, ...parsed, halfDurationMinutes: 25 };
   } catch {
     return DEFAULT_SETTINGS;
   }
@@ -56,7 +52,7 @@ export default function TournamentSettings() {
       const value = data?.value;
       if (value && typeof value === "object" && !Array.isArray(value)) {
         applyingCloudRef.current = true;
-        const merged = { ...DEFAULT_SETTINGS, ...value };
+        const merged = { ...DEFAULT_SETTINGS, ...value, halfDurationMinutes: 25 };
         setSettings(merged);
         localStorage.setItem("sscup-settings", JSON.stringify(merged));
         window.dispatchEvent(new CustomEvent("sscup-settings-updated", { detail: merged }));
@@ -77,7 +73,7 @@ export default function TournamentSettings() {
         const value = payload?.new?.value;
         if (!value || typeof value !== "object" || Array.isArray(value)) return;
         applyingCloudRef.current = true;
-        const merged = { ...DEFAULT_SETTINGS, ...value };
+        const merged = { ...DEFAULT_SETTINGS, ...value, halfDurationMinutes: 25 };
         setSettings(merged);
         localStorage.setItem("sscup-settings", JSON.stringify(merged));
         window.dispatchEvent(new CustomEvent("sscup-settings-updated", { detail: merged }));

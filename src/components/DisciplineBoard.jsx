@@ -300,7 +300,7 @@ export default function DisciplineBoard({ fixtures = [], teams = [] }) {
                     </td>
                     <td style={{ padding: "12px 8px", fontWeight: "600" }}>
                       {row.shirtNumber ? `#${row.shirtNumber} ` : ""}
-                      {row.playerName}
+                      {row.shirtNumber ? `${row.shirtNumber} - ${row.playerName}` : row.playerName}
                     </td>
                     <td style={{ padding: "12px 8px", textAlign: "center" }}>
                       {row.yellowCards > 0 ? (

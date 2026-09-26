@@ -39,17 +39,17 @@ function readMatchRules() {
   try {
     const saved = JSON.parse(localStorage.getItem("sscup-settings") || "{}");
     return {
-      halfDurationMinutes: Math.max(1, safeNumber(saved.halfDurationMinutes, 30)),
+      halfDurationMinutes: Math.max(1, safeNumber(saved.halfDurationMinutes, 25)),
       halftimeDurationMinutes: Math.max(0, safeNumber(saved.halftimeDurationMinutes, 5)),
     };
   } catch {
-    return { halfDurationMinutes: 30, halftimeDurationMinutes: 5 };
+    return { halfDurationMinutes: 25, halftimeDurationMinutes: 5 };
   }
 }
 
 function formatFootballClock(phase, elapsedSeconds, halfDurationMinutes) {
   const elapsed = Math.max(0, safeNumber(elapsedSeconds));
-  const half = Math.max(1, safeNumber(halfDurationMinutes, 30));
+  const half = Math.max(1, safeNumber(halfDurationMinutes, 25));
   if (phase === "waiting") return "00′";
   if (phase === "halftime") return "DEVRE";
   if (phase === "penalty") return "🥅 PENALTI";
@@ -133,17 +133,16 @@ function normalizeEvent(event, index) {
     type,
     label: meta.label,
     icon: meta.icon,
-    player:
-      event?.playerName ||
-      event?.player ||
-      event?.name ||
-      event?.scorer ||
-      "Oyuncu",
-    secondPlayer:
-      event?.secondPlayerName ||
-      event?.assistPlayerName ||
-      event?.playerOutName ||
-      "",
+    player: (() => {
+      const name = event?.playerName || event?.player || event?.name || event?.scorer || "Oyuncu";
+      const no = event?.shirtNumber ?? event?.number ?? "";
+      return no !== "" && no != null ? `${no} - ${name}` : name;
+    })(),
+    secondPlayer: (() => {
+      const name = event?.secondPlayerName || event?.assistPlayerName || event?.playerInName || event?.playerOutName || "";
+      const no = event?.secondPlayerShirtNumber ?? event?.playerInShirtNumber ?? "";
+      return name && no !== "" && no != null ? `${no} - ${name}` : name;
+    })(),
     team: event?.team || event?.teamName || "",
     minute:
       event?.minute ??
@@ -284,11 +283,90 @@ export default function MatchCenter({
     }
   }
 
-  function getTeamSquad(teamName) {
-    const squads = readSquads();
-    return Array.isArray(squads?.[teamName])
-      ? squads[teamName]
-      : [];
+  // Maç Merkezi kadroyu yalnız localStorage'dan bir kez okumamalı.
+  // Yönetim doğrudan Eleme -> Maç Merkezi akışında açıldığında bulut kadrosu
+  // henüz bu cihazın localStorage'ına gelmemiş olabiliyordu ve "kayıtlı oyuncusu yok"
+  // görünüyordu. Kadroyu burada da canlı state olarak yükle/eşitle.
+  const [squadsSnapshot, setSquadsSnapshot] = useState(() => readSquads());
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const applySquads = (value) => {
+      if (cancelled || !value || typeof value !== "object" || Array.isArray(value)) return;
+      setSquadsSnapshot(value);
+      localStorage.setItem("sscup-squads", JSON.stringify(value));
+    };
+
+    const refreshSquads = async () => {
+      // Önce o anda cihazda bulunan kadroyu anında göster.
+      const local = readSquads();
+      if (local && typeof local === "object" && !Array.isArray(local)) setSquadsSnapshot(local);
+
+      const { data, error } = await supabase
+        .from("app_state")
+        .select("value")
+        .eq("id", "squads")
+        .maybeSingle();
+
+      if (!error && data?.value) applySquads(data.value);
+      else if (error) console.warn("Maç Merkezi kadroları yüklenemedi:", error);
+    };
+
+    refreshSquads();
+
+    const onStorage = (event) => {
+      if (event.key === "sscup-squads") setSquadsSnapshot(readSquads());
+    };
+    const onSquadsUpdated = () => setSquadsSnapshot(readSquads());
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("sscup-squads-updated", onSquadsUpdated);
+
+    const channel = supabase
+      .channel(`match-center-squads-${Math.random().toString(36).slice(2)}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.squads" }, refreshSquads)
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("sscup-squads-updated", onSquadsUpdated);
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  function getTeamSquad(teamName, match = liveMatch) {
+    // Maç başladıktan sonra kadro kaynağı değişse/yenilense bile saha kadrosu kaybolmasın.
+    // Başlatma anında maçın içine alınan takım snapshot'ı ilk güvenli kaynaktır.
+    if (match) {
+      if (String(teamName || "") === String(match.home || "") && Array.isArray(match.homeSquadSnapshot) && match.homeSquadSnapshot.length > 0) {
+        return match.homeSquadSnapshot;
+      }
+      if (String(teamName || "") === String(match.away || "") && Array.isArray(match.awaySquadSnapshot) && match.awaySquadSnapshot.length > 0) {
+        return match.awaySquadSnapshot;
+      }
+    }
+
+    const exact = Array.isArray(squadsSnapshot?.[teamName]) ? squadsSnapshot[teamName] : null;
+    if (exact && exact.length > 0) return exact;
+
+    // İsimde büyük/küçük harf veya eski CMT adı gibi küçük farklar varsa da kadroyu bul.
+    const wanted = canonicalTeamName(teamName).toLocaleLowerCase("tr-TR");
+    const matchedKey = Object.keys(squadsSnapshot || {}).find(
+      (key) => canonicalTeamName(key).toLocaleLowerCase("tr-TR") === wanted
+    );
+    if (matchedKey && Array.isArray(squadsSnapshot[matchedKey]) && squadsSnapshot[matchedKey].length > 0) {
+      return squadsSnapshot[matchedKey];
+    }
+
+    // Realtime sırasında boş/stale bir squads payload gelirse son sağlam local kopyayı kullan.
+    const local = readSquads();
+    const localExact = Array.isArray(local?.[teamName]) ? local[teamName] : null;
+    if (localExact && localExact.length > 0) return localExact;
+    const localMatchedKey = Object.keys(local || {}).find(
+      (key) => canonicalTeamName(key).toLocaleLowerCase("tr-TR") === wanted
+    );
+    return localMatchedKey && Array.isArray(local[localMatchedKey]) ? local[localMatchedKey] : [];
   }
 
   function getPlayerName(player) {
@@ -298,6 +376,12 @@ export default function MatchCenter({
       player?.fullName ||
       "Oyuncu"
     );
+  }
+
+  function getPlayerLabel(player) {
+    const number = player?.shirtNumber ?? player?.number ?? player?.jerseyNumber ?? "";
+    const name = getPlayerName(player);
+    return number !== "" && number != null ? `${number} - ${name}` : name;
   }
 
   function getVisibleElapsedSeconds(match) {
@@ -335,6 +419,68 @@ export default function MatchCenter({
     localStorage.getItem("sscup-match-center-active") || ""
   );
 
+  // Tarayıcı/uygulama tamamen yeniden açıldığında App.jsx içindeki fixtures henüz
+  // eleme runtime bilgisini taşımayabilir. Aktif eleme maçını doğrudan kalıcı
+  // knockout app_state kaydından kurtar ve Maç Merkezi seçimini yeniden kur.
+  // Bu yalnız devam eden maçı hydrate eder; çalışan maçın skor/süre/olaylarına dokunmaz.
+  useEffect(() => {
+    let cancelled = false;
+
+    const recoverRunningKnockout = async () => {
+      const { data, error } = await supabase
+        .from("app_state")
+        .select("value")
+        .eq("id", "knockout")
+        .maybeSingle();
+
+      if (cancelled || error || !data?.value) return;
+      const value = data.value;
+      const candidates = [];
+      (Array.isArray(value.quarter) ? value.quarter : []).forEach((m, i) => candidates.push([`quarter-${i}`, "Çeyrek Final " + (i + 1), m]));
+      (Array.isArray(value.semi) ? value.semi : []).forEach((m, i) => candidates.push([`semi-${i}`, "Yarı Final " + (i + 1), m]));
+      candidates.push(["third-place-0", "3.'lük Maçı", value.thirdPlace]);
+      candidates.push(["final-0", "Final", value.finalMatch]);
+
+      const found = candidates.find(([, , m]) =>
+        m && m.played !== true && ["first_half", "halftime", "second_half", "penalty"].includes(m.matchPhase || "waiting")
+      );
+      if (!found) return;
+
+      const [knockoutKey, stageLabel, cloud] = found;
+      const recovered = {
+        ...cloud,
+        id: cloud.id || `knockout:${knockoutKey}`,
+        knockoutKey,
+        isKnockout: true,
+        stageLabel,
+        live: true,
+        played: false,
+        events: Array.isArray(cloud.events) ? cloud.events : [],
+        homeSquadSnapshot: Array.isArray(cloud.homeSquadSnapshot) ? cloud.homeSquadSnapshot : [],
+        awaySquadSnapshot: Array.isArray(cloud.awaySquadSnapshot) ? cloud.awaySquadSnapshot : [],
+      };
+      const recoveredKey = getMatchCenterKey(recovered, 0);
+
+      localStorage.setItem("sscup-match-center-active", recoveredKey);
+      setActiveMatchCenterKey(recoveredKey);
+
+      if (typeof setFixtures === "function") {
+        setFixtures((current) => {
+          const list = Array.isArray(current) ? current : [];
+          const idx = list.findIndex((m) => m?.isKnockout === true && m?.knockoutKey === knockoutKey);
+          const next = idx >= 0
+            ? list.map((m, i) => i === idx ? { ...m, ...recovered } : m)
+            : [...list, recovered];
+          localStorage.setItem("sscup-fixtures", JSON.stringify(next));
+          return next;
+        });
+      }
+    };
+
+    recoverRunningKnockout();
+    return () => { cancelled = true; };
+  }, [setFixtures]);
+
   // Maç Merkezi'ne hazırlanıp sonra geri çekilmiş eski bir maç localStorage'da
   // seçili kalabiliyordu. Böyle bir "waiting" kaydı, kendisinden daha erken
   // oynanmamış bir maç varken aktif kabul edilmez. Bu sayede saha kenarında
@@ -366,6 +512,7 @@ export default function MatchCenter({
 
   const stalePreparedSelection = Boolean(
     activeKeyMatch &&
+      activeKeyMatch?.isKnockout !== true &&
       !activeKeyIsRunning &&
       activeKeyPhase === "waiting" &&
       earlierUnplayedMatchExists
@@ -377,11 +524,41 @@ export default function MatchCenter({
     setActiveMatchCenterKey("");
   }, [stalePreparedSelection, activeMatchCenterKey]);
 
+  // Uygulama/tarayıcı yeniden açıldığında aktif eleme maçı local seçimden bağımsız
+  // olarak kendi runtime durumundan tekrar bulunabilsin. Eleme maçlarında first_half /
+  // halftime / second_half / penalty fazı tek başına devam eden maçı kanıtlar; eski bir
+  // localStorage seçimine ihtiyaç duyulmaz. Lig akışındaki mevcut live kontrolü korunur.
   const liveMatchIndex = fixtures.findIndex(
-    (match, index) =>
-      (match.live === true && match.played !== true && ["first_half", "halftime", "second_half", "penalty"].includes(match.matchPhase || "waiting")) ||
-      (!stalePreparedSelection && match.played !== true && activeMatchCenterKey && getMatchCenterKey(match, index) === activeMatchCenterKey)
+    (match, index) => {
+      const phase = match.matchPhase || "waiting";
+      const runningPhase = ["first_half", "halftime", "second_half", "penalty"].includes(phase);
+      const runningMatch =
+        match.played !== true &&
+        runningPhase &&
+        (match.live === true || match.isKnockout === true);
+      const selectedMatch =
+        !stalePreparedSelection &&
+        match.played !== true &&
+        activeMatchCenterKey &&
+        getMatchCenterKey(match, index) === activeMatchCenterKey;
+      return runningMatch || selectedMatch;
+    }
   );
+
+  // Devam eden eleme maçı buluttan/snapshot'tan geldiyse aktif seçim anahtarını da
+  // yeniden kur. Böylece refresh sonrası Maç Merkezi doğrudan aynı maçı gösterir.
+  useEffect(() => {
+    if (activeMatchCenterKey) return;
+    const runningIndex = fixtures.findIndex((match) =>
+      match?.played !== true &&
+      match?.isKnockout === true &&
+      ["first_half", "halftime", "second_half", "penalty"].includes(match?.matchPhase || "waiting")
+    );
+    if (runningIndex < 0) return;
+    const recoveredKey = getMatchCenterKey(fixtures[runningIndex], runningIndex);
+    localStorage.setItem("sscup-match-center-active", recoveredKey);
+    setActiveMatchCenterKey(recoveredKey);
+  }, [fixtures, activeMatchCenterKey]);
 
   const liveMatch = liveMatchIndex >= 0 ? fixtures[liveMatchIndex] : null;
 
@@ -619,7 +796,15 @@ export default function MatchCenter({
       played: match.played === true,
       live: match.live === true,
       matchPhase: match.matchPhase || "waiting",
+      timerRunning: match.timerRunning === true,
+      timerStartedAt: match.timerStartedAt ?? null,
+      elapsedSeconds: Math.max(0, safeNumber(match.elapsedSeconds)),
+      runtimeUpdatedAt: match.runtimeUpdatedAt || new Date().toISOString(),
       events: Array.isArray(match.events) ? match.events : [],
+      goals: Array.isArray(match.goals) ? match.goals : [],
+      deletedEventIds: Array.isArray(match.deletedEventIds) ? match.deletedEventIds.map(String) : [],
+      homeSquadSnapshot: Array.isArray(match.homeSquadSnapshot) ? match.homeSquadSnapshot : [],
+      awaySquadSnapshot: Array.isArray(match.awaySquadSnapshot) ? match.awaySquadSnapshot : [],
     };
 
     const [stage, rawIndex] = String(match.knockoutKey).split("-");
@@ -879,6 +1064,7 @@ export default function MatchCenter({
       newEvent.secondPlayerId =
         secondPlayer.id || secondPlayer.playerId || secondPlayerId;
       newEvent.secondPlayerName = getPlayerName(secondPlayer);
+      newEvent.secondPlayerShirtNumber = secondPlayer.shirtNumber || secondPlayer.number || "";
       newEvent.assistPlayerName = getPlayerName(player);
       newEvent.playerName = getPlayerName(player);
     }
@@ -889,7 +1075,9 @@ export default function MatchCenter({
       newEvent.playerInId =
         secondPlayer.id || secondPlayer.playerId || secondPlayerId;
       newEvent.playerInName = getPlayerName(secondPlayer);
+      newEvent.playerInShirtNumber = secondPlayer.shirtNumber || secondPlayer.number || "";
       newEvent.secondPlayerName = getPlayerName(secondPlayer);
+      newEvent.secondPlayerShirtNumber = secondPlayer.shirtNumber || secondPlayer.number || "";
     }
 
     const currentEvents = Array.isArray(liveMatch.events)
@@ -990,7 +1178,7 @@ export default function MatchCenter({
 
     const currentPenaltyTeamName =
       penaltySide === "home" ? liveMatch.home : liveMatch.away;
-    const squad = getTeamSquad(currentPenaltyTeamName);
+    const squad = getTeamSubstitutionState(penaltySide).starters;
     const player = squad.find(
       (item, index) =>
         String(item.id || item.playerId || index) === String(penaltyPlayerId)
@@ -1271,9 +1459,10 @@ export default function MatchCenter({
       const lineup = getSideLineup(side);
       const validIds = new Set(teamSquad.map((player, index) => playerKey(player, index)));
       const selectedIds = [...lineup.starters, ...lineup.bench];
-      if (teamSquad.length < 10) return `${teamName} takımında maç için en az 10 kayıtlı oyuncu olmalı (7 AS + 3 YEDEK).`;
+      if (teamSquad.length < 7) return `${teamName} takımında maç için en az 7 kayıtlı oyuncu olmalı.`;
       if (lineup.starters.length !== 7) return `${teamName} için tam 7 AS oyuncu seçilmelidir.`;
-      if (lineup.bench.length < 3 || lineup.bench.length > 5) return `${teamName} için en az 3, en fazla 5 YEDEK seçilmelidir.`;
+      const expectedBench = Math.min(5, Math.max(0, teamSquad.length - 7));
+      if (lineup.bench.length !== expectedBench) return `${teamName} için kayıtlı oyunculardan kalan ${expectedBench} oyuncu YEDEK seçilmelidir.`;
       if (new Set(selectedIds).size !== selectedIds.length || selectedIds.some((id) => !validIds.has(id))) return `${teamName} maç kadrosunda geçersiz veya tekrarlanan oyuncu var.`;
       const suspendedSelected = teamSquad.find((player, index) =>
         selectedIds.includes(playerKey(player, index)) && isPlayerSuspendedForLiveMatch(side, player, index)
@@ -1305,7 +1494,7 @@ export default function MatchCenter({
               const suspended = isPlayerSuspendedForLiveMatch(side, player, index);
               return (
                 <div key={id} style={{ display: "grid", gridTemplateColumns: "1fr 118px", gap: "8px", alignItems: "center", background: "rgba(255,255,255,.05)", padding: "7px", borderRadius: "8px" }}>
-                  <span><b>#{player.shirtNumber ?? player.number ?? "-"}</b> {getPlayerName(player)} {suspended ? <b style={{ color: "#ff6b6b" }}> • CEZALI</b> : null}</span>
+                  <span><b>{getPlayerLabel(player)}</b> {suspended ? <b style={{ color: "#ff6b6b" }}> • CEZALI</b> : null}</span>
                   <select
                     value={status}
                     onChange={(event) => setPlayerLineupStatus(side, player, index, event.target.value)}
@@ -1345,7 +1534,19 @@ export default function MatchCenter({
         alert(`⛔ MAÇ BAŞLATILAMAZ\n\n${lineupError}`);
         return;
       }
-      startPhase("first_half");
+      // Başlatma anındaki iki takım kadrosunu maç kaydına kilitle. Böylece Supabase/
+      // localStorage yeniden yüklemesi oyuncu listesini boşaltsa bile maç devam eder.
+      const homeSquadSnapshot = getTeamSquad(liveMatch.home, null);
+      const awaySquadSnapshot = getTeamSquad(liveMatch.away, null);
+      updateLiveMatch({
+        live: true,
+        matchPhase: "first_half",
+        timerRunning: true,
+        timerStartedAt: Date.now(),
+        elapsedSeconds: 0,
+        homeSquadSnapshot,
+        awaySquadSnapshot,
+      });
       return;
     }
 
@@ -1751,7 +1952,7 @@ export default function MatchCenter({
             </button>
           </div>
 
-          {getTeamSquad(penaltySide === "home" ? liveMatch.home : liveMatch.away).length > 0 ? (
+          {getTeamSubstitutionState(penaltySide).starters.length > 0 ? (
             <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxWidth: "500px", margin: "0 auto" }}>
               <select
                 value={penaltyPlayerId}
@@ -1759,12 +1960,11 @@ export default function MatchCenter({
                 style={{ padding: "10px", borderRadius: "8px", border: "1px solid #475569", background: "#334155", color: "white", fontWeight: "bold" }}
               >
                 <option value="">-- Penaltıyı Atacak Oyuncuyu Seçin --</option>
-                {getTeamSquad(penaltySide === "home" ? liveMatch.home : liveMatch.away).map((player, index) => {
+                {getTeamSubstitutionState(penaltySide).starters.map((player, index) => {
                   const playerId = player.id || player.playerId || index;
                   return (
                     <option key={playerId} value={playerId}>
-                      {player.shirtNumber || player.number ? `#${player.shirtNumber || player.number} - ` : ""}
-                      {getPlayerName(player)}
+                      {getPlayerLabel(player)}
                     </option>
                   );
                 })}
@@ -1895,10 +2095,7 @@ export default function MatchCenter({
 
                   return (
                     <option key={playerId} value={playerId}>
-                      {player.shirtNumber || player.number
-                        ? `${player.shirtNumber || player.number} - `
-                        : ""}
-                      {getPlayerName(player)}
+                      {getPlayerLabel(player)}
                     </option>
                   );
                 })}
@@ -1932,10 +2129,7 @@ export default function MatchCenter({
 
                     return (
                       <option key={playerId} value={playerId}>
-                        {player.shirtNumber || player.number
-                          ? `${player.shirtNumber || player.number} - `
-                          : ""}
-                        {getPlayerName(player)}
+                        {getPlayerLabel(player)}
                       </option>
                     );
                   })}
@@ -1945,13 +2139,13 @@ export default function MatchCenter({
               {eventType === "substitution" && (
                 <div style={{ width: "100%", marginTop: "8px", fontSize: "12px" }}>
                   <b>As Kadro ({selectedSubstitutionState.starters.length})</b>:{" "}
-                  {selectedSubstitutionState.starters.map(getPlayerName).join(", ") || "-"}
+                  {selectedSubstitutionState.starters.map(getPlayerLabel).join(", ") || "-"}
                   <br />
                   <b>Yedekler ({selectedSubstitutionState.bench.length})</b>:{" "}
                   {selectedSubstitutionState.bench.map((player) => {
                     const originalIndex = selectedSquad.indexOf(player);
                     const locked = selectedSubstitutionState.lockedOut.has(playerKey(player, originalIndex));
-                    return `${getPlayerName(player)}${locked ? " (çıktı - tekrar giremez)" : ""}`;
+                    return `${getPlayerLabel(player)}${locked ? " (çıktı - tekrar giremez)" : ""}`;
                   }).join(", ") || "-"}
                 </div>
               )}
@@ -2195,9 +2389,7 @@ export default function MatchCenter({
                   <span>{index + 1}</span>
 
                   <strong>
-                    {player.playerName ||
-                      player.name ||
-                      "Oyuncu"}
+                    {(player.shirtNumber ? `${player.shirtNumber} - ` : "") + (player.playerName || player.name || "Oyuncu")}
                   </strong>
 
                   <small>
