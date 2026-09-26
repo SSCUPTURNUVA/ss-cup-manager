@@ -336,11 +336,11 @@ export default function MatchCenter({
   );
 
   useEffect(() => {
-    const handleActiveMatchChanged = (event) => {
+    const onActiveMatchChanged = (event) => {
       setActiveMatchCenterKey(String(event?.detail || localStorage.getItem("sscup-match-center-active") || ""));
     };
-    window.addEventListener("sscup-match-center-active-changed", handleActiveMatchChanged);
-    return () => window.removeEventListener("sscup-match-center-active-changed", handleActiveMatchChanged);
+    window.addEventListener("sscup-match-center-active-changed", onActiveMatchChanged);
+    return () => window.removeEventListener("sscup-match-center-active-changed", onActiveMatchChanged);
   }, []);
 
   // Maç Merkezi'ne hazırlanıp sonra geri çekilmiş eski bir maç localStorage'da
@@ -978,9 +978,9 @@ export default function MatchCenter({
     await persistFixtures(updatedFixtures);
     const updatedMatch = updatedFixtures[liveMatchIndex];
 
-    // persistFixtures eleme maçını da tam snapshot olarak zaten bir kez buluta yazar.
-    // Burada ikinci yazım yapılmaz; event ekle/sil sırasında yarış ve hayalet kayıt oluşmaz.
-
+    // Lig maçı persistFixtures içinde skor + event + kart + timer tek payload olarak
+    // yazılır. Burada ikinci, eksik bir UPDATE çalıştırmak aynı maçın yeni eventlerini
+    // eski/eksik veriyle yarıştırıyordu. Eleme maçı ise kendi app_state kaydını kullanır.
     if (EVENT_TYPES[eventType]?.countsGoal === true) {
       rebuildGoalScorers(updatedFixtures);
     }
@@ -1955,7 +1955,7 @@ export default function MatchCenter({
               {eventType === "substitution" && (
                 <div style={{ width: "100%", marginTop: "8px", fontSize: "12px" }}>
                   <b>As Kadro ({selectedSubstitutionState.starters.length})</b>:{" "}
-                  {selectedSubstitutionState.starters.map(getPlayerName).join(", ") || "-"}
+                  {selectedSubstitutionState.starters.map((p) => `${p.shirtNumber ?? p.number ?? "-"} - ${getPlayerName(p)}`).join(", ") || "-"}
                   <br />
                   <b>Yedekler ({selectedSubstitutionState.bench.length})</b>:{" "}
                   {selectedSubstitutionState.bench.map((player) => {

@@ -43,6 +43,12 @@ export function applyMatchEventRowsToFixtures(fixtures, rows) {
     const changes = grouped.get(matchKey);
     if (!changes?.length) return match;
 
+    const phase = match?.matchPhase || match?.match_phase || "waiting";
+    const isActiveSnapshot =
+      match?.played !== true &&
+      (match?.live === true || ["first_half", "halftime", "second_half", "penalty"].includes(phase));
+    if (isActiveSnapshot) return match;
+
     const deleted = new Set((Array.isArray(match?.deletedEventIds) ? match.deletedEventIds : []).map(String));
     const byId = new Map();
     (Array.isArray(match?.events) ? match.events : []).forEach((event) => {
