@@ -207,7 +207,7 @@ function statusText(match) {
   return match?.time || "SAAT BEKLENİYOR";
 }
 
-function MatchDetailModal({ match, onClose, now, halfDurationMinutes }) {
+function MatchDetailModal({ match, onClose, now, halfDurationMinutes, squads }) {
   const eventsContainerRef = useRef(null);
   const events = match ? getEvents(match) : [];
   const penaltyEvents = match ? getEvents(match).filter((event) => ["penalty_shootout_goal", "penalty_shootout_miss"].includes(event.type)) : [];
@@ -215,6 +215,16 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes }) {
   const awayPenaltyEvents = penaltyEvents.filter((event) => event.team === match.away || event.side === "away");
   const matchEvents = events.filter((event) => !["penalty_shootout_goal", "penalty_shootout_miss"].includes(event.type));
   const latestEventId = matchEvents.length > 0 ? String(matchEvents[matchEvents.length - 1]?.id || "") : "";
+
+  const findShirtNumber = (teamName, playerName, directNumber = "") => {
+    if (directNumber !== "" && directNumber != null) return directNumber;
+    if (!teamName || !playerName || !squads || typeof squads !== "object") return "";
+    const normalize = (value) => String(value || "").trim().toLocaleLowerCase("tr-TR");
+    const player = (Array.isArray(squads?.[teamName]) ? squads[teamName] : []).find((item) =>
+      normalize(item?.name || item?.playerName) === normalize(playerName)
+    );
+    return player?.shirtNumber ?? player?.number ?? "";
+  };
 
   useEffect(() => {
     if (!match || !eventsContainerRef.current || matchEvents.length === 0) return;
@@ -259,7 +269,7 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes }) {
                     <div className="public-modal-penalty-empty">Henüz atış yok</div>
                   ) : group.events.map((event) => (
                     <div className="public-modal-penalty-row" key={`pen-${event.id}`}>
-                      <span>{event.shirtNumber ? `${event.shirtNumber} ` : ""}{event.player} <small>PEN.</small></span>
+                      <span>{findShirtNumber(event.team, event.player, event.shirtNumber) !== "" ? `#${findShirtNumber(event.team, event.player, event.shirtNumber)} ` : ""}{event.player} <small>PEN.</small></span>
                       <strong className={event.type === "penalty_shootout_goal" ? "ok" : "miss"}>{event.type === "penalty_shootout_goal" ? "✓" : "✕"}</strong>
                     </div>
                   ))}
@@ -274,7 +284,7 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes }) {
         {matchEvents.length === 0 ? (
           <div className="public-modal-empty">{match.played ? "Bu maç için kayıtlı gol/kart olayı bulunmuyor." : "Maç başladığında goller ve kartlar burada görünecek."}</div>
         ) : (
-          <div className="public-modal-events" ref={eventsContainerRef}>
+          <div className="public-modal-events" ref={eventsContainerRef} tabIndex={0} onWheel={(event) => event.stopPropagation()} onTouchMove={(event) => event.stopPropagation()}>
             {matchEvents.map((event) => (
               <div className="public-modal-event" key={event.id}>
                 <span className="public-modal-event-minute">{event.minute !== "" ? `${event.minute}'` : "•"}</span>
@@ -283,12 +293,12 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes }) {
                   <b>{event.label}</b>
                   {event.type === "substitution" ? (
                     <>
-                      <strong>Çıktı: {event.playerOutName || event.player}</strong>
-                      <small>Girdi: {event.playerInName || "Oyuncu"} • {event.team}</small>
+                      <strong>Çıktı: {findShirtNumber(event.team, event.playerOutName || event.player, event.shirtNumber) !== "" ? `#${findShirtNumber(event.team, event.playerOutName || event.player, event.shirtNumber)} ` : ""}{event.playerOutName || event.player}</strong>
+                      <small>Girdi: {findShirtNumber(event.team, event.playerInName, event.secondPlayerShirtNumber) !== "" ? `#${findShirtNumber(event.team, event.playerInName, event.secondPlayerShirtNumber)} ` : ""}{event.playerInName || "Oyuncu"} • {event.team}</small>
                     </>
                   ) : (
                     <>
-                      <strong>{event.player}</strong>
+                      <strong>{findShirtNumber(event.team, event.player, event.shirtNumber) !== "" ? `#${findShirtNumber(event.team, event.player, event.shirtNumber)} ` : ""}{event.player}</strong>
                       <small>{event.team}</small>
                     </>
                   )}
@@ -308,6 +318,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const [remoteTeams, setRemoteTeams] = useState(null);
   const [remoteSquads, setRemoteSquads] = useState(null);
   const [remoteKnockout, setRemoteKnockout] = useState([]);
+  const [remoteKnockoutDraw, setRemoteKnockoutDraw] = useState([]);
   const [remoteSettings, setRemoteSettings] = useState(null);
   const [activeFixtureIds, setActiveFixtureIds] = useState(null);
   const [publicMatchCenterId, setPublicMatchCenterId] = useState("");
@@ -347,7 +358,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         supabase.from("fixtures").select("*").order("id"),
         supabase.from("app_state")
           .select("id,value,updated_at")
-          .in("id", ["squads", "knockout", "knockout_match_center_v1", "active_fixture_ids", "settings", "fixtures_snapshot", "public_match_center"]),
+          .in("id", ["squads", "knockout", "knockout_draw_v1", "knockout_match_center_v1", "active_fixture_ids", "settings", "fixtures_snapshot", "public_match_center"]),
         fetchMatchEventRows(),
       ]);
 
@@ -413,6 +424,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       setPublicMatchCenterId(String(centerRow?.value?.matchId || ""));
 
       let stagedKnockout = null;
+      const drawRow = stateById.get("knockout_draw_v1");
+      const drawPairs = Array.isArray(drawRow?.value?.pairs) ? drawRow.value.pairs.slice(0, 4) : [];
+      setRemoteKnockoutDraw(drawPairs);
+
       const knockoutRow = stateById.get("knockout");
       const value = knockoutRow?.value && typeof knockoutRow.value === "object" ? knockoutRow.value : {};
       const cloudUpdatedAt = knockoutRow?.updated_at || "";
@@ -535,6 +550,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       .on("postgres_changes", { event: "*", schema: "public", table: "fixtures" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.squads" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout" }, refresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout_draw_v1" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout_match_center_v1" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.active_fixture_ids" }, refresh)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.settings" }, refresh)
@@ -633,6 +649,16 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           else next.push(mapped);
           return next;
         });
+
+        // Canlı maç detay penceresi açıksa sadece listeyi değil, ekranda render edilen
+        // seçili maç state'ini de güncelle. Önceden gol/olay Supabase'e geliyor fakat
+        // modal eski nesneyi tuttuğu için kapat-aç yapmadan görünmüyordu.
+        setSelectedMatch((current) => {
+          if (!current) return current;
+          const sameId = String(current?.id || "") === String(mapped.id || "");
+          const sameKey = mapped.knockoutKey && String(current?.knockoutKey || "") === String(mapped.knockoutKey);
+          return sameId || sameKey ? { ...current, ...mapped } : current;
+        });
       } catch (error) {
         console.error("Eleme canlı hızlı yenileme hatası:", error);
       } finally {
@@ -702,7 +728,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const q = [0,1,2,3].map((i) => byKoKey.get(`quarter-${i}`)).filter(Boolean);
   const qTeams = [0,1,2,3].map((i) => {
     const m = byKoKey.get(`quarter-${i}`);
-    return { home: m?.home || `ÇF ${i + 1} Takım 1`, away: m?.away || `ÇF ${i + 1} Takım 2`, winner: koWinner(m, m?.home, m?.away) };
+    const drawPair = Array.isArray(remoteKnockoutDraw?.[i]) ? remoteKnockoutDraw[i] : [];
+    const home = m?.home || drawPair[0] || `ÇF ${i + 1} Takım 1`;
+    const away = m?.away || drawPair[1] || `ÇF ${i + 1} Takım 2`;
+    return { home, away, winner: koWinner(m, home, away) };
   });
   const semiPairs = [
     { home: qTeams[0].winner || "ÇF 1 Galibi", away: qTeams[2].winner || "ÇF 3 Galibi" },
@@ -715,7 +744,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const s0l = koLoser(semi0, semiPairs[0].home, semiPairs[0].away);
   const s1l = koLoser(semi1, semiPairs[1].home, semiPairs[1].away);
 
-  const knockoutMatches = rawKnockoutMatches.length === 0 ? [] : [
+  const hasKnockoutDraw = remoteKnockoutDraw.some((pair) => Array.isArray(pair) && pair[0] && pair[1]);
+  const knockoutMatches = (rawKnockoutMatches.length === 0 && !hasKnockoutDraw) ? [] : [
     ...[0,1,2,3].map((i) => ({ ...(byKoKey.get(`quarter-${i}`) || {}), id: byKoKey.get(`quarter-${i}`)?.id || `ko-quarter-${i}`, knockoutKey: `quarter-${i}`, isKnockout: true, stageLabel: "ÇEYREK FİNAL", home: qTeams[i].home, away: qTeams[i].away })),
     { ...(semi0 || {}), id: semi0?.id || "ko-semi-0", knockoutKey: "semi-0", isKnockout: true, stageLabel: "YARI FİNAL", home: semiPairs[0].home, away: semiPairs[0].away },
     { ...(semi1 || {}), id: semi1?.id || "ko-semi-1", knockoutKey: "semi-1", isKnockout: true, stageLabel: "YARI FİNAL", home: semiPairs[1].home, away: semiPairs[1].away },
@@ -1097,7 +1127,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         <footer className="public-live-footer"><div><b>{tournamentName}</b><span>{displaySettings.slogan || "Kazanan Sahada Belli Olur"}</span></div><small>{lastSync ? `Son veri: ${lastSync.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Canlı veri bağlantısı kuruluyor…"}</small></footer>
       </main>
 
-      <MatchDetailModal match={selectedMatch} onClose={() => setSelectedMatch(null)} now={now} halfDurationMinutes={displaySettings.halfDurationMinutes || 30} />
+      <MatchDetailModal match={selectedMatch} onClose={() => setSelectedMatch(null)} now={now} halfDurationMinutes={displaySettings.halfDurationMinutes || 30} squads={displaySquads} />
     </div>
   );
 }

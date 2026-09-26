@@ -500,6 +500,29 @@ export default function App() {
   }, [fixtureBootstrapReady, isPublicRoute]);
 
   const [goalScorers, setGoalScorers] = useState([]);
+  const [knockoutStatMatches, setKnockoutStatMatches] = useState([]);
+
+  useEffect(() => {
+    if (isPublicRoute) return;
+    let cancelled = false;
+    const loadKnockoutStats = async () => {
+      const { data, error } = await supabase.from("app_state").select("value").eq("id", "knockout").maybeSingle();
+      if (error || cancelled) return;
+      const value = data?.value && typeof data.value === "object" ? data.value : {};
+      const matches = [
+        ...(Array.isArray(value.quarter) ? value.quarter : []),
+        ...(Array.isArray(value.semi) ? value.semi : []),
+        ...(value.finalMatch ? [value.finalMatch] : []),
+        ...(value.thirdPlace ? [value.thirdPlace] : []),
+      ].filter(Boolean);
+      setKnockoutStatMatches(matches);
+    };
+    loadKnockoutStats();
+    const channel = supabase.channel(`goal-stats-knockout-${Date.now()}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout" }, loadKnockoutStats)
+      .subscribe();
+    return () => { cancelled = true; supabase.removeChannel(channel); };
+  }, [isPublicRoute]);
 
   useEffect(() => {
     localStorage.setItem("sscup-format", JSON.stringify(tournamentFormat));
@@ -897,11 +920,12 @@ export default function App() {
   useEffect(() => {
     // Gol krallığı ayrı ve bağımsız bir "hayalet" kayıt değildir.
     // Her zaman maç eventlerinden yeniden hesaplanır; skor/event silinmeden bu liste de kaybolmaz.
-    const derived = deriveGoalScorers(fixtures);
+    const leagueFixtures = (fixtures || []).filter((match) => match?.isKnockout !== true);
+    const derived = deriveGoalScorers([...leagueFixtures, ...knockoutStatMatches]);
     setGoalScorers(derived);
     localStorage.setItem("sscup-goals", JSON.stringify(derived));
     localStorage.setItem("sscup-goal-scorers", JSON.stringify(derived));
-  }, [fixtures]);
+  }, [fixtures, knockoutStatMatches]);
 
   useEffect(() => {
     const refreshSettings = () => {

@@ -424,3 +424,38 @@
 @media (max-width: 640px) {
   .public-fixture-week-head { align-items: flex-start; flex-direction: column; }
 }
+
+/* V25: Canlı maç detayında olay listesi kendi alanında kesin kaydırılır. */
+.public-modal-events{
+  height:min(44vh,460px);
+  max-height:min(44vh,460px);
+  min-height:120px;
+  overflow-y:scroll !important;
+  overflow-x:hidden;
+  touch-action:pan-y;
+  overscroll-behavior-y:contain;
+}
+@media(max-width:560px){.public-modal-events{height:42vh;max-height:42vh;}}
+
+
+/* V26: Canlı maç detayı - gerçek olay paneli kaydırma + görünür scrollbar */
+.public-match-modal{overflow:hidden !important;display:flex;flex-direction:column;}
+.public-modal-events{
+  flex:0 1 360px;
+  height:360px !important;
+  min-height:120px;
+  max-height:42vh !important;
+  overflow-y:auto !important;
+  overflow-x:hidden !important;
+  overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;
+  touch-action:pan-y;
+  scrollbar-width:auto;
+  scrollbar-color:#ffc400 #162331;
+  padding-bottom:18px !important;
+}
+.public-modal-events::-webkit-scrollbar{width:10px;}
+.public-modal-events::-webkit-scrollbar-track{background:#162331;border-radius:10px;}
+.public-modal-events::-webkit-scrollbar-thumb{background:#ffc400;border-radius:10px;border:2px solid #162331;}
+.public-modal-events:focus{outline:1px solid rgba(255,196,0,.35);outline-offset:-1px;}
+@media(max-width:560px){.public-modal-events{height:38vh !important;max-height:38vh !important;}}

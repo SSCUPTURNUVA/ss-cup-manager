@@ -60,6 +60,26 @@ export default function KnockoutMatchCenter() {
     return () => { cancelled = true; };
   }, []);
 
+  // Eleme Turu'ndan farklı bir maç merkeze alındığında component açık kalsa bile
+  // yeni aktif maçı anında yükle. Böylece ÇF2 açılırken ÇF1 ekranda kalmaz.
+  useEffect(() => {
+    let mounted = true;
+    const reloadActiveMatch = async () => {
+      const { data, error } = await supabase.from("app_state").select("value").eq("id", STATE_ID).maybeSingle();
+      if (error || !mounted) return;
+      const loaded = normalizeMatch(data?.value?.activeMatch || null);
+      setMatch(loaded);
+      if (loaded?.id && loaded.played !== true) localStorage.setItem(ACTIVE_KEY, String(loaded.id));
+      else localStorage.removeItem(ACTIVE_KEY);
+    };
+    const channel = supabase.channel(`ko-center-active-${Math.random().toString(36).slice(2)}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: `id=eq.${STATE_ID}` }, reloadActiveMatch)
+      .subscribe();
+    const onFocus = () => void reloadActiveMatch();
+    window.addEventListener("focus", onFocus);
+    return () => { mounted = false; window.removeEventListener("focus", onFocus); supabase.removeChannel(channel); };
+  }, []);
+
   const persistMatch = useCallback(async (nextMatch) => {
     const normalized = normalizeMatch(nextMatch);
     setMatch(normalized);
@@ -139,14 +159,14 @@ export default function KnockoutMatchCenter() {
           timerRunning: existing?.timerRunning === true, timerStartedAt: existing?.timerStartedAt || null,
         });
         const q1w=winnerOf(q1), q2w=winnerOf(q2), q3w=winnerOf(q3), q4w=winnerOf(q4);
-        if (q1w && q3w) semi[0] = ensureMatch(semi[0], "semi-1", "Yarı Final 1", q1w, q3w);
-        if (q2w && q4w) semi[1] = ensureMatch(semi[1], "semi-2", "Yarı Final 2", q2w, q4w);
+        // Kazanan diğer çeyrek finali beklemeden yarı final slotuna yerleşir.
+        if (q1w || q3w) semi[0] = ensureMatch(semi[0], "semi-1", "Yarı Final 1", q1w || semi[0]?.home || "", q3w || semi[0]?.away || "");
+        if (q2w || q4w) semi[1] = ensureMatch(semi[1], "semi-2", "Yarı Final 2", q2w || semi[1]?.home || "", q4w || semi[1]?.away || "");
         value.semi = semi;
-        const s1=semi[0], s2=semi[1], s1w=winnerOf(s1), s2w=winnerOf(s2);
-        if (s1w && s2w) {
-          value.finalMatch = ensureMatch(value.finalMatch, "final-0", "Final", s1w, s2w);
-          value.thirdPlace = ensureMatch(value.thirdPlace, "third-place-0", "3.'lük Maçı", loserOf(s1), loserOf(s2));
-        }
+        const s1=semi[0], s2=semi[1], s1w=winnerOf(s1), s2w=winnerOf(s2), s1l=loserOf(s1), s2l=loserOf(s2);
+        // Yarı final biter bitmez kazanan finale, kaybeden 3.'lük maçına yerleşir.
+        if (s1w || s2w) value.finalMatch = ensureMatch(value.finalMatch, "final-0", "Final", s1w || value.finalMatch?.home || "", s2w || value.finalMatch?.away || "");
+        if (s1l || s2l) value.thirdPlace = ensureMatch(value.thirdPlace, "third-place-0", "3.'lük Maçı", s1l || value.thirdPlace?.home || "", s2l || value.thirdPlace?.away || "");
       }
 
       const knockoutWrite = supabase.from("app_state").upsert({
@@ -160,7 +180,29 @@ export default function KnockoutMatchCenter() {
         updated_at: now,
       });
 
-      const results = await Promise.all([centerWrite, knockoutWrite, publicCenterWrite]);
+      const writes = [centerWrite, knockoutWrite, publicCenterWrite];
+
+      // Biten eleme maçını lig arşivinden tamamen bağımsız Eleme Sonuçları arşivine yaz.
+      if (normalized?.played === true) {
+        const { data: resultsRow, error: resultsReadError } = await supabase
+          .from("app_state")
+          .select("value")
+          .eq("id", "knockout_results_v1")
+          .maybeSingle();
+        if (resultsReadError) throw resultsReadError;
+        const archive = Array.isArray(resultsRow?.value) ? [...resultsRow.value] : [];
+        const completed = { ...normalized, completedAt: normalized.completedAt || now };
+        const existingIndex = archive.findIndex((item) => String(item?.id) === String(completed.id));
+        if (existingIndex >= 0) archive[existingIndex] = completed;
+        else archive.unshift(completed);
+
+        // Eleme sonuç arşivi bağımsız kalır; gol ve kart istatistikleri genel turnuva
+        // panellerinde lig + eleme maç eventlerinden birlikte hesaplanır.
+
+        writes.push(supabase.from("app_state").upsert({ id: "knockout_results_v1", value: archive, updated_at: now }));
+      }
+
+      const results = await Promise.all(writes);
       const failed = results.find((result) => result?.error);
       if (failed?.error) throw failed.error;
       // Postgres Realtime yayını projede kapalı/gecikmeli olsa bile açık canlı

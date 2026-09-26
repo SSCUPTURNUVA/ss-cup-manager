@@ -102,7 +102,7 @@ export default function DisciplineBoard({ fixtures = [], teams = [] }) {
       byKey.set(key, { ...existing, ...match, deletedEventIds, events: Array.from(eventMap.values()) });
     };
 
-    (fixtures || []).forEach((match, index) => mergeMatch(match, index));
+    (fixtures || []).filter((match) => match?.isKnockout !== true).forEach((match, index) => mergeMatch(match, index));
     (cloudEventFixtures || []).forEach((match, index) => mergeMatch(match, index));
     return Array.from(byKey.values());
   }, [fixtures, cloudEventFixtures]);

@@ -631,6 +631,10 @@ export default function MatchCenter({
   const topFiveScorers = goalScorers.slice(0, 5);
 
   async function syncKnockoutStateToCloud(match) {
+    // Bağımsız Eleme Maç Merkezi'nde knockout app_state yazımını yalnız
+    // KnockoutMatchCenter yönetir. Eski ortak MatchCenter senkronu quarter-1'i
+    // dizi index 1'e yazarak ÇF1'i ÇF2'nin üstüne kopyalıyordu.
+    if (isolatedKnockout) return;
     if (!match?.isKnockout || !match?.knockoutKey) return;
 
     const { data, error: readError } = await supabase
@@ -952,6 +956,7 @@ export default function MatchCenter({
         secondPlayer.id || secondPlayer.playerId || secondPlayerId;
       newEvent.playerInName = getPlayerName(secondPlayer);
       newEvent.secondPlayerName = getPlayerName(secondPlayer);
+      newEvent.secondPlayerShirtNumber = secondPlayer.shirtNumber || secondPlayer.number || "";
     }
 
     const currentEvents = Array.isArray(liveMatch.events)

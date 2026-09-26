@@ -21,6 +21,11 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
   const [drawId, setDrawId] = useState("");
   const [firstTeam, setFirstTeam] = useState("");
   const [knockoutCloud, setKnockoutCloud] = useState({});
+  const [knockoutResults, setKnockoutResults] = useState([]);
+  const [resetting, setResetting] = useState(false);
+  const [selectedResult, setSelectedResult] = useState(null);
+  const [resetModalOpen, setResetModalOpen] = useState(false);
+  const [notice, setNotice] = useState("");
   const drawLoadedRef = useRef(false);
 
   // Eleme kurasını Supabase'den geri yükle. İlk boş render buluttaki kuranın
@@ -78,33 +83,46 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
     return () => { mounted = false; supabase.removeChannel(channel); };
   }, []);
 
+  useEffect(() => {
+    let mounted = true;
+    const loadResults = async () => {
+      const { data } = await supabase.from("app_state").select("value").eq("id", "knockout_results_v1").maybeSingle();
+      if (mounted) setKnockoutResults(Array.isArray(data?.value) ? data.value : []);
+    };
+    loadResults();
+    const channel = supabase.channel(`ko-results-${Math.random().toString(36).slice(2)}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout_results_v1" }, loadResults)
+      .subscribe();
+    return () => { mounted = false; supabase.removeChannel(channel); };
+  }, []);
+
+
   const usedTeams = useMemo(() => new Set(pairs.flat()), [pairs]);
   const availableTeams = topEight.filter((team) => !usedTeams.has(team));
   const secondOptions = availableTeams.filter((team) => team !== firstTeam);
 
-  async function resetDraw() {
-    // Yalnız eleme turunu temizle; lig maçlarına dokunma.
-    const knockoutFixtures = fixtures.filter((match) => match?.isKnockout === true);
-    const knockoutIds = new Set(
-      knockoutFixtures.flatMap((match) => [match?.id, match?.knockoutKey].filter(Boolean).map(String))
-    );
+  async function resetDraw({ askConfirm = false } = {}) {
+    if (resetting) return;
+    if (askConfirm) setResetting(true);
+    // TEST MODU: Eleme sistemini tamamen sıfırla. Lig verilerine dokunma.
     const nextFixtures = fixtures.filter((match) => match?.isKnockout !== true);
 
     setPairs([]);
     setDrawId("");
     setFirstTeam("");
+    setKnockoutCloud({});
+    setKnockoutResults([]);
 
-    // Maç Merkezi'nde seçili olan maç bir eleme maçıysa kaldır.
-    const activeKey = localStorage.getItem("sscup-match-center-active") || "";
-    if (knockoutIds.has(String(activeKey))) {
-      localStorage.removeItem("sscup-match-center-active");
-    }
+    // Ayrı Eleme Maç Merkezi aktif seçimini tamamen kaldır.
+    localStorage.removeItem("sscup-knockout-match-center-active");
 
-    // Yalnız eleme maçlarına ait hazır kadroları temizle.
+    // Sadece eleme maçlarına ait hazır kadroları temizle.
+    // Bağımsız eleme maçlarının id'leri knockout: ile başlar; lig kadroları korunur.
     try {
       const savedLineups = JSON.parse(localStorage.getItem("sscup-match-lineups") || "{}");
-      const nextLineups = { ...savedLineups };
-      knockoutIds.forEach((id) => delete nextLineups[id]);
+      const nextLineups = Object.fromEntries(
+        Object.entries(savedLineups).filter(([key]) => !String(key).startsWith("knockout:"))
+      );
       localStorage.setItem("sscup-match-lineups", JSON.stringify(nextLineups));
       await supabase.from("app_state").upsert({
         id: "match_lineups",
@@ -115,32 +133,59 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
       console.error("Eleme kadroları temizlenemedi:", error);
     }
 
-    // Eleme maçlarını fixture listesinden çıkar ve hem yerelde hem bulutta kalıcılaştır.
+    // Eski yapıda fixtures içine düşmüş eleme kayıtları varsa yalnız onları çıkar.
     localStorage.setItem("sscup-fixtures", JSON.stringify(nextFixtures));
     if (typeof setFixtures === "function") setFixtures(nextFixtures);
     window.dispatchEvent(new CustomEvent("sscup-fixtures-updated", { detail: nextFixtures }));
 
     try {
       const now = new Date().toISOString();
-      await Promise.all([
+      const writes = await Promise.all([
+        // Kura + ÇF/YF/Final/3.'lük ilerlemesi tamamen temizlenir.
         supabase.from("app_state").upsert({
           id: "knockout_draw_v1",
           value: { mode, pairs: [], drawId: "" },
           updated_at: now,
         }),
         supabase.from("app_state").upsert({
+          id: "knockout",
+          value: {},
+          updated_at: now,
+        }),
+        // Aktif eleme maçı, skor, süre, olay, penaltı kaydı tamamen temizlenir.
+        supabase.from("app_state").upsert({
           id: "knockout_match_center_v1",
           value: { activeMatch: null },
           updated_at: now,
         }),
+        // Canlı takip artık sıfırlanan eleme maçını aktif maç olarak tutmasın.
+        supabase.from("app_state").upsert({
+          id: "public_match_center",
+          value: { matchId: "" },
+          updated_at: now,
+        }),
+        // İleride/şu anda kullanılan bağımsız eleme arşiv ve istatistik kayıtları da testte sıfırlansın.
+        supabase.from("app_state").upsert({ id: "knockout_results_v1", value: [], updated_at: now }),
+        supabase.from("app_state").upsert({ id: "knockout_goal_scorers_v1", value: [], updated_at: now }),
+        supabase.from("app_state").upsert({ id: "knockout_cards_v1", value: [], updated_at: now }),
         supabase.from("app_state").upsert({
           id: "fixtures_snapshot",
           value: nextFixtures,
           updated_at: now,
         }),
       ]);
+      const failed = writes.find((result) => result?.error);
+      if (failed?.error) throw failed.error;
     } catch (error) {
-      console.error("Eleme sıfırlama buluta kaydedilemedi:", error);
+      console.error("Eleme sistemi tamamen sıfırlanamadı:", error);
+      if (askConfirm) setNotice("Eleme sistemi sıfırlanamadı. Lütfen tekrar deneyin.");
+      if (askConfirm) setResetting(false);
+      return;
+    }
+
+    if (askConfirm) {
+      setResetting(false);
+      setNotice("Eleme sistemi sıfırlandı.");
     }
   }
 
@@ -150,10 +195,17 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
   }
 
   function addManualPair(secondTeam) {
-    if (!firstTeam || !secondTeam || firstTeam === secondTeam) return;
-    if (usedTeams.has(firstTeam) || usedTeams.has(secondTeam)) return;
+    const selectedFirst = firstTeam;
+    if (!selectedFirst || !secondTeam || selectedFirst === secondTeam) return;
     if (!drawId) setDrawId(`draw-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-    setPairs((prev) => [...prev, [firstTeam, secondTeam]]);
+    // Kontrolü güncel prev üzerinden yap: hızlı seçimde eski render'ın usedTeams'i
+    // ikinci eşleşmeye ilk maçın takımlarını tekrar sokamasın.
+    setPairs((prev) => {
+      if (prev.length >= 4) return prev;
+      const usedNow = new Set(prev.flat());
+      if (usedNow.has(selectedFirst) || usedNow.has(secondTeam)) return prev;
+      return [...prev, [selectedFirst, secondTeam]];
+    });
     setFirstTeam("");
   }
 
@@ -187,6 +239,7 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
   async function sendQuarterToMatchCenter(index) {
     const pair = pairs[index];
     if (!pair?.[0] || !pair?.[1]) return;
+    if (knockoutCloud?.quarter?.[index]?.played === true) return;
 
     const currentDrawId = drawId || `draw-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     if (!drawId) setDrawId(currentDrawId);
@@ -248,6 +301,12 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
   const semiCloud = Array.isArray(knockoutCloud.semi) ? knockoutCloud.semi : [];
   const finalCloud = knockoutCloud.finalMatch || null;
   const thirdCloud = knockoutCloud.thirdPlace || null;
+  const resultEvents = Array.isArray(selectedResult?.events) ? selectedResult.events : [];
+  const eventLabel = (event) => ({
+    goal: "⚽ GOL", penalty_goal: "🥅 PENALTI GOLÜ", penalty_shootout_goal: "⚽ PENALTI GOLÜ",
+    penalty_shootout_miss: "❌ PENALTI KAÇTI", penalty_miss: "❌ PENALTI KAÇTI", own_goal: "🥴 KENDİ KALESİNE",
+    yellow_card: "🟨 SARI KART", red_card: "🟥 KIRMIZI KART", substitution: "🔄 DEĞİŞİKLİK", assist: "🅰️ ASİST"
+  }[event?.type || event?.eventType] || String(event?.type || event?.eventType || "OLAY").toUpperCase());
 
   return (
     <div className="ko-page">
@@ -257,7 +316,7 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
           <h2>1/8 FİNAL KURASI</h2>
           <p>Lig sıralamasındaki ilk 8 takım otomatik olarak kura havuzuna alınır.</p>
         </div>
-        <button type="button" className="ko-reset" onClick={resetDraw}>↻ ELEMELERİ SIFIRLA</button>
+        <button type="button" className="ko-reset" disabled={resetting} onClick={() => setResetModalOpen(true)}>{resetting ? "SIFIRLANIYOR..." : "↻ ELEMELERİ SIFIRLA"}</button>
       </section>
 
       <section className="ko-card">
@@ -322,12 +381,19 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
         <div className="ko-pairs">
           {[0,1,2,3].map((index) => {
             const pair = pairs[index];
+            const playedMatch = Array.isArray(knockoutCloud.quarter) ? knockoutCloud.quarter[index] : null;
+            const completed = playedMatch?.played === true;
+            const home = playedMatch?.home || pair?.[0];
+            const away = playedMatch?.away || pair?.[1];
+            const penaltyText = completed && Number(playedMatch?.homeScore || 0) === Number(playedMatch?.awayScore || 0)
+              ? ` • Penaltılar ${playedMatch?.homePen ?? 0}-${playedMatch?.awayPen ?? 0}` : "";
             return <div className={pair ? "ko-pair filled" : "ko-pair"} key={index}>
-              <div className="match-no">1/8 • MAÇ {index + 1}</div>
-              <div className="team"><span>{pair?.[0] || "Takım bekleniyor"}</span></div>
-              <div className="pair-vs">VS</div>
-              <div className="team"><span>{pair?.[1] || "Rakip bekleniyor"}</span></div>
-              {pair && <button type="button" className="ko-mc-button" onClick={() => sendQuarterToMatchCenter(index)}>🏟️ Maç Merkezine Al</button>}
+              <div className="match-no">1/8 • MAÇ {index + 1}{completed ? " • TAMAMLANDI" : ""}</div>
+              <div className="team"><span>{home || "Takım bekleniyor"}</span>{completed && <b>{Number(playedMatch?.homeScore || 0)}</b>}</div>
+              <div className="pair-vs">{completed ? "-" : "VS"}</div>
+              <div className="team"><span>{away || "Rakip bekleniyor"}</span>{completed && <b>{Number(playedMatch?.awayScore || 0)}</b>}</div>
+              {completed && <div className="ko-result-note">✓ TAMAMLANDI{penaltyText}</div>}
+              {pair && !completed && <button type="button" className="ko-mc-button" onClick={() => sendQuarterToMatchCenter(index)}>🏟️ Maç Merkezine Al</button>}
             </div>;
           })}
         </div>
@@ -352,6 +418,54 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
         <div className="ko-section-title"><div><span>07</span><h3>Final</h3></div></div>
         <div className="ko-pairs"><div className={finalCloud?.home && finalCloud?.away ? "ko-pair filled" : "ko-pair"}><div className="match-no">FİNAL</div><div className="team"><span>{finalCloud?.home || "YF1 Kazananı"}</span></div><div className="pair-vs">VS</div><div className="team"><span>{finalCloud?.away || "YF2 Kazananı"}</span></div>{finalCloud?.home && finalCloud?.away && finalCloud?.played !== true && <button type="button" className="ko-mc-button" onClick={() => sendExistingToMatchCenter(finalCloud, "final-0", "Final")}>🏟️ Maç Merkezine Al</button>}</div></div>
       </section>
+
+      <section className="ko-card ko-road-card">
+        <div className="ko-section-title"><div><span>08</span><h3>Eleme Maçları Sonuçları</h3></div><small>{knockoutResults.length} maç</small></div>
+        {knockoutResults.length === 0 ? <div className="ko-warning">Henüz tamamlanmış eleme maçı yok.</div> : (
+          <div className="ko-results-list">
+            {knockoutResults.map((m) => {
+              const tied = Number(m?.homeScore || 0) === Number(m?.awayScore || 0);
+              return <button type="button" className="ko-result-row" key={m.id} onClick={() => setSelectedResult(m)}>
+                <div><b>{m.stageLabel || "Eleme Maçı"}</b><small>{m.completedAt ? new Date(m.completedAt).toLocaleString("tr-TR") : ""}</small></div>
+                <div className="ko-result-score"><span>{m.home}</span><strong>{Number(m.homeScore || 0)} - {Number(m.awayScore || 0)}</strong><span>{m.away}</span></div>
+                {tied && <div className="ko-result-pen">Penaltılar: {m.homePen ?? 0} - {m.awayPen ?? 0}</div>}
+                <div className="ko-result-detail-hint">Maç olaylarını gör ›</div>
+              </button>;
+            })}
+          </div>
+        )}
+      </section>
+
+      {resetModalOpen && <div className="ko-confirm-backdrop" onMouseDown={() => !resetting && setResetModalOpen(false)}>
+        <div className="ko-confirm-modal" onMouseDown={(e) => e.stopPropagation()}>
+          <div className="ko-confirm-icon">⚠️</div>
+          <h3>Elemeleri Sıfırla</h3>
+          <p>Kura, aktif maç, kadro, skor, süre, olaylar, penaltılar ve test eleme kayıtları temizlenecek. Lig verilerine dokunulmayacak.</p>
+          <div className="ko-confirm-actions">
+            <button type="button" className="cancel" disabled={resetting} onClick={() => setResetModalOpen(false)}>VAZGEÇ</button>
+            <button type="button" className="danger" disabled={resetting} onClick={async () => { await resetDraw({ askConfirm: true }); setResetModalOpen(false); }}>{resetting ? "SIFIRLANIYOR..." : "ELEMELERİ SIFIRLA"}</button>
+          </div>
+        </div>
+      </div>}
+
+      {notice && <div className="ko-notice" role="status" onClick={() => setNotice("")}>✓ {notice}</div>}
+
+      {selectedResult && <div className="ko-detail-backdrop" onMouseDown={() => setSelectedResult(null)}>
+        <div className="ko-detail-modal" onMouseDown={(e) => e.stopPropagation()}>
+          <button type="button" className="ko-detail-close" onClick={() => setSelectedResult(null)}>×</button>
+          <div className="ko-detail-stage">{selectedResult.stageLabel || "ELEME MAÇI"} • MAÇ SONU</div>
+          <div className="ko-detail-score"><strong>{selectedResult.home}</strong><b>{Number(selectedResult.homeScore || 0)} - {Number(selectedResult.awayScore || 0)}</b><strong>{selectedResult.away}</strong></div>
+          {Number(selectedResult.homeScore || 0) === Number(selectedResult.awayScore || 0) && <div className="ko-detail-pen">PENALTILAR {selectedResult.homePen ?? 0} - {selectedResult.awayPen ?? 0}</div>}
+          <div className="ko-detail-title">MAÇ OLAYLARI <span>{resultEvents.length}</span></div>
+          {resultEvents.length === 0 ? <div className="ko-warning">Bu maç için kayıtlı maç olayı yok.</div> : <div className="ko-detail-events">
+            {resultEvents.map((event, index) => <div className="ko-detail-event" key={event?.id || index}>
+              <span>{event?.minute !== undefined && event?.minute !== "" ? `${event.minute}'` : "•"}</span>
+              <div><b>{eventLabel(event)}</b><strong>{event?.shirtNumber || event?.number ? `#${event.shirtNumber || event.number} ` : ""}{event?.playerName || event?.player || event?.name || ""}</strong><small>{event?.team || event?.teamName || ""}</small></div>
+            </div>)}
+          </div>}
+        </div>
+      </div>}
+
     </div>
   );
 }
