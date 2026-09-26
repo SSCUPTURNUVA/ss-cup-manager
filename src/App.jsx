@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+﻿import { supabase } from "./supabase";
 import PublicTournament from "./components/PublicTournament";
 import DailySchedule from "./components/DailySchedule";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -23,6 +23,7 @@ import TeamContacts from "./components/TeamContacts";
 import DisciplineBoard from "./components/DisciplineBoard";
 import BackupManager from "./components/BackupManager";
 import KnockoutDraw from "./components/KnockoutDraw";
+import KnockoutMessages from "./components/KnockoutMessages";
 import { sortFixturesBySchedule } from "./utils/fixtureOrder";
 import { MATCH_EVENT_PREFIX, applyMatchEventRowsToFixtures, fetchMatchEventRows, syncMatchEventChanges } from "./utils/matchEventSync";
 import { flushPendingFixtureSync, syncLeagueFixtureWithRetry } from "./utils/pendingFixtureSync";
@@ -44,6 +45,7 @@ const menuItems = [
   { id: "group-fixture", icon: "🗓️", label: "Grup Fikstürü", format: "groups" },
   { id: "standings", icon: "📊", label: "Puan Durumu", format: "league" },
   { id: "knockout", icon: "🏆", label: "Eleme Turu", format: "league" },
+  { id: "knockoutmessages", icon: "💬", label: "Eleme Tebrik Mesajları", format: "league" },
   { id: "group-standings", icon: "📊", label: "Grup Puan Durumu", format: "groups" },
   { id: "teams", icon: "👥", label: "Takımlar" },
   { id: "teamcontacts", icon: "📲", label: "Takım Bilgileri" },
@@ -1027,6 +1029,9 @@ export default function App() {
             <SquadManager teams={teams} />
           </div>
         );
+
+      case "knockoutmessages":
+        return <KnockoutMessages settings={settings} />;
 
       case "teamcontacts":
         return (
