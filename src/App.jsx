@@ -1,558 +1,1221 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from "./supabase";
+import PublicTournament from "./components/PublicTournament";
+import DailySchedule from "./components/DailySchedule";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import "./App.css";
+import MatchCenter from "./components/MatchCenter";
+import TeamManager from "./components/TeamManager";
+import SquadManager from "./components/SquadManager";
+import DrawCeremony from "./components/DrawCeremony";
+import DrawManager from "./components/DrawManager";
+import Fixture from "./components/Fixture";
+import Standings from "./components/Standings";
+import Knockout from "./components/Knockout";
+import GoalScorers from "./components/GoalScorers";
+import TournamentFormat from "./components/TournamentFormat";
+import GroupFixture from "./components/GroupFixture";
+import GroupStandings from "./components/GroupStandings";
+import TournamentSettings from "./components/TournamentSettings";
+import HomeDashboard from "./components/HomeDashboard";
+import AnnouncementCenter from "./components/AnnouncementCenter";
+import Statistics from "./components/Statistics";
+import TeamContacts from "./components/TeamContacts";
+import DisciplineBoard from "./components/DisciplineBoard";
+import BackupManager from "./components/BackupManager";
+import { sortFixturesBySchedule } from "./utils/fixtureOrder";
+import { MATCH_EVENT_PREFIX, applyMatchEventRowsToFixtures, fetchMatchEventRows, syncMatchEventChanges } from "./utils/matchEventSync";
+import { flushPendingFixtureSync, syncLeagueFixtureWithRetry } from "./utils/pendingFixtureSync";
+import { flushPendingAppStateSync, readPendingAppStateSync, syncAppStateWithRetry } from "./utils/pendingAppStateSync";
 
-// ==========================================
-// 1. SUPABASE ISTEMCISI
-// ==========================================
-const supabaseUrl = import.meta.env?.VITE_SUPABASE_URL || 'https://example.supabase.co';
-const supabaseAnonKey = import.meta.env?.VITE_SUPABASE_ANON_KEY || 'example-key';
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const mobileMenuItems = [
+  { id: "home", icon: "🏠", label: "Ana Sayfa" },
+  { id: "matchcenter", icon: "📺", label: "Maç" },
+  { id: "fixture", icon: "📅", label: "Fikstür" },
+  { id: "dailyschedule", icon: "📋", label: "Program" },
+  { id: "standings", icon: "📊", label: "Puan" },
+];
 
-// ==========================================
-// 2. YARDIMCI FONKSIYONLAR
-// ==========================================
+const menuItems = [
+  { id: "home", icon: "🏠", label: "Ana Sayfa" },
+  { id: "matchcenter", icon: "📺", label: "Maç Merkezi" },
+  { id: "fixture", icon: "📅", label: "Lig Fikstürü", format: "league" },
+  { id: "group-fixture", icon: "🗓️", label: "Grup Fikstürü", format: "groups" },
+  { id: "standings", icon: "📊", label: "Puan Durumu", format: "league" },
+  { id: "group-standings", icon: "📊", label: "Grup Puan Durumu", format: "groups" },
+  { id: "knockout", icon: "🏆", label: "Eleme Turu" },
+  { id: "teams", icon: "👥", label: "Takımlar" },
+  { id: "teamcontacts", icon: "📲", label: "Takım Bilgileri" },
+  { id: "draw", icon: "🎲", label: "Lig Kurası", format: "league" },
+  { id: "dailyschedule", icon: "🖼️", label: "Gecenin Maçları Görseli" },
+  { id: "scorers", icon: "⚽", label: "Gol Krallığı" },
+  { id: "discipline", icon: "🟨", label: "Disiplin Kurulu" },
+  { id: "announcements", icon: "📢", label: "Duyuru Merkezi" },
+  { id: "statistics", icon: "📈", label: "İstatistikler" },
+  { id: "format", icon: "🏆", label: "Turnuva Formatı" },
+  { id: "settings", icon: "⚙️", label: "Turnuva Ayarları" },
+  { id: "backup", icon: "💾", label: "Turnuvayı Yedekle" },
+  { id: "public", icon: "🌐", label: "Canlı Durum" },
+];
 
-// Forma No + Oyuncu Adı Formatlayıcı
-export const formatPlayerName = (player) => {
-  if (!player) return 'Bilinmiyor';
-  const number = player.number || player.jerseyNumber || player.formaNo || player.no;
-  return number ? `#${number} ${player.name}` : player.name;
-};
+function readStorage(key, fallback) {
+  try {
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
-// ==========================================
-// 3. ELEME TURU MANUEL KURA BİLEŞENİ
-// ==========================================
-function ManualKnockoutDraw({ teams = [], onSaveMatches }) {
-  const [matches, setMatches] = useState([]);
-  const [teamAId, setTeamAId] = useState('');
-  const [teamBId, setTeamBId] = useState('');
+function calculateStandings(teams, fixtures) {
+  const table = {};
 
-  const availableTeams = useMemo(() => {
-    const assignedIds = new Set(matches.flatMap((m) => [m.teamAId, m.teamBId]));
-    return teams.filter((t) => !assignedIds.has(t.id));
-  }, [teams, matches]);
+  teams.forEach((team) => {
+    const teamName =
+      typeof team === "string"
+        ? team
+        : team?.name || team?.teamName || "";
 
-  const handleAddMatch = () => {
-    if (!teamAId || !teamBId) {
-      alert('Lütfen iki takım da seçin.');
+    if (teamName) {
+      table[teamName] = {
+        team: teamName,
+        played: 0,
+        won: 0,
+        drawn: 0,
+        lost: 0,
+        goalsFor: 0,
+        goalsAgainst: 0,
+        goalDifference: 0,
+        points: 0,
+      };
+    }
+  });
+
+  fixtures.forEach((match) => {
+    if (match?.isKnockout === true) return;
+
+    const home = match.home;
+    const away = match.away;
+
+    if (!home || !away) return;
+
+    if (!table[home]) {
+      table[home] = {
+        team: home,
+        played: 0,
+        won: 0,
+        drawn: 0,
+        lost: 0,
+        goalsFor: 0,
+        goalsAgainst: 0,
+        goalDifference: 0,
+        points: 0,
+      };
+    }
+
+    if (!table[away]) {
+      table[away] = {
+        team: away,
+        played: 0,
+        won: 0,
+        drawn: 0,
+        lost: 0,
+        goalsFor: 0,
+        goalsAgainst: 0,
+        goalDifference: 0,
+        points: 0,
+      };
+    }
+
+    if (match.played !== true) return;
+
+    const homeScore = Number(match.homeScore);
+    const awayScore = Number(match.awayScore);
+
+    if (
+      !Number.isInteger(homeScore) ||
+      !Number.isInteger(awayScore)
+    ) {
       return;
     }
-    if (teamAId === teamBId) {
-      alert('Aynı takımı birbiriyle eşleştiremezsiniz!');
+
+    table[home].played += 1;
+    table[away].played += 1;
+
+    table[home].goalsFor += homeScore;
+    table[home].goalsAgainst += awayScore;
+    table[away].goalsFor += awayScore;
+    table[away].goalsAgainst += homeScore;
+
+    if (homeScore > awayScore) {
+      table[home].won += 1;
+      table[home].points += 3;
+      table[away].lost += 1;
+    } else if (awayScore > homeScore) {
+      table[away].won += 1;
+      table[away].points += 3;
+      table[home].lost += 1;
+    } else {
+      table[home].drawn += 1;
+      table[away].drawn += 1;
+      table[home].points += 1;
+      table[away].points += 1;
+    }
+  });
+
+  return Object.values(table)
+    .map((team) => ({
+      ...team,
+      goalDifference:
+        team.goalsFor - team.goalsAgainst,
+    }))
+    .sort((a, b) => {
+      if (b.points !== a.points) {
+        return b.points - a.points;
+      }
+
+      if (
+        b.goalDifference !== a.goalDifference
+      ) {
+        return (
+          b.goalDifference - a.goalDifference
+        );
+      }
+
+      if (b.goalsFor !== a.goalsFor) {
+        return b.goalsFor - a.goalsFor;
+      }
+
+      return a.team.localeCompare(b.team, "tr");
+    });
+}
+
+
+const GOAL_EVENT_TYPES = new Set(["goal", "penalty_goal", "penalty_shootout_goal", "scorer_record"]);
+
+function getFixtureEvents(match) {
+  const deletedSet = new Set((Array.isArray(match?.deletedEventIds) ? match.deletedEventIds : []).map(String));
+  const events = (Array.isArray(match?.events) ? match.events : [])
+    .filter((event) => !deletedSet.has(String(event?.id ?? "")));
+  const goals = (Array.isArray(match?.goals) ? match.goals : [])
+    .filter((event) => !deletedSet.has(String(event?.id ?? "")));
+  const eventIds = new Set(events.map((event) => event?.id).filter(Boolean));
+  const legacyGoals = goals
+    .filter((goal) => !eventIds.has(goal?.id))
+    .map((goal) => ({ ...goal, type: goal?.type || "goal" }));
+  return [...events, ...legacyGoals];
+}
+
+function canonicalTeamName(name) {
+  const raw = String(name || "").trim();
+  const normalized = raw.toLocaleLowerCase("tr-TR").replace(/[^a-z0-9çğıöşü]+/gi, " ").trim();
+  if (normalized === "cmt insaat" || normalized === "cmt inşaat") return "Cem Taş CMT İnşaat";
+  return raw;
+}
+
+function deriveGoalScorers(fixtures) {
+  const totals = {};
+  (fixtures || []).forEach((match) => {
+    const phase = match?.matchPhase || "waiting";
+    const counts = match?.played === true || (match?.live === true && ["first_half", "halftime", "second_half", "penalty"].includes(phase));
+    if (!counts) return;
+    getFixtureEvents(match)
+      .filter((event) => GOAL_EVENT_TYPES.has(event?.type || "goal"))
+      .forEach((event) => {
+        const playerId = event?.playerId || event?.id || event?.playerName || event?.name || event?.player;
+        const name = event?.playerName || event?.name || event?.player || "Oyuncu";
+        const team = canonicalTeamName(event?.team || event?.teamName || "");
+        if (!playerId || !team) return;
+        const key = `${team}-${playerId}`;
+        if (!totals[key]) {
+          totals[key] = {
+            id: key,
+            playerId,
+            name,
+            playerName: name,
+            team,
+            teamName: team,
+            shirtNumber: event?.shirtNumber || event?.number || "",
+            goals: 0,
+          };
+        }
+        totals[key].goals += 1;
+      });
+  });
+  return Object.values(totals).sort((a, b) => b.goals - a.goals || String(a.name).localeCompare(String(b.name), "tr"));
+}
+
+const MOBILE_ADMIN_ACCESS_TOKEN = "SSCUP-YONETIM-2026-7pQ4mN9xK2vR8sT5";
+const ADMIN_PIN = "2026";
+
+function AdminPinGate({ onUnlock }) {
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+
+  function submit(event) {
+    event.preventDefault();
+    if (pin === ADMIN_PIN) {
+      setError("");
+      onUnlock();
       return;
     }
-
-    const tA = teams.find((t) => t.id === teamAId);
-    const tB = teams.find((t) => t.id === teamBId);
-
-    setMatches((prev) => [
-      ...prev,
-      { id: 'match-' + Date.now(), teamA: tA, teamB: tB, teamAId, teamBId }
-    ]);
-    setTeamAId('');
-    setTeamBId('');
-  };
-
-  const handleRemoveMatch = (id) => {
-    setMatches((prev) => prev.filter((m) => m.id !== id));
-  };
+    setPin("");
+    setError("PIN yanlış. Tekrar deneyin.");
+  }
 
   return (
-    <div style={styles.card}>
-      <h3 style={{ marginTop: 0 }}>Manuel Eleme Turu Kurası</h3>
-      <div style={styles.flexRow}>
-        <select
-          value={teamAId}
-          onChange={(e) => setTeamAId(e.target.value)}
-          style={styles.select}
-        >
-          <option value="">1. Takımı Seçin</option>
-          {availableTeams.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-
-        <span style={{ fontWeight: 'bold', color: '#ff4d4d' }}>VS</span>
-
-        <select
-          value={teamBId}
-          onChange={(e) => setTeamBId(e.target.value)}
-          style={styles.select}
-        >
-          <option value="">2. Takımı Seçin</option>
-          {availableTeams.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-
-        <button onClick={handleAddMatch} style={styles.btnPrimary}>
-          Eşleştir
-        </button>
-      </div>
-
-      <div style={{ marginTop: '15px' }}>
-        <h4>Eşleşme Listesi ({matches.length})</h4>
-        {matches.length === 0 && <p style={{ color: '#888' }}>Henüz eşleşme eklenmedi.</p>}
-        {matches.map((m, idx) => (
-          <div key={m.id} style={styles.matchItem}>
-            <span>
-              <strong>Maç {idx + 1}:</strong> {m.teamA.name} - {m.teamB.name}
-            </span>
-            <button onClick={() => handleRemoveMatch(m.id)} style={styles.btnDanger}>
-              Sil
-            </button>
-          </div>
-        ))}
-      </div>
-
-      {matches.length > 0 && (
-        <button
-          onClick={() => onSaveMatches(matches)}
-          style={{ ...styles.btnSuccess, width: '100%', marginTop: '15px' }}
-        >
-          Eleme Turunu Kaydet ve Başlat
-        </button>
-      )}
+    <div className="admin-pin-page">
+      <form className="admin-pin-card" onSubmit={submit}>
+        <div className="admin-pin-logo"><span>S&amp;S</span><small>CUP</small></div>
+        <span className="admin-pin-kicker">YÖNETİM GÜVENLİĞİ</span>
+        <h1>4 Haneli PIN</h1>
+        <p>Yönetim paneline girmek için PIN kodunu girin.</p>
+        <input
+          autoFocus
+          inputMode="numeric"
+          pattern="[0-9]*"
+          type="password"
+          maxLength={4}
+          value={pin}
+          onChange={(event) => {
+            setPin(event.target.value.replace(/\D/g, "").slice(0, 4));
+            setError("");
+          }}
+          placeholder="••••"
+          aria-label="4 haneli yönetim PIN kodu"
+        />
+        {error && <div className="admin-pin-error">{error}</div>}
+        <button type="submit" disabled={pin.length !== 4}>YÖNETİME GİR</button>
+        <small>EXE ve telefon yönetimi korumalıdır • Canlı Takip halka açıktır</small>
+      </form>
     </div>
   );
 }
 
-// ==========================================
-// 4. ARKA PLANDA DEVAM EDEN ZAMAN SAYAÇLI MAÇ MERKEZİ
-// ==========================================
-function MatchCenter({ match, players = [], onBack, onUpdateMatchStatus }) {
-  const [loading, setLoading] = useState(true);
-  const [events, setEvents] = useState([]);
-  
-  // ZAMAN YÖNETİMİ STATE'LERİ (Arka planda çalışması için)
-  const [matchMinutes, setMatchMinutes] = useState(0);
-  const [matchSeconds, setMatchSeconds] = useState(0);
-  const [isTimerRunning, setIsTimerRunning] = useState(false);
+export default function App() {
+  // Açılış senkronizasyonu tamamlanmadan hiçbir eski bekleyen kayıt buluta gönderilmez.
+  // Bu bayrak, eski localStorage/pending verisinin gerçek turnuvaya geri yazılmasını engeller.
+  const [fixtureBootstrapReady, setFixtureBootstrapReady] = useState(false);
 
-  // Form State
-  const [selectedPlayerId, setSelectedPlayerId] = useState('');
-  const [selectedAssistantId, setSelectedAssistantId] = useState('');
-  const [eventType, setEventType] = useState('goal');
-  const [manualMinute, setManualMinute] = useState('');
+  // MASAÜSTÜ EXE her zaman yönetim modudur.
+  // Web/PWA varsayılan olarak salt-okunur canlı takiptir; yalnızca organizatörün
+  // özel yönetim bağlantısı bu cihazı yönetici olarak yetkilendirir.
+  const isDesktopManager = useMemo(() => {
+    try {
+      const ua = navigator?.userAgent || "";
+      const isElectron = /Electron/i.test(ua);
+      const isFileProtocol = window?.location?.protocol === "file:";
+      return isElectron || isFileProtocol;
+    } catch {
+      return false;
+    }
+  }, []);
 
-  // 1. Maç Yükleme ve Gerçek Zamanlı Süre Hesaplama (Telefon Kapansa Bile Çalışır)
+  const isMobileAdmin = useMemo(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const pageParam = params.get("page");
+      const accessParam = params.get("access");
+      const wantsAdmin = pageParam === "yonetim" || pageParam === "admin";
+
+      // Mobil/web yonetim YALNIZCA mevcut URL'de dogru yeni anahtar varsa acilir.
+      // localStorage ile kalici yetki YOK: paylasilan Canli Takip cihazlari asla
+      // sonradan yonetime donemez.
+      return wantsAdmin && accessParam === MOBILE_ADMIN_ACCESS_TOKEN;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const isPublicRoute = useMemo(() => {
+    try {
+      // Masaustu EXE her zaman yonetimdir. Yeni ozel anahtarli mobil link de yonetimdir.
+      if (isDesktopManager || isMobileAdmin) return false;
+
+      // Bunlarin disindaki BUTUN web/PWA girisleri salt-okunur Canli Takiptir.
+      return true;
+    } catch {
+      return !(isDesktopManager || isMobileAdmin);
+    }
+  }, [isDesktopManager, isMobileAdmin]);
+
+  const [activePage, setActivePage] = useState(() => {
+    if (isPublicRoute) return "public";
+    return "home";
+  });
+
+  const [settings, setSettings] = useState(() =>
+    readStorage("sscup-settings", {
+      tournamentName: "S&S CUP",
+      slogan: "Kazanan Sahada Belli Olur",
+      season: "2026",
+      organizer: "",
+      mainSponsor: "",
+      subSponsors: [],
+      primaryColor: "#d4af37",
+    })
+  );
+
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [adminUnlocked, setAdminUnlocked] = useState(false);
+
+  const [tournamentFormat, setTournamentFormat] = useState(() =>
+    readStorage("sscup-format", "league")
+  );
+
+  const [teams, setTeams] = useState(() => readStorage("sscup-teams", []));
+
   useEffect(() => {
-    let isMounted = true;
-    setLoading(true);
+    let cancelled = false;
 
-    const timer = setTimeout(() => {
-      if (isMounted && match) {
-        setEvents(match.events || []);
-        
-        // Eğer maç önceden başlatılmışsa kalan/geçen süreyi Gerçek Zamanlı Hesapla
-        if (match.startTimestamp && match.isTimerRunning) {
-          setIsTimerRunning(true);
-        } else {
-          setIsTimerRunning(false);
-          setMatchMinutes(match.elapsedMinutes || 0);
-          setMatchSeconds(match.elapsedSeconds || 0);
+    async function loadTeams() {
+      const { data, error } = await supabase
+        .from("teams")
+        .select("id,name")
+        .order("id");
+
+      if (error) {
+        console.error("Takım çekme hatası:", error);
+        return;
+      }
+
+      if (!cancelled && Array.isArray(data)) {
+        const cloudTeams = data.map((team) => team.name).filter(Boolean);
+
+        if (cloudTeams.length > 0) {
+          setTeams(cloudTeams);
+          localStorage.setItem("sscup-teams", JSON.stringify(cloudTeams));
+          return;
         }
 
-        setLoading(false);
+        // KORUMALI İLK EŞİTLEME:
+        // Bulut boşsa PC'deki dolu takım listesini boş veriyle EZME.
+        // Yerel kayıt varsa onu Supabase'e taşı ve telefonun da görmesini sağla.
+        const localTeams = readStorage("sscup-teams", []);
+        const localNames = Array.isArray(localTeams)
+          ? localTeams
+              .map((team) => typeof team === "string" ? team : team?.name || team?.teamName || "")
+              .filter(Boolean)
+          : [];
+
+        if (localNames.length > 0) {
+          const { error: seedError } = await supabase
+            .from("teams")
+            .insert(localNames.map((name) => ({ name })));
+
+          if (seedError) {
+            console.error("Yerel takımları buluta taşıma hatası:", seedError);
+          } else {
+            setTeams(localNames);
+          }
+        } else {
+          setTeams([]);
+        }
       }
-    }, 50);
+    }
+
+    // İlk açılışta çek.
+    loadTeams();
+
+    // Realtime herhangi bir cihazda takım ekleme/silme/düzenleme olduğunda
+    // açık olan diğer cihazın listesini anında yeniler.
+    const channel = supabase
+      .channel(`sscup-app-teams-${Math.random().toString(36).slice(2)}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "teams" },
+        () => loadTeams()
+      )
+      .subscribe();
+
+    // Realtime bağlantısı bir cihazda kaçarsa güvenli yedek.
+    const poll = window.setInterval(loadTeams, 60000);
+
+    // Telefon uygulamaya geri dönünce / PC penceresi odaklanınca da yenile.
+    const onFocus = () => loadTeams();
+    const onVisible = () => {
+      if (document.visibilityState === "visible") loadTeams();
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
 
     return () => {
-      isMounted = false;
-      clearTimeout(timer);
+      cancelled = true;
+      window.clearInterval(poll);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+      supabase.removeChannel(channel);
     };
-  }, [match]);
+  }, []);
 
-  // 2. Kapanıp Açılsa Bile Doğru Süreyi Hesaplayan Döngü
-  useEffect(() => {
-    let interval = null;
+  const [drawOrder, setDrawOrder] = useState(() =>
+    readStorage("sscup-draw-order", [])
+  );
+  const sharedStateReadyRef = useRef(false);
+  const applyingSharedCloudRef = useRef(false);
 
-    if (isTimerRunning && match?.startTimestamp) {
-      interval = setInterval(() => {
-        const now = Date.now();
-        const start = match.startTimestamp;
-        // Toplam geçen saniye = (Şu Anki Zaman - Başlangıç Zamanı) / 1000 + Önceden Duran Süre
-        const totalElapsedSeconds = Math.floor((now - start) / 1000) + (match.savedSeconds || 0);
+  const FIXTURE_CACHE_KEY = "sscup-fixtures-v3";
+  // Public cihaz eski localStorage maçlarını bir an bile göstermesin.
+  // Canlı takip verisini yalnız buluttan alır; yerel cache sadece yönetim içindir.
+  const [fixtures, setFixturesState] = useState(() =>
+    isPublicRoute ? [] : sortFixturesBySchedule(readStorage(FIXTURE_CACHE_KEY, []))
+  );
+  const fixturesRef = useRef(fixtures);
 
-        const mins = Math.floor(totalElapsedSeconds / 60);
-        const secs = totalElapsedSeconds % 60;
+  // TEK MERKEZİ YEREL YAZMA KAPISI:
+  // Çocuk ekranlardan gelen HER fixture ekle/sil/düzenle burada yakalanır.
+  // Telefon ve EXE aynı işlevi kullanır; değişen maç zaman damgası alır,
+  // snapshot daha React render'ı beklemeden write-ahead kuyruğa girer ve buluta yollanır.
+  const setFixtures = useCallback((update) => {
+    const current = fixturesRef.current || [];
+    const proposed = typeof update === "function" ? update(current) : update;
+    if (!Array.isArray(proposed)) return;
 
-        setMatchMinutes(mins);
-        setMatchSeconds(secs);
-      }, 1000);
-    } else {
-      clearInterval(interval);
-    }
-
-    return () => clearInterval(interval);
-  }, [isTimerRunning, match?.startTimestamp, match?.savedSeconds]);
-
-  // Maçı Başlat / Duraklat
-  const toggleTimer = () => {
-    if (!isTimerRunning) {
-      // Başlatılıyor: Başlama zamanını kaydet
-      const now = Date.now();
-      const updatedMatch = {
-        ...match,
-        startTimestamp: now,
-        savedSeconds: matchMinutes * 60 + matchSeconds,
-        isTimerRunning: true
-      };
-      setIsTimerRunning(true);
-      onUpdateMatchStatus(updatedMatch);
-    } else {
-      // Durduruluyor
-      const updatedMatch = {
-        ...match,
-        startTimestamp: null,
-        savedSeconds: matchMinutes * 60 + matchSeconds,
-        elapsedMinutes: matchMinutes,
-        elapsedSeconds: matchSeconds,
-        isTimerRunning: false
-      };
-      setIsTimerRunning(false);
-      onUpdateMatchStatus(updatedMatch);
-    }
-  };
-
-  const matchPlayers = useMemo(() => {
-    if (!match) return [];
-    return players.filter(
-      (p) => p.teamId === match.teamAId || p.teamId === match.teamBId
-    );
-  }, [match, players]);
-
-  // Olay Ekleme
-  const handleAddEvent = (e) => {
-    e.preventDefault();
-
-    if (!selectedPlayerId) {
-      alert('Lütfen bir oyuncu seçin!');
+    if (isPublicRoute || !fixtureBootstrapReady) {
+      fixturesRef.current = proposed;
+      setFixturesState(proposed);
       return;
     }
 
-    const playerObj = matchPlayers.find((p) => p.id === selectedPlayerId);
-    const assistantObj = matchPlayers.find((p) => p.id === selectedAssistantId);
+    const now = new Date().toISOString();
+    const currentByKey = new Map(current.map((m, i) => [String(m?.id ?? m?.knockoutKey ?? i), m]));
+    const stamped = proposed.map((match, index) => {
+      const key = String(match?.id ?? match?.knockoutKey ?? index);
+      const previous = currentByKey.get(key);
+      if (JSON.stringify(previous) === JSON.stringify(match)) return match;
+      return { ...match, runtimeUpdatedAt: now };
+    });
 
-    // Otomatik o anki maç dakikasını kullan veya manuel yazılanı al
-    const eventMinute = manualMinute || (matchMinutes + 1).toString();
+    fixturesRef.current = stamped;
+    localStorage.setItem(FIXTURE_CACHE_KEY, JSON.stringify(stamped));
+    localStorage.setItem("sscup-fixtures", JSON.stringify(stamped));
+    // Maç olayları snapshot'tan bağımsız, event-id bazlı kalıcı kayda önce yazılır.
+    // Böylece eski fixtures_snapshot bir kartı/golü yeniden diriltemez.
+    syncMatchEventChanges(current, stamped)
+      .catch((error) => console.error("Maç olayı kalıcı senkron hatası:", error))
+      .finally(() => syncAppStateWithRetry("fixtures_snapshot", stamped));
+    setFixturesState(stamped);
+  }, [fixtureBootstrapReady, isPublicRoute]);
 
-    const newEvent = {
-      id: 'event-' + Date.now(),
-      matchId: match.id,
-      player: playerObj,
-      assistant: assistantObj || null,
-      type: eventType,
-      minute: eventMinute,
-      createdAt: new Date().toISOString()
+  const [goalScorers, setGoalScorers] = useState([]);
+
+  useEffect(() => {
+    localStorage.setItem("sscup-format", JSON.stringify(tournamentFormat));
+    if (!isPublicRoute && sharedStateReadyRef.current && !applyingSharedCloudRef.current) {
+      syncAppStateWithRetry("tournament_format", tournamentFormat);
+    }
+  }, [tournamentFormat, isPublicRoute]);
+
+  useEffect(() => {
+    localStorage.setItem("sscup-teams", JSON.stringify(teams));
+  }, [teams]);
+
+  useEffect(() => {
+    localStorage.setItem("sscup-draw-order", JSON.stringify(drawOrder));
+    if (!isPublicRoute && sharedStateReadyRef.current && !applyingSharedCloudRef.current) {
+      syncAppStateWithRetry("draw_order", drawOrder);
+    }
+  }, [drawOrder, isPublicRoute]);
+
+  useEffect(() => {
+    fixturesRef.current = fixtures;
+    localStorage.setItem(FIXTURE_CACHE_KEY, JSON.stringify(fixtures));
+    localStorage.setItem("sscup-fixtures", JSON.stringify(fixtures));
+  }, [fixtures]);
+
+  // ORTAK YÖNETİM DURUMU: ayar/format/kura gibi maç dışı müdahaleler de
+  // telefon <-> EXE arasında aynı bulut kaynağından canlı eşitlenir.
+  useEffect(() => {
+    if (isPublicRoute) return undefined;
+    let cancelled = false;
+    let inFlight = false;
+
+    const applyRows = (rows = []) => {
+      if (cancelled) return;
+      applyingSharedCloudRef.current = true;
+      for (const row of rows) {
+        if (row?.id === "settings" && row.value && typeof row.value === "object" && !Array.isArray(row.value)) {
+          setSettings((current) => ({ ...current, ...row.value }));
+          localStorage.setItem("sscup-settings", JSON.stringify(row.value));
+          window.dispatchEvent(new CustomEvent("sscup-settings-updated", { detail: row.value }));
+        } else if (row?.id === "tournament_format" && typeof row.value === "string") {
+          setTournamentFormat(row.value);
+          localStorage.setItem("sscup-format", JSON.stringify(row.value));
+        } else if (row?.id === "draw_order" && Array.isArray(row.value)) {
+          setDrawOrder(row.value);
+          localStorage.setItem("sscup-draw-order", JSON.stringify(row.value));
+        }
+      }
+      window.setTimeout(() => {
+        applyingSharedCloudRef.current = false;
+        sharedStateReadyRef.current = true;
+      }, 0);
     };
 
-    setEvents((prev) => [...prev, newEvent]);
+    const refreshShared = async () => {
+      if (inFlight || cancelled) return;
+      inFlight = true;
+      try {
+        const { data, error } = await supabase.from("app_state")
+          .select("id,value,updated_at")
+          .in("id", ["settings", "tournament_format", "draw_order"]);
+        if (error) throw error;
+        applyRows(data || []);
+        const ids = new Set((data || []).map((row) => row.id));
+        sharedStateReadyRef.current = true;
+        // Bulutta henüz bu satırlar yoksa mevcut güvenli yerel değeri ilk kez taşı.
+        if (!ids.has("tournament_format")) syncAppStateWithRetry("tournament_format", tournamentFormat);
+        if (!ids.has("draw_order")) syncAppStateWithRetry("draw_order", drawOrder);
+      } catch (error) {
+        console.warn("Ortak yönetim verisi eşitleme beklemede:", error);
+        sharedStateReadyRef.current = true;
+      } finally {
+        inFlight = false;
+      }
+    };
 
-    // Formu Sıfırla
-    setSelectedPlayerId('');
-    setSelectedAssistantId('');
-    setManualMinute('');
-    alert('Maç olayı kaydedildi!');
-  };
+    refreshShared();
+    const timer = window.setInterval(refreshShared, 60000);
+    const channel = supabase.channel(`shared-admin-${Math.random().toString(36).slice(2)}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state" }, (payload) => {
+        if (["settings", "tournament_format", "draw_order"].includes(payload?.new?.id)) refreshShared();
+      }).subscribe();
+    const onFocus = () => refreshShared();
+    const onVisible = () => { if (document.visibilityState === "visible") refreshShared(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true; window.clearInterval(timer); window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible); supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPublicRoute]);
 
-  if (loading) {
+
+  const lastCentralPersistRef = useRef("");
+  const lastCorePersistRef = useRef(new Map());
+  useEffect(() => {
+    if (isPublicRoute || !fixtureBootstrapReady) return undefined;
+
+    const signature = JSON.stringify(fixtures);
+    if (signature === lastCentralPersistRef.current) return undefined;
+    lastCentralPersistRef.current = signature;
+
+    // Snapshot yazımı yalnız setFixtures merkezi kapısından yapılır.
+    // Bu effect sadece fixtures tablosundaki skor/oynandı çekirdek alanlarını
+    // eşitle. İlk bulut yüklemesini geri yazma; sonrasında yalnız gerçekten değişen
+    // maç satırını gönder.
+    const nextCore = new Map();
+    fixtures.forEach((match) => {
+      if (!match || match.isKnockout === true || match.id == null) return;
+      const key = String(match.id);
+      const coreSignature = JSON.stringify({
+        homeScore: Number(match.homeScore ?? 0),
+        awayScore: Number(match.awayScore ?? 0),
+        played: match.played === true,
+      });
+      nextCore.set(key, coreSignature);
+      const previous = lastCorePersistRef.current.get(key);
+      if (lastCorePersistRef.current.size > 0 && previous !== coreSignature) {
+        syncLeagueFixtureWithRetry(match);
+      }
+    });
+    lastCorePersistRef.current = nextCore;
+
+    return undefined;
+  }, [fixtures, fixtureBootstrapReady, isPublicRoute]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadFixturesFromSupabase() {
+      // FINAL SAHA SÜRÜMÜ: AÇILIŞTA HİÇBİR MAÇ VERİSİ SİLİNMEZ.
+      // Önceki tek-seferlik test temizliği kaldırıldı; gerçek turnuva verisine
+      // program açılışı/çıkışı asla dokunamaz.
+
+      let { data, error } = await supabase.from("fixtures").select("*").order("id");
+      if (error) {
+        console.error("Fikstür yükleme hatası:", error);
+        // İnternet yoksa yalnızca bu sürümün kendi güvenli cache'ini kullan. Eski key'lere dönme.
+        if (!cancelled) setFixturesState(sortFixturesBySchedule(readStorage(FIXTURE_CACHE_KEY, [])));
+        return;
+      }
+      if (!data) return;
+
+      const { data: activeFixtureRow, error: activeFixtureError } = await supabase
+        .from("app_state").select("value").eq("id", "active_fixture_ids").maybeSingle();
+      if (!activeFixtureError) {
+        const activeIds = Array.isArray(activeFixtureRow?.value?.ids)
+          ? activeFixtureRow.value.ids.map((id) => String(id)) : [];
+        if (activeIds.length > 0) {
+          const activeSet = new Set(activeIds);
+          const filtered = data.filter((row) => activeSet.has(String(row?.id)));
+          // Yanlış/stale active_fixture_ids tüm fikstürü saklamasın. Eşleşme varsa kullan.
+          if (filtered.length > 0) data = filtered;
+        }
+      }
+
+      let cloudFixtures = data.map((item) => ({
+        id: item.id, home: item.home, away: item.away, date: item.date, time: item.time,
+        field: item.pitch, week: item.week, played: item.played === true,
+        homeScore: Number(item.home_score ?? 0), awayScore: Number(item.away_score ?? 0),
+        live: false, timerRunning: false,
+        timerStartedAt: null, elapsedSeconds: 0,
+        matchPhase: item.played === true ? "completed" : "waiting", isKnockout: item.is_knockout === true,
+        knockoutKey: item.knockout_key || "", stageLabel: item.stage || "",
+        events: [], goals: [], cloudUpdatedAt: item.updated_at || "",
+      }));
+      const { data: snapshotRow, error: snapshotError } = await supabase
+        .from("app_state").select("value,updated_at").eq("id", "fixtures_snapshot").maybeSingle();
+
+      // Uygulama tam kayıt anında kapanmışsa write-ahead kuyruğundaki snapshot
+      // buluttan daha yenidir. Açılışta bunu kullan; veri ekrandan da kaybolmasın.
+      const pendingSnapshot = readPendingAppStateSync()?.fixtures_snapshot;
+      const cloudSnapshotTime = Date.parse(snapshotRow?.updated_at || "") || 0;
+      const pendingSnapshotTime = Date.parse(pendingSnapshot?.savedAt || "") || 0;
+      const hasPendingSnapshot = Array.isArray(pendingSnapshot?.value);
+      const snapshotValue = hasPendingSnapshot
+        ? pendingSnapshot.value
+        : (!snapshotError && Array.isArray(snapshotRow?.value) ? snapshotRow.value : []);
+      const snapshotUpdatedAt = hasPendingSnapshot
+        ? pendingSnapshot?.savedAt
+        : snapshotRow?.updated_at;
+
+      if (Array.isArray(snapshotValue) && snapshotValue.length > 0) {
+        const runtimeById = new Map(snapshotValue.map((m) => [String(m?.id), m]));
+        cloudFixtures = cloudFixtures.map((base) => {
+          const runtime = runtimeById.get(String(base.id));
+          if (!runtime) return base;
+          const runtimeTime = Date.parse(runtime?.runtimeUpdatedAt || "") || 0;
+          const baseTime = Date.parse(base?.cloudUpdatedAt || "") || 0;
+          const runtimeScheduleIsNewer = runtimeTime > baseTime;
+          return {
+            ...base,
+            // Snapshot yalnız daha yeniyse program alanlarını korur. Böylece
+            // yeni seçilmiş tarih/saat eski bulut satırı yüzünden geri dönmez;
+            // buna karşılık eski snapshot da daha yeni bulut verisini ezemez.
+            ...(runtimeScheduleIsNewer ? {
+              date: runtime.date ?? base.date,
+              time: runtime.time ?? base.time,
+              field: runtime.field ?? base.field,
+              week: runtime.week ?? base.week,
+            } : {}),
+            live: base.played !== true && runtime.live === true,
+            timerRunning: base.played !== true && runtime.timerRunning === true,
+            timerStartedAt: base.played !== true ? (runtime.timerStartedAt ?? null) : null,
+            elapsedSeconds: Number(runtime.elapsedSeconds ?? 0),
+            matchPhase: base.played === true ? "completed" : (runtime.matchPhase || "waiting"),
+            deletedEventIds: Array.isArray(runtime.deletedEventIds) ? runtime.deletedEventIds.map(String) : [],
+            events: (Array.isArray(runtime.events) ? runtime.events : []).filter(
+              (event) => !(Array.isArray(runtime.deletedEventIds) ? runtime.deletedEventIds.map(String) : []).includes(String(event?.id ?? ""))
+            ),
+            goals: (Array.isArray(runtime.goals) ? runtime.goals : []).filter(
+              (event) => !(Array.isArray(runtime.deletedEventIds) ? runtime.deletedEventIds.map(String) : []).includes(String(event?.id ?? ""))
+            ),
+            homePen: runtime.homePen ?? runtime.homePenalties ?? base.homePen ?? 0,
+            awayPen: runtime.awayPen ?? runtime.awayPenalties ?? base.awayPen ?? 0,
+            homePenalties: runtime.homePenalties ?? runtime.homePen ?? base.homePenalties ?? "",
+            awayPenalties: runtime.awayPenalties ?? runtime.awayPen ?? base.awayPenalties ?? "",
+            cloudUpdatedAt: snapshotUpdatedAt || base.cloudUpdatedAt || "",
+          };
+        });
+      }
+      const sorted = sortFixturesBySchedule(cloudFixtures);
+      if (!cancelled) {
+        fixturesRef.current = sorted;
+        setFixturesState(sorted);
+        localStorage.setItem(FIXTURE_CACHE_KEY, JSON.stringify(sorted));
+      }
+    }
+
+    loadFixturesFromSupabase()
+      .catch((error) => console.error("Fikstür açılış yükleme hatası:", error))
+      .finally(() => { if (!cancelled) setFixtureBootstrapReady(true); });
+
+    return () => { cancelled = true; };
+  }, [isPublicRoute]);
+
+  // Uygulama hangi sayfada olursa olsun internet geri geldiğinde bekleyen
+  // maç ve app_state kayıtlarını tamamla. Yönetim ekranının açık kalmasına bağlı değildir.
+  useEffect(() => {
+    // KRİTİK: Canlı takip salt-okunurdur. Telefonda kalmış eski pending kuyruğu
+    // hiçbir zaman turnuva verisini buluta geri yazamaz.
+    if (isPublicRoute || !fixtureBootstrapReady) return undefined;
+    const flushAll = () => {
+      flushPendingFixtureSync();
+      flushPendingAppStateSync();
+    };
+    flushAll();
+    window.addEventListener("online", flushAll);
+    const retryTimer = window.setInterval(flushAll, 10000);
+    return () => {
+      window.removeEventListener("online", flushAll);
+      window.clearInterval(retryTimer);
+    };
+  }, [fixtureBootstrapReady, isPublicRoute]);
+
+  // YÖNETİM CİHAZLARI ARASI CANLI EŞİTLEME (REALTIME-ONLY):
+  // Telefonda girilen gol/kart/değişiklik PC EXE'de; PC'de girilen de telefonda
+  // ekran yenilemeden görünür. Yerelde buluta gitmeyi bekleyen daha yeni kayıt varsa
+  // buluttaki eski snapshot onu ezemez.
+  useEffect(() => {
+    if (isPublicRoute || !fixtureBootstrapReady) return undefined;
+
+    let disposed = false;
+    let inFlight = false;
+    let queued = false;
+
+    const refreshManagementFixtures = async () => {
+      if (disposed) return;
+      if (inFlight) { queued = true; return; }
+      inFlight = true;
+      try {
+        const [fixtureResult, snapshotResult, eventRows] = await Promise.all([
+          supabase.from("fixtures").select("*").order("id"),
+          supabase.from("app_state").select("value,updated_at").eq("id", "fixtures_snapshot").maybeSingle(),
+          fetchMatchEventRows(),
+        ]);
+
+        if (fixtureResult.error) throw fixtureResult.error;
+        if (snapshotResult.error) throw snapshotResult.error;
+
+        const pendingSnapshot = readPendingAppStateSync()?.fixtures_snapshot;
+        // Bu cihazda henüz buluta çıkmamış daha yeni işlem varsa buluttaki eski veri
+        // ekrandan SİLEMEZ. Refresh'i tamamen iptal etmek yerine aşağıda pending
+        // snapshot maç bazında öncelikli kaynak olarak kullanılır.
+
+        const rows = Array.isArray(fixtureResult.data) ? fixtureResult.data : [];
+        const cloudSnapshot = Array.isArray(snapshotResult.data?.value) ? snapshotResult.data.value : [];
+        const snapshot = Array.isArray(pendingSnapshot?.value)
+          ? pendingSnapshot.value
+          : cloudSnapshot;
+        const rowById = new Map(rows.map((row) => [String(row?.id), row]));
+        const snapById = new Map(snapshot.map((match) => [String(match?.id), match]));
+
+        setFixturesState((current) => {
+          const base = current.length > 0 ? current : rows.map((item) => ({
+            id: item.id, home: item.home, away: item.away, date: item.date, time: item.time,
+            field: item.pitch, week: item.week, isKnockout: item.is_knockout === true,
+            knockoutKey: item.knockout_key || "", stageLabel: item.stage || "",
+          }));
+
+          let merged = sortFixturesBySchedule(base.map((match) => {
+            const row = rowById.get(String(match?.id));
+            const runtime = snapById.get(String(match?.id));
+            if (!row && !runtime) return match;
+            const played = row ? row.played === true : match.played === true;
+            // Yönetim ekranı canlı refresh olduğunda eski fixtures satırı, bu cihazda
+            // az önce kaydedilmiş daha yeni program bilgisini geri çevirmesin.
+            // runtimeUpdatedAt maç bazında gerçek yerel değişiklik zamanıdır;
+            // row.updated_at ise fixtures tablosundaki bulut zamanıdır.
+            const runtimeTime = Date.parse(runtime?.runtimeUpdatedAt || match?.runtimeUpdatedAt || "") || 0;
+            const rowTime = Date.parse(row?.updated_at || match?.cloudUpdatedAt || "") || 0;
+            const keepRuntimeSchedule = runtimeTime > rowTime;
+            return {
+              ...match,
+              ...(runtime || {}),
+              ...(row ? {
+                home: row.home ?? match.home,
+                away: row.away ?? match.away,
+                date: keepRuntimeSchedule ? (runtime?.date ?? match.date) : (row.date ?? match.date),
+                time: keepRuntimeSchedule ? (runtime?.time ?? match.time) : (row.time ?? match.time),
+                field: keepRuntimeSchedule ? (runtime?.field ?? match.field) : (row.pitch ?? match.field),
+                week: keepRuntimeSchedule ? (runtime?.week ?? match.week) : (row.week ?? match.week),
+                homeScore: Number(row.home_score ?? runtime?.homeScore ?? match.homeScore ?? 0),
+                awayScore: Number(row.away_score ?? runtime?.awayScore ?? match.awayScore ?? 0),
+                played,
+              } : {}),
+              live: played ? false : runtime?.live === true,
+              timerRunning: played ? false : runtime?.timerRunning === true,
+              timerStartedAt: played ? null : (runtime?.timerStartedAt ?? null),
+              matchPhase: played ? "completed" : (runtime?.matchPhase || match.matchPhase || "waiting"),
+              deletedEventIds: [...new Set([
+                ...(Array.isArray(match?.deletedEventIds) ? match.deletedEventIds.map(String) : []),
+                ...(Array.isArray(runtime?.deletedEventIds) ? runtime.deletedEventIds.map(String) : []),
+              ])],
+              events: (() => {
+                const deleted = new Set([
+                  ...(Array.isArray(match?.deletedEventIds) ? match.deletedEventIds.map(String) : []),
+                  ...(Array.isArray(runtime?.deletedEventIds) ? runtime.deletedEventIds.map(String) : []),
+                ]);
+                const source = Array.isArray(runtime?.events) ? runtime.events : (Array.isArray(match.events) ? match.events : []);
+                return source.filter((event) => !deleted.has(String(event?.id ?? "")));
+              })(),
+              goals: (() => {
+                const deleted = new Set([
+                  ...(Array.isArray(match?.deletedEventIds) ? match.deletedEventIds.map(String) : []),
+                  ...(Array.isArray(runtime?.deletedEventIds) ? runtime.deletedEventIds.map(String) : []),
+                ]);
+                const source = Array.isArray(runtime?.goals) ? runtime.goals : (Array.isArray(match.goals) ? match.goals : []);
+                return source.filter((event) => !deleted.has(String(event?.id ?? "")));
+              })(),
+              runtimeUpdatedAt: runtime?.runtimeUpdatedAt || match.runtimeUpdatedAt || "",
+              cloudUpdatedAt: snapshotResult.data?.updated_at || match.cloudUpdatedAt || "",
+            };
+          }));
+
+          merged = applyMatchEventRowsToFixtures(merged, eventRows);
+
+          if (JSON.stringify(merged) === JSON.stringify(current)) return current;
+          localStorage.setItem(FIXTURE_CACHE_KEY, JSON.stringify(merged));
+          return merged;
+        });
+      } catch (error) {
+        console.warn("Yönetim canlı eşitleme beklemede:", error);
+      } finally {
+        inFlight = false;
+        if (queued && !disposed) { queued = false; window.setTimeout(refreshManagementFixtures, 0); }
+      }
+    };
+
+    refreshManagementFixtures();
+    const channel = supabase
+      .channel(`management-fixtures-${Date.now()}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "fixtures" }, refreshManagementFixtures)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.fixtures_snapshot" }, refreshManagementFixtures)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state" }, (payload) => {
+        const id = String(payload?.new?.id || payload?.old?.id || "");
+        if (id.startsWith(MATCH_EVENT_PREFIX)) refreshManagementFixtures();
+      })
+      .subscribe();
+
+    const onFocus = () => refreshManagementFixtures();
+    const onVisible = () => { if (document.visibilityState === "visible") refreshManagementFixtures(); };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      disposed = true;
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisible);
+      supabase.removeChannel(channel);
+    };
+  }, [fixtureBootstrapReady, isPublicRoute]);
+
+  useEffect(() => {
+    // Gol krallığı ayrı ve bağımsız bir "hayalet" kayıt değildir.
+    // Her zaman maç eventlerinden yeniden hesaplanır; skor/event silinmeden bu liste de kaybolmaz.
+    const derived = deriveGoalScorers(fixtures);
+    setGoalScorers(derived);
+    localStorage.setItem("sscup-goals", JSON.stringify(derived));
+    localStorage.setItem("sscup-goal-scorers", JSON.stringify(derived));
+  }, [fixtures]);
+
+  useEffect(() => {
+    const refreshSettings = () => {
+      setSettings(
+        readStorage("sscup-settings", {
+          tournamentName: "S&S CUP",
+          slogan: "Kazanan Sahada Belli Olur",
+          season: "2026",
+          organizer: "",
+          mainSponsor: "",
+          subSponsors: [],
+          primaryColor: "#d4af37",
+        })
+      );
+    };
+
+    window.addEventListener("storage", refreshSettings);
+    window.addEventListener("sscup-settings-updated", refreshSettings);
+
+    return () => {
+      window.removeEventListener("storage", refreshSettings);
+      window.removeEventListener("sscup-settings-updated", refreshSettings);
+    };
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+      "--primary-color",
+      settings.primaryColor || "#d4af37"
+    );
+  }, [settings.primaryColor]);
+
+  const standings = useMemo(
+    () => calculateStandings(teams, fixtures),
+    [teams, fixtures]
+  );
+
+  function changePage(pageId) {
+    setActivePage(pageId);
+    setMobileMenuOpen(false);
+
+    setTimeout(() => {
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+
+      const mainContent = document.querySelector('.main-content');
+      const contentArea = document.querySelector('.content-area');
+      
+      if (mainContent) mainContent.scrollTop = 0;
+      if (contentArea) contentArea.scrollTop = 0;
+    }, 50);
+  }
+
+  // 🔒 YALNIZCA SPORCULAR / CANLI TAKİP MODU
+  if (isPublicRoute) {
     return (
-      <div style={styles.card}>
-        <h3>Maç Merkezi Yükleniyor...</h3>
-      </div>
+      <PublicTournament
+        teams={teams}
+        fixtures={fixtures}
+        standings={standings}
+        goalScorers={goalScorers}
+        settings={settings}
+      />
     );
   }
 
-  return (
-    <div style={styles.card}>
-      <button onClick={onBack} style={{ ...styles.btnDanger, marginBottom: '10px' }}>
-        ← Geri Dön
-      </button>
+  // Yönetim tarafı her uygulama/sayfa açılışında yeniden PIN ister.
+  // Yetki localStorage'a yazılmaz; kapat-aç veya yenilemede kilit geri gelir.
+  if (!adminUnlocked) {
+    return <AdminPinGate onUnlock={() => setAdminUnlocked(true)} />;
+  }
 
-      <h2>
-        {match.teamA.name} VS {match.teamB.name}
-      </h2>
+  function renderPage() {
+    switch (activePage) {
+      case "settings":
+        return <TournamentSettings />;
 
-      {/* MAÇ SÜRESİ VE BAŞLAT/DURDUR KONTROLÜ */}
-      <div style={{ ...styles.card, backgroundColor: '#222', textAlign: 'center' }}>
-        <h1 style={{ fontSize: '48px', margin: '10px 0', color: '#00ffcc' }}>
-          {String(matchMinutes).padStart(2, '0')}:{String(matchSeconds).padStart(2, '0')}
-        </h1>
-        <button
-          onClick={toggleTimer}
-          style={isTimerRunning ? styles.btnDanger : styles.btnSuccess}
-        >
-          {isTimerRunning ? 'Maçı Duraklat' : 'Maçı Başlat / Devam Et'}
-        </button>
-        <p style={{ color: '#aaa', fontSize: '12px', marginTop: '8px' }}>
-          * Telefonda uygulamadan çıksanız bile süre arka planda akmaya devam eder.
-        </p>
-      </div>
-
-      {/* OLAY EKLEME FORMU */}
-      <form onSubmit={handleAddEvent} style={{ ...styles.card, backgroundColor: '#2a2a2a' }}>
-        <h4>Yeni Maç Olayı Ekle</h4>
-        <div style={styles.flexRow}>
-          <select
-            value={selectedPlayerId}
-            onChange={(e) => setSelectedPlayerId(e.target.value)}
-            style={styles.select}
-          >
-            <option value="">Oyuncu Seçin *</option>
-            {matchPlayers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {formatPlayerName(p)} ({p.teamName || 'Takım'})
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={eventType}
-            onChange={(e) => setEventType(e.target.value)}
-            style={styles.select}
-          >
-            <option value="goal">⚽ Gol</option>
-            <option value="yellow_card">🟨 Sarı Kart</option>
-            <option value="red_card">🟥 Kırmızı Kart</option>
-          </select>
-
-          {eventType === 'goal' && (
-            <select
-              value={selectedAssistantId}
-              onChange={(e) => setSelectedAssistantId(e.target.value)}
-              style={styles.select}
-            >
-              <option value="">Asist (Opsiyonel)</option>
-              {matchPlayers
-                .filter((p) => p.id !== selectedPlayerId)
-                .map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {formatPlayerName(p)}
-                  </option>
-                ))}
-            </select>
-          )}
-
-          <input
-            type="number"
-            placeholder={`Dk (Varsayılan: ${matchMinutes + 1}')`}
-            value={manualMinute}
-            onChange={(e) => setManualMinute(e.target.value)}
-            style={{ ...styles.select, width: '130px' }}
+      case "format":
+        return (
+          <TournamentFormat
+            tournamentFormat={tournamentFormat}
+            setTournamentFormat={setTournamentFormat}
+            teams={teams}
           />
+        );
 
-          <button type="submit" style={styles.btnSuccess}>
-            Ekle
-          </button>
-        </div>
-      </form>
-
-      {/* CANLI OLAY AKIŞI */}
-      <div>
-        <h4>Maç Olayları</h4>
-        {events.length === 0 && <p style={{ color: '#888' }}>Henüz kaydedilmiş olay yok.</p>}
-        {events.map((ev) => (
-          <div key={ev.id} style={styles.eventRow}>
-            <span><strong>{ev.minute}'</strong></span>
-            <span>
-              {ev.type === 'goal' && '⚽ GOL:'}
-              {ev.type === 'yellow_card' && '🟨 Sarı Kart:'}
-              {ev.type === 'red_card' && '🟥 Kırmızı Kart:'}
-            </span>
-            <span style={{ fontWeight: 'bold' }}>{formatPlayerName(ev.player)}</span>
-            {ev.assistant && (
-              <span style={{ color: '#aaa', fontSize: '12px' }}>
-                (Asist: {formatPlayerName(ev.assistant)})
-              </span>
-            )}
+      case "teams":
+        return (
+          <div className="page-stack">
+            <TeamManager
+              teams={teams}
+              setTeams={setTeams}
+              drawOrder={drawOrder}
+              setDrawOrder={setDrawOrder}
+              fixtures={fixtures}
+              setFixtures={setFixtures}
+            />
+            <SquadManager teams={teams} />
           </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+        );
 
-// ==========================================
-// 5. ANA UYGULAMA (APP)
-// ==========================================
-export default function App() {
-  const [activeTab, setActiveTab] = useState('draw');
-  const [selectedMatch, setSelectedMatch] = useState(null);
+      case "teamcontacts":
+        return (
+          <TeamContacts
+            teams={teams}
+            fixtures={fixtures}
+            standings={standings}
+            goalScorers={goalScorers}
+            settings={settings}
+          />
+        );
 
-  const [teams] = useState([
-    { id: 't1', name: 'Karadeniz FC' },
-    { id: 't2', name: 'Anadolu Gücü' },
-    { id: 't3', name: 'Boğaziçi SK' },
-    { id: 't4', name: 'Ege Yıldızları' }
-  ]);
+      case "draw":
+        return (
+          <div className="page-stack">
+            <DrawCeremony
+              teams={teams}
+              drawOrder={drawOrder}
+              setDrawOrder={setDrawOrder}
+            />
+            <DrawManager
+              teams={teams}
+              drawOrder={drawOrder}
+              setFixtures={setFixtures}
+            />
+          </div>
+        );
 
-  const [players] = useState([
-    { id: 'p1', teamId: 't1', number: 10, name: 'Ahmet Yılmaz', teamName: 'Karadeniz FC' },
-    { id: 'p2', teamId: 't1', number: 7, name: 'Mehmet Demir', teamName: 'Karadeniz FC' },
-    { id: 'p3', teamId: 't2', number: 9, name: 'Caner Erkin', teamName: 'Anadolu Gücü' },
-    { id: 'p4', teamId: 't2', number: 1, name: 'Volkan Babacan', teamName: 'Anadolu Gücü' }
-  ]);
+      case "fixture":
+        return <Fixture fixtures={fixtures} setFixtures={setFixtures} />;
 
-  const [knockoutMatches, setKnockoutMatches] = useState([]);
+      case "dailyschedule":
+        return <DailySchedule fixtures={fixtures} settings={settings} />;
 
-  const handleSaveMatches = (matches) => {
-    setKnockoutMatches(matches);
-    alert('Manuel Eleme Kurası Başarıyla Kaydedildi!');
-  };
+      case "group-fixture":
+        return <GroupFixture />;
 
-  const handleOpenMatchCenter = (match) => {
-    setSelectedMatch(match);
-    setActiveTab('match_center');
-  };
+      case "group-standings":
+        return <GroupStandings />;
 
-  const handleUpdateMatchStatus = (updatedMatch) => {
-    setSelectedMatch(updatedMatch);
-    setKnockoutMatches((prev) =>
-      prev.map((m) => (m.id === updatedMatch.id ? updatedMatch : m))
-    );
-  };
+      case "matchcenter":
+        return (
+          <MatchCenter
+            fixtures={fixtures}
+            standings={standings}
+            goalScorers={goalScorers}
+            setFixtures={setFixtures}
+          />
+        );
+
+      case "standings":
+        return <Standings teams={teams} fixtures={fixtures} />;
+
+      case "scorers":
+        return <GoalScorers goalScorers={goalScorers} />;
+
+      case "knockout":
+        return (
+          <Knockout
+            teams={teams}
+            fixtures={fixtures}
+            setFixtures={setFixtures}
+            onOpenMatchCenter={() => changePage("matchcenter")}
+          />
+        );
+
+      case "announcements":
+        return (
+          <AnnouncementCenter
+            fixtures={fixtures}
+            standings={standings}
+            goalScorers={goalScorers}
+            settings={settings}
+          />
+        );
+
+      case "discipline":
+        return <DisciplineBoard teams={teams} fixtures={fixtures} />;
+
+      case "statistics":
+        return <Statistics fixtures={fixtures} standings={standings} />;
+
+      case "backup":
+        return <BackupManager />;
+
+      case "public":
+        return (
+          <PublicTournament
+            teams={teams}
+            fixtures={fixtures}
+            standings={standings}
+            goalScorers={goalScorers}
+            settings={settings}
+          />
+        );
+
+      case "home":
+      default:
+        return (
+          <HomeDashboard
+            teams={teams}
+            fixtures={fixtures}
+            standings={standings}
+            goalScorers={goalScorers}
+            setTeams={setTeams}
+            setFixtures={setFixtures}
+            setDrawOrder={setDrawOrder}
+            setGoalScorers={setGoalScorers}
+            setSettings={setSettings}
+            settings={settings}
+            onNavigate={changePage}
+          />
+        );
+    }
+  }
+
+  const visibleMenuItems = menuItems.filter((item) => !item.format || item.format === tournamentFormat);
+  const activeMenuItem = menuItems.find((item) => item.id === activePage);
 
   return (
-    <div style={styles.container}>
-      <header style={styles.header}>
-        <h2>SS CUP V1 - Turnuva Yönetim Paneli</h2>
-        <div style={styles.flexRow}>
-          <button
-            onClick={() => setActiveTab('draw')}
-            style={activeTab === 'draw' ? styles.btnPrimary : styles.btnSecondary}
-          >
-            Kura & Fikstür
-          </button>
+    <div className="app-shell">
+      <aside className={`sidebar ${mobileMenuOpen ? "sidebar-open" : ""}`}>
+        <div className="brand brand-pro">
+          <div className="brand-logo ss-logo-mark" aria-label="S&S CUP logosu"><span>S&S</span><small>CUP</small></div>
+          <div className="brand-copy">
+            <span className="brand-product">S&S CUP MANAGER PRO</span>
+            <h1>{settings.tournamentName}</h1>
+            <p>{settings.slogan || "Kazanan Sahada Belli Olur"}</p>
+          </div>
         </div>
-      </header>
 
-      {activeTab === 'draw' && (
-        <div>
-          <ManualKnockoutDraw teams={teams} onSaveMatches={handleSaveMatches} />
+        <nav className="sidebar-nav">
+          {visibleMenuItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`nav-item ${activePage === item.id ? "active" : ""}`}
+              onClick={() => changePage(item.id)}
+            >
+              <span className="nav-icon">{item.icon}</span>
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </nav>
 
-          {knockoutMatches.length > 0 && (
-            <div style={{ ...styles.card, marginTop: '20px' }}>
-              <h3>Oluşturulan Eleme Maçları</h3>
-              {knockoutMatches.map((m) => (
-                <div key={m.id} style={styles.matchItem}>
-                  <span>
-                    {m.teamA.name} VS {m.teamB.name}
-                  </span>
-                  <button
-                    onClick={() => handleOpenMatchCenter(m)}
-                    style={styles.btnPrimary}
-                  >
-                    Maç Merkezine Git →
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="sidebar-footer sidebar-footer-pro">
+          <span>🏆</span>
+          <div>
+            <strong>S&S CUP MANAGER PRO</strong>
+            <small>Profesyonel Turnuva Yönetim Sistemi • {settings.season}</small>
+          </div>
         </div>
-      )}
+      </aside>
 
-      {activeTab === 'match_center' && selectedMatch && (
-        <MatchCenter
-          match={selectedMatch}
-          players={players}
-          onBack={() => setActiveTab('draw')}
-          onUpdateMatchStatus={handleUpdateMatchStatus}
+      {mobileMenuOpen && (
+        <button
+          type="button"
+          className="sidebar-overlay"
+          aria-label="Menüyü kapat"
+          onClick={() => setMobileMenuOpen(false)}
         />
       )}
+
+      <main className="main-content">
+        <header className="topbar">
+          <button
+            type="button"
+            className="menu-toggle"
+            onClick={() => setMobileMenuOpen((current) => !current)}
+            aria-label="Menüyü aç"
+          >
+            ☰
+          </button>
+
+          <div>
+            <span className="topbar-label">S&S CUP MANAGER PRO</span>
+            <h2>
+              {activeMenuItem?.icon} {activeMenuItem?.label}
+            </h2>
+          </div>
+
+          <div className="topbar-badge">{teams.length} Takım</div>
+        </header>
+
+        <div className="content-area">{renderPage()}</div>
+
+        <nav
+          className="mobile-bottom-nav"
+          aria-label="Hızlı menü"
+          style={{
+            position: "fixed",
+            bottom: "0px",
+            left: "0px",
+            right: "0px",
+            top: "auto",
+            transform: "none",
+            zIndex: 999999,
+            backgroundColor: "#121212",
+            borderTop: "1px solid rgba(255,255,255,0.1)",
+          }}
+        >
+          {mobileMenuItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={activePage === item.id ? "active" : ""}
+              onClick={() => changePage(item.id)}
+              aria-label={item.label}
+            >
+              <span>{item.icon}</span>
+              <small>{item.label}</small>
+            </button>
+          ))}
+        </nav>
+      </main>
     </div>
   );
 }
-
-// ==========================================
-// 6. DAHİLİ STİLLER
-// ==========================================
-const styles = {
-  container: {
-    backgroundColor: '#121212',
-    color: '#ffffff',
-    minHeight: '100vh',
-    padding: '20px',
-    fontFamily: 'sans-serif'
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '20px',
-    borderBottom: '1px solid #333',
-    paddingBottom: '10px'
-  },
-  card: {
-    backgroundColor: '#1e1e1e',
-    padding: '20px',
-    borderRadius: '8px',
-    marginBottom: '15px'
-  },
-  flexRow: {
-    display: 'flex',
-    gap: '10px',
-    alignItems: 'center',
-    flexWrap: 'wrap'
-  },
-  select: {
-    backgroundColor: '#333',
-    color: '#fff',
-    border: '1px solid #444',
-    padding: '8px 12px',
-    borderRadius: '4px',
-    outline: 'none'
-  },
-  btnPrimary: {
-    backgroundColor: '#0066cc',
-    color: '#fff',
-    border: 'none',
-    padding: '8px 16px',
-    borderRadius: '4px',
-    cursor: 'pointer'
-  },
-  btnSecondary: {
-    backgroundColor: '#444',
-    color: '#fff',
-    border: 'none',
-    padding: '8px 16px',
-    borderRadius: '4px',
-    cursor: 'pointer'
-  },
-  btnSuccess: {
-    backgroundColor: '#28a745',
-    color: '#fff',
-    border: 'none',
-    padding: '8px 16px',
-    borderRadius: '4px',
-    cursor: 'pointer'
-  },
-  btnDanger: {
-    backgroundColor: '#dc3545',
-    color: '#fff',
-    border: 'none',
-    padding: '6px 12px',
-    borderRadius: '4px',
-    cursor: 'pointer'
-  },
-  matchItem: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#2a2a2a',
-    padding: '10px',
-    borderRadius: '4px',
-    marginBottom: '8px'
-  },
-  eventRow: {
-    display: 'flex',
-    gap: '10px',
-    alignItems: 'center',
-    padding: '8px',
-    borderBottom: '1px solid #333'
-  }
-};
