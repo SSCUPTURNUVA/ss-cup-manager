@@ -281,7 +281,7 @@ export default function MatchCenter({
   }
 
   function getTeamSquad(teamName) {
-    const squads = readSquads();
+    const squads = cloudSquads && typeof cloudSquads === "object" ? cloudSquads : readSquads();
     return Array.isArray(squads?.[teamName])
       ? squads[teamName]
       : [];
@@ -328,6 +328,41 @@ export default function MatchCenter({
   }
 
   const ACTIVE_RUNTIME_KEY = "sscup-active-match-runtime";
+
+  // Kadro MatchCenter içinde de buluttan yüklenir. Mobilde SquadManager ekranının
+  // daha önce açılmış olmasına bağlı değildir.
+  const [cloudSquads, setCloudSquads] = useState(() => readSquads());
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadSquadsForMatchCenter() {
+      const { data, error } = await supabase
+        .from("app_state")
+        .select("value")
+        .eq("id", "squads")
+        .maybeSingle();
+      if (cancelled || error) return;
+      const value = data?.value;
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        setCloudSquads(value);
+        localStorage.setItem("sscup-squads", JSON.stringify(value));
+      }
+    }
+    loadSquadsForMatchCenter();
+    const channel = supabase
+      .channel(`sscup-matchcenter-squads-${Math.random().toString(36).slice(2)}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.squads" }, (payload) => {
+        const value = payload?.new?.value;
+        if (!value || typeof value !== "object" || Array.isArray(value)) return;
+        setCloudSquads(value);
+        localStorage.setItem("sscup-squads", JSON.stringify(value));
+      })
+      .subscribe();
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   const [activeMatchCenterKey, setActiveMatchCenterKey] = useState(() => {
     const directKey = localStorage.getItem("sscup-match-center-active") || "";
@@ -492,6 +527,16 @@ export default function MatchCenter({
   );
 
   let liveMatch = liveMatchIndex >= 0 ? fixtures[liveMatchIndex] : null;
+  if (!liveMatch && activeMatchCenterKey) {
+    try {
+      const pending = JSON.parse(localStorage.getItem("sscup-match-center-pending") || "null");
+      if (pending && String(pending?.id || "") === String(activeMatchCenterKey) && pending?.played !== true) {
+        liveMatch = pending;
+      }
+    } catch {
+      // pending kayıt yoksa runtime'a bak
+    }
+  }
   if (!liveMatch && activeMatchCenterKey) {
     try {
       const saved = JSON.parse(localStorage.getItem(ACTIVE_RUNTIME_KEY) || "null");

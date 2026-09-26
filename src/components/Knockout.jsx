@@ -1070,6 +1070,10 @@ export default function Knockout({
     // Maç Merkezi seçimi yalnız React ekranında kalmasın. Kullanıcı başka sekmeye
     // geçse veya yönetim ekranını yeniden açsa da bu maç, bitirilene/çıkarılana kadar seçili kalır.
     localStorage.setItem("sscup-match-center-active", stableId);
+    // MatchCenter henüz mount değilse event'i kaçırabilir. Seçilen maçın kendisini de
+    // taşı; ilk render'da fixtures gecikse bile tek tıkta açılabilsin.
+    const selectedMatchForCenter = updatedFixtures.find((item) => String(item?.id || "") === String(stableId)) || baseMatch;
+    localStorage.setItem("sscup-match-center-pending", JSON.stringify(selectedMatchForCenter));
     // Tek basışta Maç Merkezi aynı sekmede anında seçilsin; Realtime beklenmez.
     window.dispatchEvent(new CustomEvent("sscup-match-center-active-changed", {
       detail: stableId,
