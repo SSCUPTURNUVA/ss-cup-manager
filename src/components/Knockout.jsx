@@ -184,7 +184,11 @@ export default function Knockout({
               deletedEventIds: Array.isArray(current.deletedEventIds) ? current.deletedEventIds : [],
             };
           };
-          if (Array.isArray(value.quarter)) setQuarter((current) =>
+          // Manuel kura sırasında gecikmiş realtime snapshot'ı kullanıcının yeni
+          // seçimini geri silemez. Manuel quarter/pot cihazda önceliklidir.
+          const incomingMode = value.quarterMode;
+          const manualSelectionActive = incomingMode === "manual";
+          if (!manualSelectionActive && Array.isArray(value.quarter)) setQuarter((current) =>
             value.quarter.map((incoming, i) => preserveRunningRuntime(current?.[i], incoming))
           );
           if (Array.isArray(value.semi)) setSemi((current) =>
@@ -192,8 +196,8 @@ export default function Knockout({
           );
           if (value.finalMatch) setFinalMatch((current) => preserveRunningRuntime(current, value.finalMatch));
           if (value.thirdPlace) setThirdPlace((current) => preserveRunningRuntime(current, value.thirdPlace));
-          if (Array.isArray(value.drawPotOne)) setDrawPotOne(value.drawPotOne);
-          if (Array.isArray(value.drawPotTwo)) setDrawPotTwo(value.drawPotTwo);
+          if (!manualSelectionActive && Array.isArray(value.drawPotOne)) setDrawPotOne(value.drawPotOne);
+          if (!manualSelectionActive && Array.isArray(value.drawPotTwo)) setDrawPotTwo(value.drawPotTwo);
           if (typeof value.drawStarted === "boolean") setDrawStarted(value.drawStarted);
           if (["draw", "ranking", "free", "manual"].includes(value.quarterMode)) setQuarterMode(value.quarterMode);
         }
