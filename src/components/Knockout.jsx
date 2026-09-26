@@ -1228,6 +1228,14 @@ export default function Knockout({
     const remainingFixtures = fixtures.filter((match) => match?.isKnockout !== true);
     if (typeof setFixtures === "function") setFixtures(remainingFixtures);
     localStorage.setItem("sscup-fixtures", JSON.stringify(remainingFixtures));
+    localStorage.setItem("sscup-fixtures-v3", JSON.stringify(remainingFixtures));
+
+    // ELEME SIFIRLAMA kesin sınırdır: eski aktif eleme maçı hiçbir kaynaktan
+    // tekrar dirilmemeli. Normal çık-girde bu kayıtlar korunur; yalnız burada silinir.
+    localStorage.removeItem("sscup-match-center-active");
+    localStorage.removeItem("sscup-active-match-runtime");
+    window.dispatchEvent(new CustomEvent("sscup-match-center-active-changed", { detail: "" }));
+
     try {
       const allLineups = JSON.parse(localStorage.getItem("sscup-match-lineups") || "{}");
       const cleanLineups = Object.fromEntries(Object.entries(allLineups).filter(([key]) => !String(key).startsWith("knockout:")));
