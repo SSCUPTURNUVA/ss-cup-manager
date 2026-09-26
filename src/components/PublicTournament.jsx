@@ -727,7 +727,11 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   // Önce tarih, aynı tarihte saat. Bundan sonraki bütün Canlı Takip
   // bölümleri bu kronolojik listeyi kullanır.
   const displayFixtures = sortFixturesBySchedule([
-    ...leagueFixtures.filter((m) => !m?.isKnockout || !knockoutKeys.has(m.knockoutKey)),
+    // Eleme maçlarının canlıdaki tek kaynağı remoteKnockout/knockoutMatches olsun.
+    // fixtures içinde geçmişten kalmış eleme satırı varsa knockoutKey formatı farklı
+    // olduğunda (quarter-1 / quarter-0) ikinci bir CANLI maç olarak seçilebiliyordu.
+    // Bu da ekranda güncel eleme state'i yerine eski skoru göstermeye devam ediyordu.
+    ...leagueFixtures.filter((m) => m?.isKnockout !== true),
     ...knockoutMatches,
   ]);
   const liveMatches = displayFixtures
