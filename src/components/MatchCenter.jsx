@@ -430,9 +430,9 @@ export default function MatchCenter({
       if (!["first_half", "halftime", "second_half", "penalty"].includes(savedPhase)) return list;
 
       const restored = {
-        ...savedMatch,
         ...existing,
-        // Gerçek fixture kimliği/takımları/kadroları korunur; runtime çalışma durumunu tamamlar.
+        ...savedMatch,
+        // Çalışan maçta runtime üstündür; fixture yalnız kimlik/takım bilgilerini tamamlar.
         home: existing.home ?? savedMatch.home,
         away: existing.away ?? savedMatch.away,
         homeId: existing.homeId ?? existing.homeTeamId ?? savedMatch.homeId ?? savedMatch.homeTeamId ?? savedMatch.home?.id ?? null,
@@ -526,7 +526,23 @@ export default function MatchCenter({
       (!stalePreparedSelection && match.played !== true && activeMatchCenterKey && getMatchCenterKey(match, index) === activeMatchCenterKey)
   );
 
-  let liveMatch = liveMatchIndex >= 0 ? fixtures[liveMatchIndex] : null;
+  // Çalışan maçta runtime tek otoritedir. Buluttan gelen waiting/0:00 snapshot
+  // Maçı Bitir denene kadar çalışan maçı geriye alamaz.
+  let runtimeMatch = null;
+  if (activeMatchCenterKey) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(ACTIVE_RUNTIME_KEY) || "null");
+      if (
+        String(saved?.key || "") === String(activeMatchCenterKey) &&
+        saved?.match?.played !== true &&
+        ["first_half", "halftime", "second_half", "penalty"].includes(saved?.match?.matchPhase || "waiting")
+      ) runtimeMatch = saved.match;
+    } catch {
+      runtimeMatch = null;
+    }
+  }
+
+  let liveMatch = runtimeMatch || (liveMatchIndex >= 0 ? fixtures[liveMatchIndex] : null);
   if (!liveMatch && activeMatchCenterKey) {
     try {
       const pending = JSON.parse(localStorage.getItem("sscup-match-center-pending") || "null");
@@ -534,21 +550,7 @@ export default function MatchCenter({
         liveMatch = pending;
       }
     } catch {
-      // pending kayıt yoksa runtime'a bak
-    }
-  }
-  if (!liveMatch && activeMatchCenterKey) {
-    try {
-      const saved = JSON.parse(localStorage.getItem(ACTIVE_RUNTIME_KEY) || "null");
-      if (
-        String(saved?.key || "") === String(activeMatchCenterKey) &&
-        saved?.match?.played !== true &&
-        ["first_half", "halftime", "second_half", "penalty"].includes(saved?.match?.matchPhase || "waiting")
-      ) {
-        liveMatch = saved.match;
-      }
-    } catch {
-      // fixture bulunamazsa mevcut boş ekran davranışı
+      // pending kayıt yok
     }
   }
 
