@@ -1049,6 +1049,10 @@ export default function Knockout({
     // Maç Merkezi seçimi yalnız React ekranında kalmasın. Kullanıcı başka sekmeye
     // geçse veya yönetim ekranını yeniden açsa da bu maç, bitirilene/çıkarılana kadar seçili kalır.
     localStorage.setItem("sscup-match-center-active", stableId);
+    // Tek basışta Maç Merkezi aynı sekmede anında seçilsin; Realtime beklenmez.
+    window.dispatchEvent(new CustomEvent("sscup-match-center-active-changed", {
+      detail: stableId,
+    }));
     window.dispatchEvent(new CustomEvent("sscup-match-center-active-changed", { detail: stableId }));
     syncAppStateWithRetry("public_match_center", { matchId: stableId, updatedAt: new Date().toISOString() });
 
