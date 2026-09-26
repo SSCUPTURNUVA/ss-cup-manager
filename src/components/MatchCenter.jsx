@@ -195,23 +195,6 @@ export default function MatchCenter({
   const [selectedPlayerId, setSelectedPlayerId] = useState("");
   const [secondPlayerId, setSecondPlayerId] = useState("");
   const [matchRules, setMatchRules] = useState(readMatchRules);
-  const ACTIVE_RUNTIME_KEY = "sscup-active-match-runtime";
-  const [cloudSquads, setCloudSquads] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("sscup-squads") || "{}"); }
-    catch { return {}; }
-  });
-
-  // Maç Merkezi oyuncuları telefonda da doğrudan buluttan alır.
-  useEffect(() => {
-    let cancelled = false;
-    supabase.from("app_state").select("value").eq("id", "squads").maybeSingle()
-      .then(({ data, error }) => {
-        if (cancelled || error || !data?.value || typeof data.value !== "object") return;
-        setCloudSquads(data.value);
-        localStorage.setItem("sscup-squads", JSON.stringify(data.value));
-      });
-    return () => { cancelled = true; };
-  }, []);
 
   // Penaltı Atışları Yönetimi
   const [penaltySide, setPenaltySide] = useState(() => readUiPreference("sscup-penalty-side", "home"));
@@ -302,8 +285,10 @@ export default function MatchCenter({
   }
 
   function getTeamSquad(teamName) {
-    const squads = cloudSquads && typeof cloudSquads === "object" ? cloudSquads : readSquads();
-    return Array.isArray(squads?.[teamName]) ? squads[teamName] : [];
+    const squads = readSquads();
+    return Array.isArray(squads?.[teamName])
+      ? squads[teamName]
+      : [];
   }
 
   function getPlayerName(player) {
@@ -346,12 +331,16 @@ export default function MatchCenter({
     );
   }
 
+  const ACTIVE_RUNTIME_KEY = "sscup-active-match-runtime";
   const [activeMatchCenterKey, setActiveMatchCenterKey] = useState(() =>
     localStorage.getItem("sscup-match-center-active") || ""
   );
 
   useEffect(() => {
-    const handler = (event) => setActiveMatchCenterKey(String(event?.detail || localStorage.getItem("sscup-match-center-active") || ""));
+    const handler = (event) => {
+      const key = String(event?.detail || localStorage.getItem("sscup-match-center-active") || "");
+      setActiveMatchCenterKey(key);
+    };
     window.addEventListener("sscup-match-center-active-changed", handler);
     return () => window.removeEventListener("sscup-match-center-active-changed", handler);
   }, []);
@@ -405,23 +394,20 @@ export default function MatchCenter({
   );
 
   let runtimeMatch = null;
-  try {
-    const saved = JSON.parse(localStorage.getItem(ACTIVE_RUNTIME_KEY) || "null");
-    const phase = saved?.match?.matchPhase || "waiting";
-    if (
-      String(saved?.key || "") === String(activeMatchCenterKey) &&
-      saved?.match?.played !== true &&
-      ["first_half", "halftime", "second_half", "penalty"].includes(phase)
-    ) runtimeMatch = saved.match;
-  } catch { runtimeMatch = null; }
-
-  let liveMatch = runtimeMatch || (liveMatchIndex >= 0 ? fixtures[liveMatchIndex] : null);
-  if (!liveMatch && activeMatchCenterKey) {
+  if (activeMatchCenterKey) {
     try {
-      const pending = JSON.parse(localStorage.getItem("sscup-match-center-pending") || "null");
-      if (String(pending?.id || "") === String(activeMatchCenterKey) && pending?.played !== true) liveMatch = pending;
-    } catch { /* boş */ }
+      const saved = JSON.parse(localStorage.getItem(ACTIVE_RUNTIME_KEY) || "null");
+      const phase = saved?.match?.matchPhase || "waiting";
+      if (
+        String(saved?.key || "") === String(activeMatchCenterKey) &&
+        saved?.match?.played !== true &&
+        ["first_half", "halftime", "second_half", "penalty"].includes(phase)
+      ) runtimeMatch = saved.match;
+    } catch { runtimeMatch = null; }
   }
+
+  const fixtureLiveMatch = liveMatchIndex >= 0 ? fixtures[liveMatchIndex] : null;
+  const liveMatch = runtimeMatch || fixtureLiveMatch;
 
   const playedMatches = fixtures.filter(
     (match) => match.played === true
@@ -657,7 +643,12 @@ export default function MatchCenter({
       played: match.played === true,
       live: match.live === true,
       matchPhase: match.matchPhase || "waiting",
+      timerRunning: match.timerRunning === true,
+      timerStartedAt: match.timerStartedAt ?? null,
+      elapsedSeconds: Number(match.elapsedSeconds || 0),
       events: Array.isArray(match.events) ? match.events : [],
+      goals: Array.isArray(match.goals) ? match.goals : [],
+      deletedEventIds: Array.isArray(match.deletedEventIds) ? match.deletedEventIds : [],
     };
 
     const [stage, rawIndex] = String(match.knockoutKey).split("-");
@@ -750,23 +741,24 @@ export default function MatchCenter({
   }
 
   async function updateLiveMatch(patch) {
-    if (!liveMatch) return;
-    const activeKey = activeMatchCenterKey || getMatchCenterKey(liveMatch, liveMatchIndex);
-    const nextMatch = { ...liveMatch, ...patch };
-    const phase = nextMatch.matchPhase || "waiting";
+    if (liveMatchIndex < 0 || !liveMatch) return;
 
-    // Maç başladıktan sonra çık-gir için çalışma kaydı SENKRON ve anında yazılır.
-    if (nextMatch.played !== true && ["first_half", "halftime", "second_half", "penalty"].includes(phase)) {
-      localStorage.setItem(ACTIVE_RUNTIME_KEY, JSON.stringify({ key: activeKey, match: nextMatch, savedAt: new Date().toISOString() }));
+    const nextMatch = { ...liveMatch, ...patch };
+    const nextPhase = nextMatch.matchPhase || "waiting";
+    if (
+      nextMatch.played !== true &&
+      ["first_half", "halftime", "second_half", "penalty"].includes(nextPhase)
+    ) {
+      localStorage.setItem(ACTIVE_RUNTIME_KEY, JSON.stringify({
+        key: activeMatchCenterKey,
+        match: nextMatch,
+        savedAt: new Date().toISOString(),
+      }));
     }
 
-    let found = false;
-    const updatedFixtures = fixtures.map((match, index) => {
-      if (getMatchCenterKey(match, index) !== activeKey) return match;
-      found = true;
-      return { ...match, ...patch };
-    });
-    if (!found) updatedFixtures.push(nextMatch);
+    const updatedFixtures = fixtures.map((match, index) =>
+      index === liveMatchIndex ? { ...match, ...patch } : match
+    );
     await persistFixtures(updatedFixtures);
   }
 
@@ -1468,7 +1460,7 @@ export default function MatchCenter({
       // Maç bittiği anda hem kalıcı anahtarı hem React içindeki aktif seçim state'ini
       // temizle. Sadece localStorage'ı silmek yetmiyordu; state eski maç anahtarını
       // tuttuğu için tamamlanan maç Maç Merkezi'nde tekrar aktif görünebiliyordu.
-      const finishingKey = activeMatchCenterKey || getMatchCenterKey(liveMatch, liveMatchIndex);
+      const finishingIndex = liveMatchIndex;
       const finishPatch = {
         played: true,
         live: false,
@@ -1481,22 +1473,17 @@ export default function MatchCenter({
       // Maç biter bitmez aktif Maç Merkezi seçimini ÖNCE temizle. Böylece kullanıcı
       // Supabase cevabını beklemeden fikstüre geçip sıradaki maçı seçse bile biten maç
       // yeniden Maç Merkezi'ne dönemez.
-      // Bitişi index ile değil sabit maç anahtarıyla uygula.
-      let foundFinishingMatch = false;
-      const finishedFixtures = fixtures.map((match, index) => {
-        if (getMatchCenterKey(match, index) !== finishingKey) return match;
-        foundFinishingMatch = true;
-        return { ...match, ...finishPatch };
-      });
-      if (!foundFinishingMatch) finishedFixtures.push({ ...liveMatch, ...finishPatch });
-
-      await persistFixtures(finishedFixtures);
-
-      // Kalıcı bitiş yazıldıktan sonra aktif/runtime temizlenir.
       localStorage.removeItem("sscup-match-center-active");
-      localStorage.removeItem("sscup-match-center-pending");
-      localStorage.removeItem(ACTIVE_RUNTIME_KEY);
       setActiveMatchCenterKey("");
+
+      // Bitiş durumunu tek işlemde doğrudan fixtures'a yaz. persistFixtures önce React
+      // state + localStorage'u günceller, ardından Supabase senkronunu yapar. Bu sayede
+      // "Maçı Bitir" denildiği anda maç played:true olur ve Tamamlanan Maçlar'a geçer.
+      const finishedFixtures = fixtures.map((match, index) =>
+        index === finishingIndex ? { ...match, ...finishPatch } : match
+      );
+      await persistFixtures(finishedFixtures);
+      localStorage.removeItem(ACTIVE_RUNTIME_KEY);
     } finally {
       finishLockRef.current = false;
       setIsFinishingMatch(false);
