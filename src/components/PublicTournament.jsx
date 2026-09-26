@@ -209,6 +209,7 @@ function statusText(match) {
 
 function MatchDetailModal({ match, onClose, now, halfDurationMinutes, squads }) {
   const eventsContainerRef = useRef(null);
+  const touchYRef = useRef(null);
   const events = match ? getEvents(match) : [];
   const penaltyEvents = match ? getEvents(match).filter((event) => ["penalty_shootout_goal", "penalty_shootout_miss"].includes(event.type)) : [];
   const homePenaltyEvents = penaltyEvents.filter((event) => event.team === match.home || event.side === "home");
@@ -255,6 +256,30 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes, squads }) 
     event.stopPropagation();
     event.preventDefault();
     container.scrollTop += event.deltaY;
+  };
+
+  const handleEventsTouchStart = (event) => {
+    if (!event.touches?.length) return;
+    touchYRef.current = event.touches[0].clientY;
+    event.stopPropagation();
+  };
+
+  const handleEventsTouchMove = (event) => {
+    const container = eventsContainerRef.current;
+    if (!container || !event.touches?.length || touchYRef.current == null) return;
+    const nextY = event.touches[0].clientY;
+    const delta = touchYRef.current - nextY;
+    if (Math.abs(delta) > 0) {
+      container.scrollTop += delta;
+      touchYRef.current = nextY;
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  };
+
+  const handleEventsTouchEnd = (event) => {
+    touchYRef.current = null;
+    event.stopPropagation();
   };
 
   if (!match) return null;
@@ -305,7 +330,7 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes, squads }) 
         {matchEvents.length === 0 ? (
           <div className="public-modal-empty">{match.played ? "Bu maç için kayıtlı gol/kart olayı bulunmuyor." : "Maç başladığında goller ve kartlar burada görünecek."}</div>
         ) : (
-          <div className="public-modal-events" ref={eventsContainerRef} tabIndex={0} onWheel={handleEventsWheel} onTouchMove={(event) => event.stopPropagation()}>
+          <div className="public-modal-events" ref={eventsContainerRef} tabIndex={0} onWheel={handleEventsWheel} onTouchStart={handleEventsTouchStart} onTouchMove={handleEventsTouchMove} onTouchEnd={handleEventsTouchEnd} onTouchCancel={handleEventsTouchEnd}>
             {matchEvents.map((event) => (
               <div className="public-modal-event" key={event.id}>
                 <span className="public-modal-event-minute">{event.minute !== "" ? `${event.minute}'` : "•"}</span>
@@ -515,11 +540,11 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       setLastSync(new Date());
       setSelectedMatch((current) => {
         if (!current) return current;
-        const candidates = [...(mappedFixtures || []), ...(stagedKnockout || [])];
-        return candidates.find((m) =>
-          (current.knockoutKey && m.knockoutKey === current.knockoutKey) ||
-          String(m.id) === String(current.id)
-        ) || null;
+        // Eleme maç detayını genel refresh'in daha eski knockout aynasıyla ezme.
+        // Aktif eleme modalının tek sahibi aşağıdaki hızlı knockout_match_center_v1 okuyucusudur.
+        if (current.isKnockout === true || current.knockoutKey) return current;
+        const candidates = mappedFixtures || [];
+        return candidates.find((m) => String(m.id) === String(current.id)) || null;
       });
     } catch (error) {
       console.error("Canlı takip yenileme hatası:", error);

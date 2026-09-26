@@ -476,3 +476,19 @@
   touch-action:pan-y !important;
 }
 @media(max-width:560px){.public-modal-events{height:34vh !important;max-height:34vh !important;}}
+
+
+/* V28: Mobil canlı maç olayları - parmak hareketi yalnız olay listesini kaydırır. */
+@media(max-width:680px){
+  .public-modal-backdrop{touch-action:none !important;}
+  .public-match-modal{touch-action:none !important;}
+  .public-modal-events{
+    height:42dvh !important;
+    max-height:42dvh !important;
+    min-height:180px !important;
+    overflow-y:scroll !important;
+    -webkit-overflow-scrolling:touch !important;
+    touch-action:none !important;
+    overscroll-behavior:contain !important;
+  }
+}
