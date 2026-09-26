@@ -145,7 +145,7 @@ export default function Knockout({
         if (Array.isArray(value.drawPotOne)) setDrawPotOne(value.drawPotOne);
         if (Array.isArray(value.drawPotTwo)) setDrawPotTwo(value.drawPotTwo);
         if (typeof value.drawStarted === "boolean") setDrawStarted(value.drawStarted);
-        if (["draw", "ranking", "free"].includes(value.quarterMode)) setQuarterMode(value.quarterMode);
+        if (["draw", "ranking", "free", "manual"].includes(value.quarterMode)) setQuarterMode(value.quarterMode);
       }
 
       setCloudReady(true);
@@ -195,7 +195,7 @@ export default function Knockout({
           if (Array.isArray(value.drawPotOne)) setDrawPotOne(value.drawPotOne);
           if (Array.isArray(value.drawPotTwo)) setDrawPotTwo(value.drawPotTwo);
           if (typeof value.drawStarted === "boolean") setDrawStarted(value.drawStarted);
-          if (["draw", "ranking", "free"].includes(value.quarterMode)) setQuarterMode(value.quarterMode);
+          if (["draw", "ranking", "free", "manual"].includes(value.quarterMode)) setQuarterMode(value.quarterMode);
         }
       )
       .subscribe();
@@ -745,29 +745,16 @@ export default function Knockout({
     const nextQuarter = quarter.map((m, i) => i === matchIndex ? { ...m, [field]: team, homeScore: "", awayScore: "", homePen: "", awayPen: "", played: false, live: false, matchPhase: "waiting", timerRunning: false, timerStartedAt: null, elapsedSeconds: 0, events: [] } : m);
     const used = new Set(nextQuarter.flatMap(m => [m.home, m.away]).filter(Boolean));
     const remaining = topEight.map(t => t.team).filter(name => name && !used.has(name));
-    // MOBİL: takım seçimi bulut cevabını beklemeden ekrana anında işlensin.
-    // Supabase yalnız kalıcılık içindir; UI onun dönüş süresine bağlı değildir.
-    const emptySemi = createEmptySemi();
-    const emptyFinal = createEmptyFinal();
-    const emptyThirdPlace = createEmptyFinal();
+    // Manuel kura hazırlanırken yarı/final zaten sıfırlandı.
+    // Her takım dokunuşunda bütün eleme ağacını yeniden yaratmak mobilde render +
+    // fixture + realtime zincirini tetikliyordu. Burada yalnız değişen iki state'i güncelle.
     setQuarter(nextQuarter);
-    setSemi(emptySemi);
-    setFinalMatch(emptyFinal);
-    setThirdPlace(emptyThirdPlace);
     setDrawPotOne(remaining);
 
+    // Üstteki merkezi 250ms debounce bulut kaydı bu state'i zaten kalıcı yazar.
+    // Burada ikinci bir Supabase upsert yapmıyoruz; tek dokunuş = tek state değişimi.
     cloudWriteLockRef.current = true;
-    try {
-      const value = { quarter: nextQuarter, semi: emptySemi, finalMatch: emptyFinal, thirdPlace: emptyThirdPlace, drawPotOne: remaining, drawPotTwo: [], drawStarted: true, quarterMode: "manual" };
-      const { error } = await supabase.from("app_state").upsert({ id: "knockout", value, updated_at: new Date().toISOString() });
-      if (error) throw error;
-    } catch (error) {
-      console.error("Manuel kura kaydedilemedi:", error);
-      // Ekranı geri sarmıyoruz; kullanıcı tekrar tekrar dokunmak zorunda kalmasın.
-      alert("Takım ekranda seçildi ancak buluta kaydedilemedi. İnterneti kontrol edip seçimi tekrar kaydedin.");
-    } finally {
-      window.setTimeout(() => { cloudWriteLockRef.current = false; }, 250);
-    }
+    window.setTimeout(() => { cloudWriteLockRef.current = false; }, 350);
   }
 
   async function prepareRankedQuarter() {
