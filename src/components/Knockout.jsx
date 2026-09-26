@@ -116,6 +116,7 @@ export default function Knockout({
   const [lastDrawnMatch, setLastDrawnMatch] = useState(null);
   const [cloudReady, setCloudReady] = useState(false);
   const cloudWriteLockRef = useRef(false);
+  const matchCenterStartLockRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -940,12 +941,18 @@ export default function Knockout({
   }
 
   function startKnockoutMatch({ key, stageLabel, home, away, match }) {
+    if (matchCenterStartLockRef.current) return;
+    matchCenterStartLockRef.current = true;
+    window.setTimeout(() => { matchCenterStartLockRef.current = false; }, 900);
+
     if (!home || !away) {
+      matchCenterStartLockRef.current = false;
       alert("Bu maçın takımları henüz belli değil.");
       return;
     }
 
     if (typeof setFixtures !== "function") {
+      matchCenterStartLockRef.current = false;
       alert("App.jsx bağlantısı bulunamadı.");
       return;
     }
@@ -955,6 +962,7 @@ export default function Knockout({
     );
 
     if (anotherLiveMatch) {
+      matchCenterStartLockRef.current = false;
       alert(`${anotherLiveMatch.home} - ${anotherLiveMatch.away} maçı hâlâ canlı. Önce o maçı bitirin.`);
       return;
     }
@@ -997,7 +1005,10 @@ export default function Knockout({
         ? window.confirm("Bu maç daha önce tamamlanmış. Maç Merkezi'nde yeniden açmak istiyor musunuz?")
         : true;
 
-      if (!restart) return;
+      if (!restart) {
+        matchCenterStartLockRef.current = false;
+        return;
+      }
 
       const sameParticipants = String(existing.home || "") === String(home) && String(existing.away || "") === String(away);
       updatedFixtures = fixtures.map((item, index) =>
@@ -1053,7 +1064,6 @@ export default function Knockout({
     window.dispatchEvent(new CustomEvent("sscup-match-center-active-changed", {
       detail: stableId,
     }));
-    window.dispatchEvent(new CustomEvent("sscup-match-center-active-changed", { detail: stableId }));
     syncAppStateWithRetry("public_match_center", { matchId: stableId, updatedAt: new Date().toISOString() });
 
     window.dispatchEvent(
