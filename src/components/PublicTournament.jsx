@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabase";
 import "./PublicTournament.css";
 import { normalizeFixtureDate, fixtureTimeMinutes, sortFixturesBySchedule } from "../utils/fixtureOrder";
@@ -106,7 +106,9 @@ function calculateStandings(teams, fixtures) {
   });
 
   (fixtures || [])
-    .filter((match) => match?.played === true && match?.isKnockout !== true)
+    // CANLI lig maçı, yalnız izleyici ekranındaki geçici puan durumuna dahil edilir.
+    // Supabase'e puan/standings yazılmaz; maç bitince played sonucu normal şekilde devralır.
+    .filter((match) => match?.isKnockout !== true && (match?.played === true || match?.live === true))
     .forEach((match) => {
       const home = match?.home;
       const away = match?.away;
@@ -205,6 +207,48 @@ function statusText(match) {
   if (match?.live === true && match?.played !== true) return "CANLI";
   if (match?.played === true) return "MS";
   return match?.time || "SAAT BEKLENİYOR";
+}
+
+function knockoutLiveBadges(match) {
+  if (!match?.isKnockout || match?.live !== true || match?.played === true) return null;
+
+  const hs = safeNumber(match.homeScore);
+  const as = safeNumber(match.awayScore);
+  const hp = safeNumber(match.homePenalties ?? match.homePen);
+  const ap = safeNumber(match.awayPenalties ?? match.awayPen);
+  const penaltiesActive = hs === as && (hp > 0 || ap > 0);
+  const homeValue = penaltiesActive ? hp : hs;
+  const awayValue = penaltiesActive ? ap : as;
+
+  if (homeValue === awayValue) {
+    return { balanced: true, home: null, away: null };
+  }
+
+  const homeAhead = homeValue > awayValue;
+  const key = String(match.knockoutKey || "");
+  const stage = String(match.stageLabel || "").toLocaleUpperCase("tr-TR");
+  const isQuarter = key.startsWith("quarter-") || stage.includes("ÇEYREK");
+  const isSemi = key.startsWith("semi-") || stage.includes("YARI");
+  const isFinal = key === "final-0" || (stage.includes("FİNAL") && !stage.includes("YARI"));
+  const isThird = key.startsWith("third-place") || stage.includes("3.") || stage.includes("ÜÇÜNC");
+
+  if (isQuarter) {
+    return { balanced: false, home: homeAhead ? { icon: "↗", text: "Yarı Finale", tone: "gold" } : null, away: !homeAhead ? { icon: "↗", text: "Yarı Finale", tone: "gold" } : null };
+  }
+  if (isSemi) {
+    return {
+      balanced: false,
+      home: homeAhead ? { icon: "🏆", text: "Finale", tone: "gold" } : { icon: "🥉", text: "3.'lük Maçına", tone: "bronze" },
+      away: !homeAhead ? { icon: "🏆", text: "Finale", tone: "gold" } : { icon: "🥉", text: "3.'lük Maçına", tone: "bronze" },
+    };
+  }
+  if (isFinal) {
+    return { balanced: false, home: homeAhead ? { icon: "👑", text: "Şampiyonluğa", tone: "gold" } : null, away: !homeAhead ? { icon: "👑", text: "Şampiyonluğa", tone: "gold" } : null };
+  }
+  if (isThird) {
+    return { balanced: false, home: homeAhead ? { icon: "🥉", text: "3.'lüğe", tone: "bronze" } : null, away: !homeAhead ? { icon: "🥉", text: "3.'lüğe", tone: "bronze" } : null };
+  }
+  return null;
 }
 
 function MatchDetailModal({ match, onClose, now, halfDurationMinutes, squads }) {
@@ -925,6 +969,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const liveEvents = liveMatch ? getEvents(liveMatch).slice().reverse() : [];
   const lastGoal = liveEvents.find((event) => GOAL_EVENT_TYPES.has(event.type));
   const minute = getMinute(liveMatch, now, displaySettings.halfDurationMinutes || 30);
+  const knockoutBadges = knockoutLiveBadges(liveMatch);
   const playedCount = displayFixtures.filter((match) => match?.played === true).length;
   const totalGoals = displayFixtures
     .filter((match) => match?.played === true)
@@ -989,9 +1034,9 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           <section className="public-live-scoreboard public-clickable" onClick={() => setSelectedMatch(liveMatch)}>
             <div className="public-scoreboard-topline"><div className="public-live-pill"><i /> {actuallyLiveMatch ? "CANLI" : "MAÇ MERKEZİ"}</div><div className="public-match-status">{actuallyLiveMatch ? (minute || "CANLI") : "BAŞLAMAYI BEKLİYOR"}</div><div className="public-stage-label">{stageText(liveMatch)}</div></div>
             <div className="public-score-grid">
-              <div className="public-score-team home"><span>EV SAHİBİ</span><strong>{liveMatch.home}</strong></div>
-              <div className="public-score-center"><div className="public-score-numbers"><b>{scoreText(liveMatch.homeScore)}</b><em>:</em><b>{scoreText(liveMatch.awayScore)}</b></div><small>{liveMatch.time || ""} {liveMatch.field ? `• ${liveMatch.field}` : ""}</small></div>
-              <div className="public-score-team away"><span>DEPLASMAN</span><strong>{liveMatch.away}</strong></div>
+              <div className="public-score-team home"><span>EV SAHİBİ</span><strong>{liveMatch.home}</strong>{knockoutBadges?.home && <small className={`public-ko-live-badge ${knockoutBadges.home.tone}`}>{knockoutBadges.home.icon} {knockoutBadges.home.text}</small>}</div>
+              <div className="public-score-center"><div className="public-score-numbers"><b>{scoreText(liveMatch.homeScore)}</b><em>:</em><b>{scoreText(liveMatch.awayScore)}</b></div><small>{liveMatch.time || ""} {liveMatch.field ? `• ${liveMatch.field}` : ""}</small>{knockoutBadges?.balanced && <small className="public-ko-balanced">⚖ Tur dengede</small>}</div>
+              <div className="public-score-team away"><span>DEPLASMAN</span><strong>{liveMatch.away}</strong>{knockoutBadges?.away && <small className={`public-ko-live-badge ${knockoutBadges.away.tone}`}>{knockoutBadges.away.icon} {knockoutBadges.away.text}</small>}</div>
             </div>
             {lastGoal && <div className="public-last-goal"><span>⚽</span><div><b>SON GOL</b><strong>{lastGoal.player}</strong><small>{lastGoal.team}{lastGoal.minute !== "" ? ` • ${lastGoal.minute}'` : ""}</small></div></div>}
             <div className="public-tap-hint">Maç olaylarını görmek için tıkla ›</div>

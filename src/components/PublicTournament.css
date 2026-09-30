@@ -526,3 +526,12 @@
     overscroll-behavior: auto !important;
   }
 }
+
+/* Son 8 canlı izleyici: kompakt tur durumu rozetleri. Yalnız görseldir. */
+.public-ko-live-badge{display:inline-flex!important;align-items:center;justify-content:center;align-self:center;width:max-content;max-width:100%;margin-top:7px;padding:4px 9px;border-radius:999px;font-size:9px!important;font-weight:1000;line-height:1.15;letter-spacing:.01em;white-space:nowrap;animation:publicKoBadgeIn .28s ease-out both}
+.public-score-team.home .public-ko-live-badge{margin-left:auto}.public-score-team.away .public-ko-live-badge{margin-right:auto}
+.public-ko-live-badge.gold{color:#ffd84a;background:rgba(255,196,0,.11);border:1px solid rgba(255,196,0,.72);box-shadow:0 0 14px rgba(255,196,0,.10)}
+.public-ko-live-badge.bronze{color:#ffb071;background:rgba(220,108,31,.10);border:1px solid rgba(220,108,31,.65);box-shadow:0 0 12px rgba(220,108,31,.08)}
+.public-ko-balanced{display:inline-flex!important;align-items:center;justify-content:center;margin:7px auto 0!important;padding:4px 8px;border:1px solid #536173;border-radius:999px;background:#17202b;color:#c8d0da!important;font-size:8px!important;font-weight:900;white-space:nowrap}
+@keyframes publicKoBadgeIn{from{opacity:0;transform:translateY(3px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+@media(max-width:620px){.public-ko-live-badge{font-size:8px!important;padding:4px 7px}.public-ko-balanced{font-size:7px!important}.public-score-team strong{line-height:1.12}}

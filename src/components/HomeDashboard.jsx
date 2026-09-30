@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { supabase } from "../supabase";
 import BackupManager from "./BackupManager";
 import NewTournament from "./NewTournament";
 import { sortFixturesBySchedule } from "../utils/fixtureOrder";
@@ -23,10 +24,43 @@ export default function HomeDashboard({
   onNavigate,
 }) {
   const [now, setNow] = useState(() => new Date());
+  const [knockoutState, setKnockoutState] = useState(null);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadKnockoutState() {
+      const { data, error } = await supabase
+        .from("app_state")
+        .select("value")
+        .eq("id", "knockout")
+        .maybeSingle();
+      if (cancelled || error) return;
+      setKnockoutState(data?.value && typeof data.value === "object" ? data.value : null);
+    }
+
+    loadKnockoutState();
+    const channel = supabase
+      .channel(`dashboard-knockout-${Math.random().toString(36).slice(2)}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "app_state", filter: "id=eq.knockout" },
+        (payload) => {
+          const value = payload?.new?.value;
+          if (value && typeof value === "object") setKnockoutState(value);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      cancelled = true;
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const todayIso = now.toLocaleDateString("en-CA");
@@ -86,8 +120,30 @@ export default function HomeDashboard({
     (match) => match?.isKnockout === true
   );
 
-  const progress = validFixtures.length
-    ? Math.round((playedMatches.length / validFixtures.length) * 100)
+  // Yönetim ana ekranında turnuva toplamı lig + son 8 eleme maçı olarak gösterilir.
+  // Eleme verisi ayrı app_state kaydında tutulduğu için fixtures'a bağlı kalmıyoruz.
+  // Lig tamamlandıysa son 8 aşaması artık turnuvanın kalan planına dahildir.
+  const leaguePlayed = leagueMatches.filter((match) => match.played === true).length;
+  const leagueCompleteForTotals = leagueMatches.length > 0 && leaguePlayed === leagueMatches.length;
+  const knockoutStarted = leagueCompleteForTotals || knockoutState?.drawStarted === true ||
+    (Array.isArray(knockoutState?.quarter) && knockoutState.quarter.some((m) => m?.home || m?.away));
+  const knockoutStageMatches = knockoutStarted
+    ? [
+        ...(Array.isArray(knockoutState?.quarter) ? knockoutState.quarter : []),
+        ...(Array.isArray(knockoutState?.semi) ? knockoutState.semi : []),
+        ...(knockoutState?.thirdPlace ? [knockoutState.thirdPlace] : []),
+        ...(knockoutState?.finalMatch ? [knockoutState.finalMatch] : []),
+      ]
+    : [];
+  const knockoutTotal = knockoutStarted ? 8 : 0;
+  const knockoutPlayedFromState = knockoutStageMatches.filter((match) => match?.played === true).length;
+  const knockoutPlayedFromFixtures = knockoutMatches.filter((match) => match?.played === true).length;
+  const knockoutPlayed = Math.max(knockoutPlayedFromState, knockoutPlayedFromFixtures);
+  const tournamentPlayed = leaguePlayed + knockoutPlayed;
+  const tournamentTotal = leagueMatches.length + knockoutTotal;
+  const remainingMatches = Math.max(tournamentTotal - tournamentPlayed, 0);
+  const progress = tournamentTotal
+    ? Math.round((tournamentPlayed / tournamentTotal) * 100)
     : 0;
 
   const currentWeek = pendingLeagueMatches
@@ -169,7 +225,6 @@ export default function HomeDashboard({
       sum + Number(match.homeScore || 0) + Number(match.awayScore || 0),
     0
   );
-  const remainingMatches = Math.max(validFixtures.length - playedMatches.length, 0);
 
   function openMatch(match) {
     if (!match || match.played === true) return;
@@ -224,7 +279,7 @@ export default function HomeDashboard({
 
       <section className="dashboard-kpi-grid" aria-label="Turnuva özeti">
         <article><span>👥</span><div><strong>{teams.length}</strong><small>Takım</small></div></article>
-        <article><span>✅</span><div><strong>{playedMatches.length}</strong><small>Oynanan Maç</small></div></article>
+        <article><span>✅</span><div><strong>{tournamentPlayed}</strong><small>Oynanan Maç</small></div></article>
         <article><span>⏳</span><div><strong>{remainingMatches}</strong><small>Kalan Maç</small></div></article>
         <article><span>⚽</span><div><strong>{totalGoals}</strong><small>Toplam Gol</small></div></article>
       </section>
@@ -242,8 +297,8 @@ export default function HomeDashboard({
             <span style={{ width: `${progress}%` }} />
           </div>
           <div className="progress-details">
-            <span>✅ {playedMatches.length} tamamlandı</span>
-            <span>⌛ {Math.max(validFixtures.length - playedMatches.length, 0)} kaldı</span>
+            <span>✅ {tournamentPlayed} tamamlandı</span>
+            <span>⌛ {remainingMatches} kaldı</span>
           </div>
           {lastResult && (
             <div className="last-result-box">
