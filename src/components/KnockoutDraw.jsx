@@ -1,6 +1,7 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabase";
 import "./KnockoutDraw.css";
+import CompletedMatches from "./CompletedMatches";
 
 function shuffle(list) {
   const arr = [...list];
@@ -23,7 +24,6 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
   const [knockoutCloud, setKnockoutCloud] = useState({});
   const [knockoutResults, setKnockoutResults] = useState([]);
   const [resetting, setResetting] = useState(false);
-  const [selectedResult, setSelectedResult] = useState(null);
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [knockoutSchedule, setKnockoutSchedule] = useState({});
@@ -338,12 +338,7 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
   const semiCloud = Array.isArray(knockoutCloud.semi) ? knockoutCloud.semi : [];
   const finalCloud = knockoutCloud.finalMatch || null;
   const thirdCloud = knockoutCloud.thirdPlace || null;
-  const resultEvents = Array.isArray(selectedResult?.events) ? selectedResult.events : [];
-  const eventLabel = (event) => ({
-    goal: "⚽ GOL", penalty_goal: "🥅 PENALTI GOLÜ", penalty_shootout_goal: "⚽ PENALTI GOLÜ",
-    penalty_shootout_miss: "❌ PENALTI KAÇTI", penalty_miss: "❌ PENALTI KAÇTI", own_goal: "🥴 KENDİ KALESİNE",
-    yellow_card: "🟨 SARI KART", red_card: "🟥 KIRMIZI KART", substitution: "🔄 DEĞİŞİKLİK", assist: "🅰️ ASİST"
-  }[event?.type || event?.eventType] || String(event?.type || event?.eventType || "OLAY").toUpperCase());
+
 
   return (
     <div className="ko-page">
@@ -460,21 +455,17 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
         <div className="ko-pairs"><div className={finalCloud?.home && finalCloud?.away ? "ko-pair filled" : "ko-pair"}><div className="match-no">FİNAL</div><div className="team"><span>{finalCloud?.home || "YF1 Kazananı"}</span></div><div className="pair-vs">VS</div><div className="team"><span>{finalCloud?.away || "YF2 Kazananı"}</span></div><div className="ko-inline-schedule"><label><span>📅 TARİH</span><input type="date" value={knockoutSchedule?.["final-0"]?.date || ""} onChange={(e) => updateKnockoutSchedule("final-0", "date", e.target.value)} /></label><label><span>🕘 SAAT</span><input type="time" value={knockoutSchedule?.["final-0"]?.time || ""} onChange={(e) => updateKnockoutSchedule("final-0", "time", e.target.value)} /></label></div>{finalCloud?.home && finalCloud?.away && finalCloud?.played !== true && <button type="button" className="ko-mc-button" onClick={() => sendExistingToMatchCenter(finalCloud, "final-0", "Final", "final-0")}>🏟️ Maç Merkezine Al</button>}</div></div>
       </section>
 
-      <section className="ko-card ko-road-card">
-        <div className="ko-section-title"><div><span>08</span><h3>Eleme Maçları Sonuçları</h3></div><small>{knockoutResults.length} maç</small></div>
-        {knockoutResults.length === 0 ? <div className="ko-warning">Henüz tamamlanmış eleme maçı yok.</div> : (
-          <div className="ko-results-list">
-            {knockoutResults.map((m) => {
-              const tied = Number(m?.homeScore || 0) === Number(m?.awayScore || 0);
-              return <button type="button" className="ko-result-row" key={m.id} onClick={() => setSelectedResult(m)}>
-                <div><b>{m.stageLabel || "Eleme Maçı"}</b><small>{m.completedAt ? new Date(m.completedAt).toLocaleString("tr-TR") : ""}</small></div>
-                <div className="ko-result-score"><span>{m.home}</span><strong>{Number(m.homeScore || 0)} - {Number(m.awayScore || 0)}</strong><span>{m.away}</span></div>
-                {tied && <div className="ko-result-pen">Penaltılar: {m.homePen ?? 0} - {m.awayPen ?? 0}</div>}
-                <div className="ko-result-detail-hint">Maç olaylarını gör ›</div>
-              </button>;
-            })}
-          </div>
-        )}
+      <section className="ko-card ko-road-card knockout-completed-section">
+        <div className="ko-section-title"><div><span>08</span><h3>Eleme Maçları Sonuçları</h3></div><small>{knockoutResults.length} maç • olaylar düzenlenebilir</small></div>
+        <CompletedMatches
+          fixtures={knockoutResults}
+          setFixtures={setKnockoutResults}
+          matchFilter={() => true}
+          groupMode="stage"
+          emptyTitle="Henüz tamamlanan eleme maçı yok"
+          emptyText="Biten eleme maçları burada listelenecek."
+          archiveStateId="knockout_results_v1"
+        />
       </section>
 
       {resetModalOpen && <div className="ko-confirm-backdrop" onMouseDown={() => !resetting && setResetModalOpen(false)}>
@@ -491,21 +482,7 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
 
       {notice && <div className="ko-notice" role="status" onClick={() => setNotice("")}>✓ {notice}</div>}
 
-      {selectedResult && <div className="ko-detail-backdrop" onMouseDown={() => setSelectedResult(null)}>
-        <div className="ko-detail-modal" onMouseDown={(e) => e.stopPropagation()}>
-          <button type="button" className="ko-detail-close" onClick={() => setSelectedResult(null)}>×</button>
-          <div className="ko-detail-stage">{selectedResult.stageLabel || "ELEME MAÇI"} • MAÇ SONU</div>
-          <div className="ko-detail-score"><strong>{selectedResult.home}</strong><b>{Number(selectedResult.homeScore || 0)} - {Number(selectedResult.awayScore || 0)}</b><strong>{selectedResult.away}</strong></div>
-          {Number(selectedResult.homeScore || 0) === Number(selectedResult.awayScore || 0) && <div className="ko-detail-pen">PENALTILAR {selectedResult.homePen ?? 0} - {selectedResult.awayPen ?? 0}</div>}
-          <div className="ko-detail-title">MAÇ OLAYLARI <span>{resultEvents.length}</span></div>
-          {resultEvents.length === 0 ? <div className="ko-warning">Bu maç için kayıtlı maç olayı yok.</div> : <div className="ko-detail-events">
-            {resultEvents.map((event, index) => <div className="ko-detail-event" key={event?.id || index}>
-              <span>{event?.minute !== undefined && event?.minute !== "" ? `${event.minute}'` : "•"}</span>
-              <div><b>{eventLabel(event)}</b><strong>{event?.shirtNumber || event?.number ? `#${event.shirtNumber || event.number} ` : ""}{event?.playerName || event?.player || event?.name || ""}</strong><small>{event?.team || event?.teamName || ""}</small></div>
-            </div>)}
-          </div>}
-        </div>
-      </div>}
+
 
     </div>
   );

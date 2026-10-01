@@ -83,6 +83,7 @@ export default function CompletedMatches({
   groupMode = "week",
   emptyTitle = "Henüz tamamlanan maç yok",
   emptyText = "Biten maçlar burada ayrı olarak listelenecek.",
+  archiveStateId = "",
 }) {
   const [openedIndex, setOpenedIndex] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -171,6 +172,19 @@ export default function CompletedMatches({
     }
 
     setFixtures(updatedFixtures);
+
+    if (archiveStateId) {
+      const { error: archiveError } = await supabase.from("app_state").upsert({
+        id: archiveStateId,
+        value: updatedFixtures,
+        updated_at: new Date().toISOString(),
+      });
+      if (archiveError) {
+        console.error("Tamamlanan maç arşivi kaydedilemedi:", archiveError);
+        alert("Tamamlanan maç arşivi kaydedilemedi. Tekrar deneyin.");
+        return false;
+      }
+    }
 
     const changed = updatedFixtures.filter((match, index) =>
       JSON.stringify(match) !== JSON.stringify(fixtures[index])
