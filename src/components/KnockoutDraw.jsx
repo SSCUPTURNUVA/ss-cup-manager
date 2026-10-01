@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "../supabase";
 import "./KnockoutDraw.css";
-import CompletedMatches from "./CompletedMatches";
 
 function shuffle(list) {
   const arr = [...list];
@@ -24,6 +23,9 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
   const [knockoutCloud, setKnockoutCloud] = useState({});
   const [knockoutResults, setKnockoutResults] = useState([]);
   const [resetting, setResetting] = useState(false);
+  const [selectedResult, setSelectedResult] = useState(null);
+  const [eventDraft, setEventDraft] = useState([]);
+  const [savingEvents, setSavingEvents] = useState(false);
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [knockoutSchedule, setKnockoutSchedule] = useState({});
@@ -338,7 +340,125 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
   const semiCloud = Array.isArray(knockoutCloud.semi) ? knockoutCloud.semi : [];
   const finalCloud = knockoutCloud.finalMatch || null;
   const thirdCloud = knockoutCloud.thirdPlace || null;
+  const resultEvents = Array.isArray(selectedResult?.events) ? selectedResult.events : [];
 
+  function openResultEditor(match) {
+    setSelectedResult(match);
+    setEventDraft((Array.isArray(match?.events) ? match.events : []).map((event) => ({ ...event })));
+  }
+
+  function closeResultEditor() {
+    if (savingEvents) return;
+    setSelectedResult(null);
+    setEventDraft([]);
+  }
+
+  const normalGoalSide = (event, match) => {
+    const type = event?.type || event?.eventType || "";
+    if (!["goal", "penalty_goal", "own_goal", "scorer_record"].includes(type)) return "";
+    const team = String(event?.team || event?.teamName || "");
+    if (type === "own_goal") {
+      if (team === String(match?.home || "")) return "away";
+      if (team === String(match?.away || "")) return "home";
+      return "";
+    }
+    if (team === String(match?.home || "")) return "home";
+    if (team === String(match?.away || "")) return "away";
+    return "";
+  };
+
+  const countNormalGoals = (events, match) => (events || []).reduce((acc, event) => {
+    const side = normalGoalSide(event, match);
+    if (side) acc[side] += 1;
+    return acc;
+  }, { home: 0, away: 0 });
+
+  function updateDraftEvent(index, field, value) {
+    setEventDraft((current) => current.map((event, i) => i === index ? { ...event, [field]: value } : event));
+  }
+
+  function addDraftEvent() {
+    if (!selectedResult) return;
+    setEventDraft((current) => [...current, {
+      id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, playerId: "", _manualNew: true,
+      type: "goal", minute: "", team: selectedResult.home || "", playerName: "", shirtNumber: ""
+    }]);
+  }
+
+  async function saveResultEvents() {
+    if (!selectedResult || savingEvents) return;
+    setSavingEvents(true);
+    try {
+      const before = countNormalGoals(resultEvents, selectedResult);
+      const after = countNormalGoals(eventDraft, selectedResult);
+      const updated = {
+        ...selectedResult,
+        events: eventDraft.map(({ _manualNew, ...event }) => ({ ...event })),
+        homeScore: Math.max(0, Number(selectedResult.homeScore || 0) + (after.home - before.home)),
+        awayScore: Math.max(0, Number(selectedResult.awayScore || 0) + (after.away - before.away)),
+        played: true, live: false, matchPhase: "completed", updatedAt: new Date().toISOString(),
+      };
+      const now = new Date().toISOString();
+
+      const { data: rows, error: readError } = await supabase.from("app_state").select("id,value").in("id", ["knockout", "knockout_results_v1"]);
+      if (readError) throw readError;
+      const rowList = Array.isArray(rows) ? rows : [];
+      const koRow = rowList.find((row) => row?.id === "knockout");
+      const resultsRow = rowList.find((row) => row?.id === "knockout_results_v1");
+      const ko = koRow?.value && typeof koRow.value === "object" && !Array.isArray(koRow.value) ? { ...koRow.value } : {};
+      const key = String(updated.knockoutKey || "");
+      const q = key.match(/^quarter-(\d+)$/);
+      const sf = key.match(/^semi-(\d+)$/);
+      if (q) {
+        const raw = Number(q[1]);
+        const index = raw >= 1 ? raw - 1 : raw;
+        const list = Array.isArray(ko.quarter) ? [...ko.quarter] : [];
+        list[index] = { ...(list[index] || {}), ...updated };
+        ko.quarter = list;
+      } else if (sf) {
+        const raw = Number(sf[1]);
+        const index = raw >= 1 ? raw - 1 : raw;
+        const list = Array.isArray(ko.semi) ? [...ko.semi] : [];
+        list[index] = { ...(list[index] || {}), ...updated };
+        ko.semi = list;
+      } else if (key === "final-0" || key === "final-1") {
+        ko.finalMatch = { ...(ko.finalMatch || {}), ...updated };
+      } else if (key === "third-place-0" || key === "third-place-1") {
+        ko.thirdPlace = { ...(ko.thirdPlace || {}), ...updated };
+      } else {
+        throw new Error("Eleme maç anahtarı bulunamadı.");
+      }
+
+      const archive = Array.isArray(resultsRow?.value) ? [...resultsRow.value] : [];
+      const archiveIndex = archive.findIndex((item) => String(item?.id) === String(updated.id));
+      if (archiveIndex >= 0) archive[archiveIndex] = { ...archive[archiveIndex], ...updated };
+      else archive.unshift({ ...updated, completedAt: updated.completedAt || now });
+
+      const writes = await Promise.all([
+        supabase.from("app_state").upsert({ id: "knockout", value: ko, updated_at: now }),
+        supabase.from("app_state").upsert({ id: "knockout_results_v1", value: archive, updated_at: now }),
+      ]);
+      const failed = writes.find((result) => result?.error);
+      if (failed?.error) throw failed.error;
+
+      setKnockoutCloud(ko);
+      setKnockoutResults(archive);
+      setNotice(`Maç olayları kaydedildi • ${updated.homeScore}-${updated.awayScore}`);
+      setSelectedResult(null);
+      setEventDraft([]);
+    } catch (error) {
+      console.error("Eleme maç olayları kaydedilemedi:", error);
+      setNotice("Maç olayları kaydedilemedi. Tekrar deneyin.");
+    } finally {
+      setSavingEvents(false);
+    }
+  }
+
+  const eventLabel = (event) => ({
+    goal: "⚽ GOL", penalty_goal: "🥅 PENALTI GOLÜ", penalty_shootout_goal: "⚽ PENALTI GOLÜ",
+    penalty_shootout_miss: "❌ PENALTI KAÇTI", penalty_miss: "❌ PENALTI KAÇTI", own_goal: "🥴 KENDİ KALESİNE",
+    yellow_card: "🟨 SARI KART", red_card: "🟥 KIRMIZI KART", substitution: "🔄 DEĞİŞİKLİK", assist: "🅰️ ASİST"
+  }[event?.type || event?.eventType] || String(event?.type || event?.eventType || "OLAY").toUpperCase());
 
   return (
     <div className="ko-page">
@@ -455,17 +575,21 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
         <div className="ko-pairs"><div className={finalCloud?.home && finalCloud?.away ? "ko-pair filled" : "ko-pair"}><div className="match-no">FİNAL</div><div className="team"><span>{finalCloud?.home || "YF1 Kazananı"}</span></div><div className="pair-vs">VS</div><div className="team"><span>{finalCloud?.away || "YF2 Kazananı"}</span></div><div className="ko-inline-schedule"><label><span>📅 TARİH</span><input type="date" value={knockoutSchedule?.["final-0"]?.date || ""} onChange={(e) => updateKnockoutSchedule("final-0", "date", e.target.value)} /></label><label><span>🕘 SAAT</span><input type="time" value={knockoutSchedule?.["final-0"]?.time || ""} onChange={(e) => updateKnockoutSchedule("final-0", "time", e.target.value)} /></label></div>{finalCloud?.home && finalCloud?.away && finalCloud?.played !== true && <button type="button" className="ko-mc-button" onClick={() => sendExistingToMatchCenter(finalCloud, "final-0", "Final", "final-0")}>🏟️ Maç Merkezine Al</button>}</div></div>
       </section>
 
-      <section className="ko-card ko-road-card knockout-completed-section">
-        <div className="ko-section-title"><div><span>08</span><h3>Eleme Maçları Sonuçları</h3></div><small>{knockoutResults.length} maç • olaylar düzenlenebilir</small></div>
-        <CompletedMatches
-          fixtures={knockoutResults}
-          setFixtures={setKnockoutResults}
-          matchFilter={() => true}
-          groupMode="stage"
-          emptyTitle="Henüz tamamlanan eleme maçı yok"
-          emptyText="Biten eleme maçları burada listelenecek."
-          archiveStateId="knockout_results_v1"
-        />
+      <section className="ko-card ko-road-card">
+        <div className="ko-section-title"><div><span>08</span><h3>Eleme Maçları Sonuçları</h3></div><small>{knockoutResults.length} maç</small></div>
+        {knockoutResults.length === 0 ? <div className="ko-warning">Henüz tamamlanmış eleme maçı yok.</div> : (
+          <div className="ko-results-list">
+            {knockoutResults.map((m) => {
+              const tied = Number(m?.homeScore || 0) === Number(m?.awayScore || 0);
+              return <button type="button" className="ko-result-row" key={m.id} onClick={() => openResultEditor(m)}>
+                <div><b>{m.stageLabel || "Eleme Maçı"}</b><small>{m.completedAt ? new Date(m.completedAt).toLocaleString("tr-TR") : ""}</small></div>
+                <div className="ko-result-score"><span>{m.home}</span><strong>{Number(m.homeScore || 0)} - {Number(m.awayScore || 0)}</strong><span>{m.away}</span></div>
+                {tied && <div className="ko-result-pen">Penaltılar: {m.homePen ?? 0} - {m.awayPen ?? 0}</div>}
+                <div className="ko-result-detail-hint">Maç olaylarını gör ›</div>
+              </button>;
+            })}
+          </div>
+        )}
       </section>
 
       {resetModalOpen && <div className="ko-confirm-backdrop" onMouseDown={() => !resetting && setResetModalOpen(false)}>
@@ -482,7 +606,35 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
 
       {notice && <div className="ko-notice" role="status" onClick={() => setNotice("")}>✓ {notice}</div>}
 
-
+      {selectedResult && <div className="ko-detail-backdrop" onMouseDown={closeResultEditor}>
+        <div className="ko-detail-modal ko-event-editor" onMouseDown={(e) => e.stopPropagation()}>
+          <button type="button" className="ko-detail-close" disabled={savingEvents} onClick={closeResultEditor}>×</button>
+          <div className="ko-detail-stage">{selectedResult.stageLabel || "ELEME MAÇI"} • MAÇ OLAYLARI</div>
+          <div className="ko-detail-score"><strong>{selectedResult.home}</strong><b>{Number(selectedResult.homeScore || 0)} - {Number(selectedResult.awayScore || 0)}</b><strong>{selectedResult.away}</strong></div>
+          <div className="ko-editor-note">Değişiklikler yalnız <b>KAYDET</b> dediğinde uygulanır.</div>
+          <div className="ko-detail-title">MAÇ OLAYLARI <span>{eventDraft.length}</span></div>
+          <div className="ko-detail-events ko-edit-events">
+            {eventDraft.length === 0 && <div className="ko-warning">Kayıtlı maç olayı yok. Aşağıdan olay ekleyebilirsin.</div>}
+            {eventDraft.map((event, index) => <div className="ko-edit-event" key={event?.id || index}>
+              <input className="ko-minute-input" inputMode="numeric" placeholder="dk" value={event?.minute ?? ""} onChange={(e) => updateDraftEvent(index, "minute", e.target.value)} />
+              <select value={event?.type || event?.eventType || "goal"} onChange={(e) => updateDraftEvent(index, "type", e.target.value)}>
+                <option value="goal">⚽ Gol</option><option value="penalty_goal">🥅 Penaltı Golü</option><option value="own_goal">🥴 Kendi Kalesine</option>
+                <option value="yellow_card">🟨 Sarı Kart</option><option value="red_card">🟥 Kırmızı Kart</option><option value="penalty_miss">❌ Penaltı Kaçtı</option><option value="substitution">🔄 Değişiklik</option>
+              </select>
+              <select value={event?.team || event?.teamName || ""} onChange={(e) => updateDraftEvent(index, "team", e.target.value)}>
+                <option value={selectedResult.home}>{selectedResult.home}</option><option value={selectedResult.away}>{selectedResult.away}</option>
+              </select>
+              <input className="ko-player-input" placeholder="Oyuncu adı" value={event?.playerName || event?.player || event?.name || ""} onChange={(e) => { const value = e.target.value; setEventDraft((current) => current.map((item, i) => i === index ? { ...item, playerName: value, ...(item?._manualNew ? { playerId: value.trim() } : {}) } : item)); }} />
+              <input className="ko-shirt-input" inputMode="numeric" placeholder="#" value={event?.shirtNumber || event?.number || ""} onChange={(e) => updateDraftEvent(index, "shirtNumber", e.target.value)} />
+              <button type="button" className="ko-event-delete" onClick={() => setEventDraft((current) => current.filter((_, i) => i !== index))}>Sil</button>
+            </div>)}
+          </div>
+          <div className="ko-editor-actions">
+            <button type="button" className="ko-add-event" disabled={savingEvents} onClick={addDraftEvent}>＋ OLAY EKLE</button>
+            <button type="button" className="ko-save-events" disabled={savingEvents} onClick={saveResultEvents}>{savingEvents ? "KAYDEDİLİYOR..." : "KAYDET"}</button>
+          </div>
+        </div>
+      </div>}
 
     </div>
   );

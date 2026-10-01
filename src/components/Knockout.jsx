@@ -95,27 +95,6 @@ export default function Knockout({
     safeReadStorage("sscup-fixtures", [])
   );
 
-  const [completedKnockoutMatches, setCompletedKnockoutMatches] = useState([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function loadCompletedKnockoutMatches() {
-      const { data, error } = await supabase
-        .from("app_state")
-        .select("value")
-        .eq("id", "knockout_results_v1")
-        .maybeSingle();
-      if (cancelled) return;
-      if (error) {
-        console.error("Tamamlanan eleme maçları yüklenemedi:", error);
-        return;
-      }
-      setCompletedKnockoutMatches(Array.isArray(data?.value) ? data.value : []);
-    }
-    loadCompletedKnockoutMatches();
-    return () => { cancelled = true; };
-  }, []);
-
   useEffect(() => {
     const currentLeague = (fixtures || []).filter((match) => match?.isKnockout !== true);
     if (currentLeague.length > 0) setLeagueFixtures(currentLeague);
@@ -2182,18 +2161,6 @@ export default function Knockout({
             );
           })}
         </div>
-      </div>
-
-      <div style={{ marginTop: "38px" }}>
-        <CompletedMatches
-          fixtures={completedKnockoutMatches}
-          setFixtures={setCompletedKnockoutMatches}
-          matchFilter={(match) => match?.isKnockout === true}
-          groupMode="stage"
-          archiveStateId="knockout_results_v1"
-          emptyTitle="Henüz tamamlanan eleme maçı yok"
-          emptyText="Biten çeyrek final, yarı final, üçüncülük ve final maçları burada düzenlenebilir."
-        />
       </div>
 
       {(champion && champion !== "PENALTY_WAIT") && (
