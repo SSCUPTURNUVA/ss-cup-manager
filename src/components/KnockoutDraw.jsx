@@ -26,10 +26,27 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
   const [selectedResult, setSelectedResult] = useState(null);
   const [eventDraft, setEventDraft] = useState([]);
   const [savingEvents, setSavingEvents] = useState(false);
+  const [squads, setSquads] = useState({});
   const [resetModalOpen, setResetModalOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [knockoutSchedule, setKnockoutSchedule] = useState({});
   const drawLoadedRef = useRef(false);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadSquads = async () => {
+      const { data, error } = await supabase.from("app_state").select("value").eq("id", "squads").maybeSingle();
+      if (!error && mounted) {
+        const value = data?.value;
+        setSquads(value && typeof value === "object" && !Array.isArray(value) ? value : {});
+      }
+    };
+    loadSquads();
+    const channel = supabase.channel(`ko-squads-${Math.random().toString(36).slice(2)}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "app_state", filter: "id=eq.squads" }, loadSquads)
+      .subscribe();
+    return () => { mounted = false; supabase.removeChannel(channel); };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -621,11 +638,30 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
                 <option value="goal">⚽ Gol</option><option value="penalty_goal">🥅 Penaltı Golü</option><option value="own_goal">🥴 Kendi Kalesine</option>
                 <option value="yellow_card">🟨 Sarı Kart</option><option value="red_card">🟥 Kırmızı Kart</option><option value="penalty_miss">❌ Penaltı Kaçtı</option><option value="substitution">🔄 Değişiklik</option>
               </select>
-              <select value={event?.team || event?.teamName || ""} onChange={(e) => updateDraftEvent(index, "team", e.target.value)}>
+              <select value={event?.team || event?.teamName || ""} onChange={(e) => {
+                const team = e.target.value;
+                setEventDraft((current) => current.map((item, i) => i === index ? { ...item, team, teamName: team, playerId: "", playerName: "", name: "", shirtNumber: "" } : item));
+              }}>
                 <option value={selectedResult.home}>{selectedResult.home}</option><option value={selectedResult.away}>{selectedResult.away}</option>
               </select>
-              <input className="ko-player-input" placeholder="Oyuncu adı" value={event?.playerName || event?.player || event?.name || ""} onChange={(e) => { const value = e.target.value; setEventDraft((current) => current.map((item, i) => i === index ? { ...item, playerName: value, ...(item?._manualNew ? { playerId: value.trim() } : {}) } : item)); }} />
-              <input className="ko-shirt-input" inputMode="numeric" placeholder="#" value={event?.shirtNumber || event?.number || ""} onChange={(e) => updateDraftEvent(index, "shirtNumber", e.target.value)} />
+              <select className="ko-player-input" value={event?.playerId || ""} onChange={(e) => {
+                const team = event?.team || event?.teamName || selectedResult.home || "";
+                const players = Array.isArray(squads?.[team]) ? squads[team] : [];
+                const player = players.find((item) => String(item?.id) === String(e.target.value));
+                setEventDraft((current) => current.map((item, i) => i === index ? {
+                  ...item,
+                  playerId: player?.id || "",
+                  playerName: player?.name || "",
+                  name: player?.name || "",
+                  shirtNumber: player?.shirtNumber ?? "",
+                } : item));
+              }}>
+                <option value="">Oyuncu seç</option>
+                {(Array.isArray(squads?.[event?.team || event?.teamName || selectedResult.home]) ? squads[event?.team || event?.teamName || selectedResult.home] : []).map((player) => (
+                  <option key={player?.id || `${player?.name}-${player?.shirtNumber}`} value={player?.id || ""}>#{player?.shirtNumber ?? "-"} {player?.name || "Oyuncu"}</option>
+                ))}
+              </select>
+              <input className="ko-shirt-input" inputMode="numeric" placeholder="#" value={event?.shirtNumber || event?.number || ""} readOnly />
               <button type="button" className="ko-event-delete" onClick={() => setEventDraft((current) => current.filter((_, i) => i !== index))}>Sil</button>
             </div>)}
           </div>
