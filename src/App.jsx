@@ -194,7 +194,7 @@ function calculateStandings(teams, fixtures) {
 }
 
 
-const GOAL_EVENT_TYPES = new Set(["goal", "penalty_goal", "penalty_shootout_goal", "scorer_record"]);
+const GOAL_EVENT_TYPES = new Set(["goal", "penalty_goal", "scorer_record"]);
 
 function getFixtureEvents(match) {
   const deletedSet = new Set((Array.isArray(match?.deletedEventIds) ? match.deletedEventIds : []).map(String));
@@ -226,12 +226,13 @@ function deriveGoalScorers(fixtures) {
     getFixtureEvents(match)
       .filter((event) => GOAL_EVENT_TYPES.has(event?.type || "goal"))
       .filter((event) => {
-        const type = event?.type || event?.eventType || "goal";
         const team = canonicalTeamName(event?.team || event?.teamName || "");
         const player = String(event?.playerId || event?.playerName || event?.name || event?.player || "");
         const minute = String(event?.minute ?? "");
-        const action = String(event?.actionId || "");
-        const signature = action ? `action:${action}` : `${type}|${team}|${player}|${minute}`;
+        // Gol krallığında normal gol / penaltı golü / eski scorer_record aynı
+        // gerçek gol olayının farklı aynalarıysa yalnız bir kez sayılır.
+        // Penaltı atış serisi golleri burada zaten filtre dışıdır.
+        const signature = `score|${team}|${player}|${minute}`;
         if (seenGoalEvents.has(signature)) return false;
         seenGoalEvents.add(signature);
         return true;

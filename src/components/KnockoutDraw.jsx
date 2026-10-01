@@ -460,6 +460,15 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
 
       setKnockoutCloud(ko);
       setKnockoutResults(archive);
+      // PC EXE ve telefon yönetim aynı React fixture aynasını da anında görsün.
+      // Gol krallığı ayrı toplam eklemez; App tarafı lig + eleme eventlerinden yeniden hesaplar.
+      if (typeof setFixtures === "function") {
+        setFixtures((current) => (current || []).map((match) => {
+          const sameId = updated.id && String(match?.id || "") === String(updated.id);
+          const sameKey = updated.knockoutKey && String(match?.knockoutKey || "") === String(updated.knockoutKey);
+          return (sameId || sameKey) ? { ...match, ...updated } : match;
+        }));
+      }
       setNotice(`Maç olayları kaydedildi • ${updated.homeScore}-${updated.awayScore}`);
       setSelectedResult(null);
       setEventDraft([]);
@@ -647,10 +656,10 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
               <select className="ko-player-input" value={event?.playerId || ""} onChange={(e) => {
                 const team = event?.team || event?.teamName || selectedResult.home || "";
                 const players = Array.isArray(squads?.[team]) ? squads[team] : [];
-                const player = players.find((item) => String(item?.id) === String(e.target.value));
+                const player = players.find((item) => String(item?.id || item?.playerId || "") === String(e.target.value));
                 setEventDraft((current) => current.map((item, i) => i === index ? {
                   ...item,
-                  playerId: player?.id || "",
+                  playerId: player?.id || player?.playerId || "",
                   playerName: player?.name || "",
                   name: player?.name || "",
                   shirtNumber: player?.shirtNumber ?? "",
@@ -658,7 +667,7 @@ export default function KnockoutDraw({ standings = [], fixtures = [], setFixture
               }}>
                 <option value="">Oyuncu seç</option>
                 {(Array.isArray(squads?.[event?.team || event?.teamName || selectedResult.home]) ? squads[event?.team || event?.teamName || selectedResult.home] : []).map((player) => (
-                  <option key={player?.id || `${player?.name}-${player?.shirtNumber}`} value={player?.id || ""}>#{player?.shirtNumber ?? "-"} {player?.name || "Oyuncu"}</option>
+                  <option key={player?.id || player?.playerId || `${player?.name}-${player?.shirtNumber}`} value={player?.id || player?.playerId || ""}>#{player?.shirtNumber ?? "-"} {player?.name || "Oyuncu"}</option>
                 ))}
               </select>
               <input className="ko-shirt-input" inputMode="numeric" placeholder="#" value={event?.shirtNumber || event?.number || ""} readOnly />
