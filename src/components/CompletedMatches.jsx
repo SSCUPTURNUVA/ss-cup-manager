@@ -207,19 +207,44 @@ export default function CompletedMatches({
             updated_at: new Date().toISOString(),
           };
           const key = String(match.knockoutKey || "");
+          const replaceKnockoutListMatch = (source) => {
+            const list = Array.isArray(source) ? [...source] : [];
+            // Önce aynı maç ID'sini bul. Bu, quarter-0/quarter-1 gibi eski-yeni
+            // anahtar farklarında yanlış slota yazılmasını engeller.
+            let targetIndex = list.findIndex((item) =>
+              item?.id != null && match?.id != null && String(item.id) === String(match.id)
+            );
+            if (targetIndex < 0) {
+              targetIndex = list.findIndex((item) => String(item?.knockoutKey || "") === key);
+            }
+            if (targetIndex < 0) {
+              const raw = Number(key.split("-")[1]);
+              if (Number.isFinite(raw)) {
+                // Eleme Maç Merkezi quarter-1..4 / semi-1..2 kullanır;
+                // knockout dizileri ise 0 tabanlıdır.
+                targetIndex = raw >= 1 ? raw - 1 : raw;
+              }
+            }
+            if (targetIndex < 0) return list;
+            list[targetIndex] = { ...(list[targetIndex] || {}), ...cloudMatch };
+            return list;
+          };
+
           if (key.startsWith("quarter-")) {
-            const i = Number(key.split("-")[1]);
-            const list = Array.isArray(value.quarter) ? [...value.quarter] : [];
-            list[i] = { ...(list[i] || {}), ...cloudMatch };
-            value.quarter = list;
+            value.quarter = replaceKnockoutListMatch(value.quarter);
           } else if (key.startsWith("semi-")) {
-            const i = Number(key.split("-")[1]);
-            const list = Array.isArray(value.semi) ? [...value.semi] : [];
-            list[i] = { ...(list[i] || {}), ...cloudMatch };
-            value.semi = list;
-          } else if (key === "final-0") value.finalMatch = { ...(value.finalMatch || {}), ...cloudMatch };
-          else if (key === "third-place-0") value.thirdPlace = { ...(value.thirdPlace || {}), ...cloudMatch };
-          await supabase.from("app_state").upsert({ id: "knockout", value, updated_at: new Date().toISOString() });
+            value.semi = replaceKnockoutListMatch(value.semi);
+          } else if (key === "final-0") {
+            value.finalMatch = { ...(value.finalMatch || {}), ...cloudMatch };
+          } else if (key === "third-place-0") {
+            value.thirdPlace = { ...(value.thirdPlace || {}), ...cloudMatch };
+          }
+          const { error: knockoutError } = await supabase.from("app_state").upsert({
+            id: "knockout",
+            value,
+            updated_at: new Date().toISOString(),
+          });
+          if (knockoutError) throw knockoutError;
         } catch (error) {
           console.error("Tamamlanan eleme maçı buluta kaydedilemedi:", error);
         }
