@@ -146,30 +146,15 @@ function canonicalTeamName(name) {
 
 function deriveScorers(fixtures) {
   const totals = {};
-  const seenMatches = new Set();
   (fixtures || []).forEach((match) => {
-    const matchKey = String(match?.id || match?.knockoutKey || `${match?.home || ""}|${match?.away || ""}|${match?.date || ""}|${match?.time || ""}`);
-    if (seenMatches.has(matchKey)) return;
-    seenMatches.add(matchKey);
-
     const phase = match?.matchPhase || match?.match_phase || "waiting";
     const countsForStats =
       match?.played === true ||
       (match?.live === true && ["first_half", "halftime", "second_half", "penalty"].includes(phase));
     if (!countsForStats) return;
 
-    const seenGoals = new Set();
     getEvents(match)
       .filter((event) => SCORER_EVENT_TYPES.has(event.type))
-      .filter((event) => {
-        const team = canonicalTeamName(event.team || event.teamName);
-        const playerId = String(event.playerId || event.playerName || event.name || event.player || "");
-        const minute = String(event.minute ?? "");
-        const signature = `score|${team}|${playerId}|${minute}`;
-        if (seenGoals.has(signature)) return false;
-        seenGoals.add(signature);
-        return true;
-      })
       .forEach((event) => {
         const playerName = event.playerName || event.name || event.player;
         const team = canonicalTeamName(event.team || event.teamName);

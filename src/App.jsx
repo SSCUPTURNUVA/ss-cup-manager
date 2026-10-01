@@ -1,4 +1,4 @@
-﻿import { supabase } from "./supabase";
+import { supabase } from "./supabase";
 import PublicTournament from "./components/PublicTournament";
 import DailySchedule from "./components/DailySchedule";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -194,7 +194,7 @@ function calculateStandings(teams, fixtures) {
 }
 
 
-const GOAL_EVENT_TYPES = new Set(["goal", "penalty_goal", "scorer_record"]);
+const GOAL_EVENT_TYPES = new Set(["goal", "penalty_goal", "penalty_shootout_goal", "scorer_record"]);
 
 function getFixtureEvents(match) {
   const deletedSet = new Set((Array.isArray(match?.deletedEventIds) ? match.deletedEventIds : []).map(String));
@@ -222,21 +222,8 @@ function deriveGoalScorers(fixtures) {
     const phase = match?.matchPhase || "waiting";
     const counts = match?.played === true || (match?.live === true && ["first_half", "halftime", "second_half", "penalty"].includes(phase));
     if (!counts) return;
-    const seenGoalEvents = new Set();
     getFixtureEvents(match)
       .filter((event) => GOAL_EVENT_TYPES.has(event?.type || "goal"))
-      .filter((event) => {
-        const team = canonicalTeamName(event?.team || event?.teamName || "");
-        const player = String(event?.playerId || event?.playerName || event?.name || event?.player || "");
-        const minute = String(event?.minute ?? "");
-        // Gol krallığında normal gol / penaltı golü / eski scorer_record aynı
-        // gerçek gol olayının farklı aynalarıysa yalnız bir kez sayılır.
-        // Penaltı atış serisi golleri burada zaten filtre dışıdır.
-        const signature = `score|${team}|${player}|${minute}`;
-        if (seenGoalEvents.has(signature)) return false;
-        seenGoalEvents.add(signature);
-        return true;
-      })
       .forEach((event) => {
         const playerId = event?.playerId || event?.id || event?.playerName || event?.name || event?.player;
         const name = event?.playerName || event?.name || event?.player || "Oyuncu";
