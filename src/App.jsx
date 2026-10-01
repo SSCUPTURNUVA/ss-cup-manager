@@ -222,8 +222,20 @@ function deriveGoalScorers(fixtures) {
     const phase = match?.matchPhase || "waiting";
     const counts = match?.played === true || (match?.live === true && ["first_half", "halftime", "second_half", "penalty"].includes(phase));
     if (!counts) return;
+    const seenGoalEvents = new Set();
     getFixtureEvents(match)
       .filter((event) => GOAL_EVENT_TYPES.has(event?.type || "goal"))
+      .filter((event) => {
+        const type = event?.type || event?.eventType || "goal";
+        const team = canonicalTeamName(event?.team || event?.teamName || "");
+        const player = String(event?.playerId || event?.playerName || event?.name || event?.player || "");
+        const minute = String(event?.minute ?? "");
+        const action = String(event?.actionId || "");
+        const signature = action ? `action:${action}` : `${type}|${team}|${player}|${minute}`;
+        if (seenGoalEvents.has(signature)) return false;
+        seenGoalEvents.add(signature);
+        return true;
+      })
       .forEach((event) => {
         const playerId = event?.playerId || event?.id || event?.playerName || event?.name || event?.player;
         const name = event?.playerName || event?.name || event?.player || "Oyuncu";
