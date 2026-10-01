@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+﻿import { supabase } from "./supabase";
 import PublicTournament from "./components/PublicTournament";
 import DailySchedule from "./components/DailySchedule";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -194,7 +194,7 @@ function calculateStandings(teams, fixtures) {
 }
 
 
-const GOAL_EVENT_TYPES = new Set(["goal", "penalty_goal", "penalty_shootout_goal", "scorer_record"]);
+const GOAL_EVENT_TYPES = new Set(["goal", "penalty_goal", "scorer_record"]);
 
 function getFixtureEvents(match) {
   const deletedSet = new Set((Array.isArray(match?.deletedEventIds) ? match.deletedEventIds : []).map(String));
@@ -511,12 +511,26 @@ export default function App() {
       const { data, error } = await supabase.from("app_state").select("value").eq("id", "knockout").maybeSingle();
       if (error || cancelled) return;
       const value = data?.value && typeof data.value === "object" ? data.value : {};
+      // Yönetim de Canlı Takip ile AYNI eleme kaynağını ve AYNI 8 sabit slotu kullanır.
+      // fixtures içindeki eski/yerel eleme kopyaları istatistiğe veya maç sayısına karışmaz.
       const matches = [
-        ...(Array.isArray(value.quarter) ? value.quarter : []),
-        ...(Array.isArray(value.semi) ? value.semi : []),
-        ...(value.finalMatch ? [value.finalMatch] : []),
-        ...(value.thirdPlace ? [value.thirdPlace] : []),
-      ].filter(Boolean);
+        ...[0, 1, 2, 3].map((i) => ({
+          ...(Array.isArray(value.quarter) ? (value.quarter[i] || {}) : {}),
+          id: (Array.isArray(value.quarter) && value.quarter[i]?.id) || `ko-quarter-${i}`,
+          knockoutKey: `quarter-${i}`,
+          isKnockout: true,
+          stageLabel: "ÇEYREK FİNAL",
+        })),
+        ...[0, 1].map((i) => ({
+          ...(Array.isArray(value.semi) ? (value.semi[i] || {}) : {}),
+          id: (Array.isArray(value.semi) && value.semi[i]?.id) || `ko-semi-${i}`,
+          knockoutKey: `semi-${i}`,
+          isKnockout: true,
+          stageLabel: "YARI FİNAL",
+        })),
+        { ...(value.thirdPlace || {}), id: value.thirdPlace?.id || "ko-third-place-0", knockoutKey: "third-place-0", isKnockout: true, stageLabel: "3.'LÜK MAÇI" },
+        { ...(value.finalMatch || {}), id: value.finalMatch?.id || "ko-final-0", knockoutKey: "final-0", isKnockout: true, stageLabel: "FİNAL" },
+      ];
       setKnockoutStatMatches(matches);
     };
     loadKnockoutStats();
@@ -919,15 +933,19 @@ export default function App() {
     };
   }, [fixtureBootstrapReady, isPublicRoute]);
 
-  useEffect(() => {
-    // Gol krallığı ayrı ve bağımsız bir "hayalet" kayıt değildir.
-    // Her zaman maç eventlerinden yeniden hesaplanır; skor/event silinmeden bu liste de kaybolmaz.
+  // Yönetim/EXE için tek görüntü kaynağı da Canlı Takip ile aynıdır:
+  // Supabase fixtures = lig, app_state.knockout = eleme. Yerel eleme kopyası kullanılmaz.
+  const managementLiveFixtures = useMemo(() => {
     const leagueFixtures = (fixtures || []).filter((match) => match?.isKnockout !== true);
-    const derived = deriveGoalScorers([...leagueFixtures, ...knockoutStatMatches]);
+    return [...leagueFixtures, ...knockoutStatMatches];
+  }, [fixtures, knockoutStatMatches]);
+
+  useEffect(() => {
+    const derived = deriveGoalScorers(managementLiveFixtures);
     setGoalScorers(derived);
     localStorage.setItem("sscup-goals", JSON.stringify(derived));
     localStorage.setItem("sscup-goal-scorers", JSON.stringify(derived));
-  }, [fixtures, knockoutStatMatches]);
+  }, [managementLiveFixtures]);
 
   useEffect(() => {
     const refreshSettings = () => {
@@ -1129,7 +1147,7 @@ export default function App() {
         return (
           <HomeDashboard
             teams={teams}
-            fixtures={fixtures}
+            fixtures={managementLiveFixtures}
             standings={standings}
             goalScorers={goalScorers}
             setTeams={setTeams}

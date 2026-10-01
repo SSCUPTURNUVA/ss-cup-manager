@@ -111,7 +111,7 @@ export default function HomeDashboard({
     (match) => match.played === true
   );
   const leagueMatches = validFixtures.filter(
-    (match) => match?.isKnockout !== true
+    (match) => match?.isKnockout !== true && !match?.knockoutKey
   );
   const pendingLeagueMatches = leagueMatches.filter(
     (match) => match.played !== true
@@ -129,11 +129,15 @@ export default function HomeDashboard({
     (Array.isArray(knockoutState?.quarter) && knockoutState.quarter.some((m) => m?.home || m?.away));
   const knockoutStageMatches = knockoutStarted
     ? [
-        ...(Array.isArray(knockoutState?.quarter) ? knockoutState.quarter : []),
-        ...(Array.isArray(knockoutState?.semi) ? knockoutState.semi : []),
-        ...(knockoutState?.thirdPlace ? [knockoutState.thirdPlace] : []),
-        ...(knockoutState?.finalMatch ? [knockoutState.finalMatch] : []),
-      ]
+        ...[0, 1, 2, 3].map((i) =>
+          Array.isArray(knockoutState?.quarter) ? knockoutState.quarter[i] : null
+        ),
+        ...[0, 1].map((i) =>
+          Array.isArray(knockoutState?.semi) ? knockoutState.semi[i] : null
+        ),
+        knockoutState?.thirdPlace || null,
+        knockoutState?.finalMatch || null,
+      ].filter(Boolean)
     : [];
   const knockoutTotal = knockoutStarted ? 8 : 0;
   const knockoutPlayedFromState = knockoutStageMatches.filter((match) => match?.played === true).length;
