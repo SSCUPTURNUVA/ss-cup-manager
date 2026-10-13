@@ -366,7 +366,10 @@ export default function App() {
     readStorage("sscup-format", "league")
   );
 
-  const [teams, setTeams] = useState(() => readStorage("sscup-teams", []));
+  // Takımlar yalnızca Supabase kaynağından yüklenir; eski tarayıcı listesi başlangıçta kullanılmaz.
+  const [teams, setTeams] = useState([]);
+  const [teamsLoaded, setTeamsLoaded] = useState(false);
+  const [teamsLoadError, setTeamsLoadError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -379,10 +382,13 @@ export default function App() {
 
       if (error) {
         console.error("Takım çekme hatası:", error);
+        if (!cancelled) { setTeamsLoadError(true); setTeamsLoaded(true); }
         return;
       }
 
       if (!cancelled && Array.isArray(data)) {
+        setTeamsLoadError(false);
+        setTeamsLoaded(true);
         const cloudTeams = data.map((team) => team.name).filter(Boolean);
 
         if (cloudTeams.length > 0) {
@@ -391,29 +397,10 @@ export default function App() {
           return;
         }
 
-        // KORUMALI İLK EŞİTLEME:
-        // Bulut boşsa PC'deki dolu takım listesini boş veriyle EZME.
-        // Yerel kayıt varsa onu Supabase'e taşı ve telefonun da görmesini sağla.
-        const localTeams = readStorage("sscup-teams", []);
-        const localNames = Array.isArray(localTeams)
-          ? localTeams
-              .map((team) => typeof team === "string" ? team : team?.name || team?.teamName || "")
-              .filter(Boolean)
-          : [];
-
-        if (localNames.length > 0) {
-          const { error: seedError } = await supabase
-            .from("teams")
-            .insert(localNames.map((name) => ({ name })));
-
-          if (seedError) {
-            console.error("Yerel takımları buluta taşıma hatası:", seedError);
-          } else {
-            setTeams(localNames);
-          }
-        } else {
-          setTeams([]);
-        }
+        // Bulut boşsa eski cihaz kayıtlarını asla yeniden buluta yükleme.
+        // Bulut, yeni sezon için tek otoritedir.
+        setTeams([]);
+        localStorage.setItem("sscup-teams", "[]");
       }
     }
 
@@ -998,6 +985,14 @@ export default function App() {
       if (mainContent) mainContent.scrollTop = 0;
       if (contentArea) contentArea.scrollTop = 0;
     }, 50);
+  }
+
+  // Eski yerel takım listesi ile yönetim bileşenlerini açma.
+  if (!teamsLoaded) {
+    return <div style={{padding: 24}}>Takım listesi buluttan doğrulanıyor...</div>;
+  }
+  if (teamsLoadError) {
+    return <div style={{padding: 24}}><h3>Bulut takım listesi okunamadı</h3><p>Eski takım verilerinin yüklenmemesi için uygulama durduruldu.</p><button onClick={() => window.location.reload()}>Tekrar dene</button></div>;
   }
 
   // 🔒 YALNIZCA SPORCULAR / CANLI TAKİP MODU

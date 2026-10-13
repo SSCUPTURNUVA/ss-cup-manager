@@ -32,38 +32,34 @@ export default function NewTournament({
   async function clearTournamentData() {
     // Telefon takip sayfası Supabase'i okur. Bu nedenle önce bulutu,
     // sonra PC'deki yerel veriyi temizliyoruz.
-    const cloudSteps = [
-      ["gol krallığı", () => supabase.from("goal_scorers").delete().neq("id", 0)],
-      ["fikstür", () => supabase.from("fixtures").delete().neq("id", 0)],
-      // app_state satırlarını silmek yerine boş değerle güncelliyoruz.
-      // Böylece RLS/delete davranışı eski eleme-final-şampiyon verisini canlıda bırakamaz.
-      ["eleme durumu", () => supabase.from("app_state").upsert({
-        id: "knockout",
-        value: {},
-        updated_at: new Date().toISOString(),
-      })],
-      // Takip sayfası yalnızca bu ID listesindeki lig maçlarını gösterir.
-      // Sıfırlamada [] yazarak Supabase'de kalmış eski/sonuçlanmış maçların
-      // canlı ekrana geri düşmesini kesin olarak engelliyoruz.
-      ["aktif fikstür", () => supabase.from("app_state").upsert({
-        id: "active_fixture_ids",
-        value: { ids: [] },
-        updated_at: new Date().toISOString(),
-      })],
-      ["maç kadroları", () => supabase.from("app_state").upsert({
-        id: "match_lineups",
-        value: {},
-        updated_at: new Date().toISOString(),
-      })],
-      ["takımlar", () => supabase.from("teams").delete().neq("id", 0)],
-    ];
+    // Buluttaki eski eleme ve turnuva durumlarını boşalt; tablo yapısını koru.
+    const now = new Date().toISOString();
+    const emptyStates = {
+      knockout: {}, active_fixture_ids: { ids: [] }, match_lineups: {},
+      knockout_draw_v1: {}, knockout_results_v1: [],
+      knockout_goal_scorers_v1: [], knockout_cards_v1: [],
+      knockout_schedule_v1: {}, knockout_match_center_v1: { activeMatch: null },
+      squads: {}, team_contacts: {}, fixtures_snapshot: [],
+      public_match_center: {},
+    };
+    for (const [id, value] of Object.entries(emptyStates)) {
+      const { error } = await supabase.from("app_state").upsert({ id, value, updated_at: now });
+      if (error) throw new Error(`${id}: ${error.message}`);
+    }
 
-    for (const [label, run] of cloudSteps) {
-      const { error } = await run();
-      if (error) {
-        console.error(`Supabase ${label} temizleme hatası:`, error);
-        throw new Error(`${label}: ${error.message || "bilinmeyen hata"}`);
+    // ID türüne bakmadan gerçek kayıtları sil ve sonucu doğrula.
+    for (const table of ["goal_scorers", "fixtures", "teams"]) {
+      const { data, error: readError } = await supabase.from(table).select("id");
+      if (readError) throw new Error(`${table} okuma: ${readError.message}`);
+      const ids = (data || []).map((item) => item.id);
+      for (let i = 0; i < ids.length; i += 100) {
+        const { error } = await supabase.from(table).delete().in("id", ids.slice(i, i + 100));
+        if (error) throw new Error(`${table} silme: ${error.message}`);
       }
+      const { count, error: countError } = await supabase.from(table)
+        .select("id", { count: "exact", head: true });
+      if (countError) throw new Error(`${table} doğrulama: ${countError.message}`);
+      if (count !== 0) throw new Error(`${table}: ${count} kayıt kaldı; silme yetkisini kontrol edin`);
     }
 
     setTeams([]);
@@ -82,7 +78,9 @@ export default function NewTournament({
       "sscup-match-events","sscup-active-match","sscup-live-match",
       "sscup-match-lineups","sscup-match-center-active",
       "sscup-match-event-side","sscup-match-event-type","sscup-penalty-side",
-      "sscup-pending-fixture-sync","sscup-pending-app-state-sync"
+      "sscup-pending-fixture-sync","sscup-pending-app-state-sync",
+      "sscup-knockout-match-center-active","sscup-knockout-draw-id",
+      "sscup-quarter-mode","sscup-team-contacts"
     ];
     keysToRemove.forEach((key) => localStorage.removeItem(key));
   }

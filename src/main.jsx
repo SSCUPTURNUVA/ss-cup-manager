@@ -3,11 +3,40 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+// Uygulama başlamadan önce boş bulut / eski cihaz verisi uyuşmazlığını gider.
+// Böylece React effect'leri eski eleme/maç verilerini yeniden yazamaz.
+import { supabase } from './supabase'
+
+async function startApplication() {
+  const root = createRoot(document.getElementById('root'))
+  const tables = ['app_state', 'arena_state', 'fixtures', 'goal_scorers', 'teams']
+  try {
+    const results = await Promise.all(tables.map((table) =>
+      supabase.from(table).select('*', { count: 'exact', head: true })
+    ))
+    const failure = results.find((result) => result.error)
+    if (failure) throw failure.error
+    // Bulut takım tablosu boşsa, diğer tablolar dolu olsa bile eski takım önbelleğini kaldır.
+    if (results[4].count === 0) localStorage.removeItem('sscup-teams')
+    if (results.every((result) => result.count === 0)) {
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith('sscup-')) localStorage.removeItem(key)
+      }
+    }
+    root.render(<StrictMode><App /></StrictMode>)
+  } catch (error) {
+    console.error('Turnuva başlangıç kontrolü başarısız:', error)
+    root.render(
+      <div style={{ padding: 24, fontFamily: 'sans-serif' }}>
+        <h2>Bulut bağlantısı kontrol edilemedi</h2>
+        <p>Eski verilerin yanlışlıkla yüklenmemesi için uygulama başlatılmadı.</p>
+        <button onClick={() => window.location.reload()}>Tekrar dene</button>
+      </div>
+    )
+  }
+}
+
+startApplication()
 
 // Eski PWA/service-worker cache'i yeni guvenlik ve fikstur kodunu tutmasin.
 if ('serviceWorker' in navigator) {

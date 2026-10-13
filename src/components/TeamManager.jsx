@@ -126,12 +126,7 @@ export default function TeamManager({
         error
       );
 
-      setTeams([...teams, name]);
-      localStorage.setItem(
-        "sscup-teams",
-        JSON.stringify([...teams, name])
-      );
-      setTeamName("");
+      alert("Takım buluta eklenemedi. Liste değiştirilmedi; bağlantıyı kontrol edin.");
       return;
     }
 
@@ -348,33 +343,41 @@ export default function TeamManager({
   }
 
   async function syncTeamsToCloud() {
+    // Eski bir PC/telefon oturumunun hafızasındaki takımları, sıfırlanmış
+    // bulut turnuvasına geri yazmasını engelle.
+    const { data: cloudTeams, error: readError } = await supabase
+      .from("teams")
+      .select("id,name");
+    if (readError) {
+      alert("Buluttaki takım listesi doğrulanamadı. Eşitleme iptal edildi.");
+      return;
+    }
+    const cloudNames = (cloudTeams || []).map((row) => row.name).filter(Boolean);
+    if (cloudNames.length === 0 && teams.length > 0) {
+      alert("GÜVENLİK: Bulutta takım yok ama bu cihazda eski takım listesi var. Eski takımların yeni turnuvaya geri yüklenmesi engellendi. Yeni takımları tek tek ekleyin.");
+      return;
+    }
     const confirmed = window.confirm(
       `PC'deki ${teams.length} takım canlı takip sayfasına aynen aktarılsın mı?\n\nBuluttaki eski takım listesi bununla değiştirilecek.`
     );
-
     if (!confirmed) return;
-
     try {
       const { error: clearError } = await supabase
         .from("teams")
         .delete()
         .neq("id", 0);
-
       if (clearError) throw clearError;
-
       if (teams.length > 0) {
         const { error: insertError } = await supabase
           .from("teams")
           .insert(teams.map((name) => ({ name })));
-
         if (insertError) throw insertError;
       }
-
       localStorage.setItem("sscup-teams", JSON.stringify(teams));
-      alert(`✅ Canlı takip takım listesi eşitlendi. Şu an ${teams.length} takım var.`);
+      alert(`Canlı takip takım listesi eşitlendi. Şu an ${teams.length} takım var.`);
     } catch (error) {
       console.error("Takım eşitleme hatası:", error);
-      alert("Takım listesi canlı takiple eşitlenemedi. İnternet/Supabase bağlantısını kontrol edin.");
+      alert("Takım listesi eşitlenemedi. İnternet/Supabase bağlantısını kontrol edin.");
     }
   }
 
