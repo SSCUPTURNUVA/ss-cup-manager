@@ -504,14 +504,6 @@ function MatchDetailModal({ match: sourceMatch, onClose, now, halfDurationMinute
 
 export default function PublicTournament({ teams = [], fixtures = [], standings = [], goalScorers = [], settings = {} }) {
   const [activeTab, setActiveTab] = useState("overview");
-  const [showDesignDemo, setShowDesignDemo] = useState(false);
-  // V9: Tamamen yerel demo kadroları. Buluta hiçbir kayıt gönderilmez.
-  const demoRoster = useMemo(() => ({
-    home: Array.from({ length: 12 }, (_, i) => ({ id: `h-${i + 1}`, name: `Sarı Oyuncu ${i + 1}`, number: i === 0 ? 1 : i + 5 })),
-    away: Array.from({ length: 12 }, (_, i) => ({ id: `a-${i + 1}`, name: `Siyah Oyuncu ${i + 1}`, number: i === 0 ? 1 : i + 5 })),
-  }), []);
-  const defaultDemoLineups = () => ({ home: Array.from({ length: 7 }, (_, i) => `h-${i + 1}`), away: Array.from({ length: 7 }, (_, i) => `a-${i + 1}`) });
-  const [demoLineups] = useState(defaultDemoLineups);
   const [remoteFixtures, setRemoteFixtures] = useState(null);
   const [remoteTeams, setRemoteTeams] = useState(null);
   const [remoteSquads, setRemoteSquads] = useState(null);
@@ -1124,30 +1116,12 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           <section className="ss26-arena" aria-label="S&S CUP yeni maç merkezi">
             <div className="ss26-arena-head">
               <div><span className="ss26-eyebrow">S&S CUP • RAMAZAN ÖZEL</span><h2>MAÇIN <em>NABZI</em> BURADA.</h2><p>Canlı skorlar, kadrolar ve bütün maç heyecanı tek ekranda.</p></div>
-              <button type="button" className="ss26-demo-toggle" onClick={() => setShowDesignDemo(v => !v)}>{showDesignDemo ? "✕ Önizlemeyi kapat" : "◉ Tasarımı önizle"}</button>
             </div>
-            {(showDesignDemo || liveMatch) ? (
+            {liveMatch ? (
               <div className="ss26-featured">
-                <div className="ss26-featured-top"><span className="ss26-live-label">{showDesignDemo ? "TASARIM DEMOSU • GERÇEK MAÇ DEĞİL" : liveMatch?.live ? "● CANLI MAÇ" : "MAÇ MERKEZİ"}</span><span>{showDesignDemo ? "ÖRNEK KARŞILAŞMA" : stageText(liveMatch)}</span></div>
-                <div className="ss26-versus"><strong>{showDesignDemo ? "SARI TAKIM" : liveMatch.home}</strong><div><b>{showDesignDemo ? 0 : scoreText(liveMatch.homeScore)}</b><span>:</span><b>{showDesignDemo ? 0 : scoreText(liveMatch.awayScore)}</b><small>{showDesignDemo ? "42′ • DEMO" : liveMatch.live ? minute || "CANLI" : statusText(liveMatch)}</small></div><strong>{showDesignDemo ? "SİYAH TAKIM" : liveMatch.away}</strong></div>
-                                 {showDesignDemo && <div className="ss-v10-roster">
-                   <style>{`.ss-v10-roster{margin:10px 0;padding:12px;background:#101c2d;border:1px solid #b38a28;border-radius:12px;color:#fff}.ss-v10-roster-title{font-size:13px;font-weight:900;color:#ffda68;margin-bottom:10px}.ss-v10-roster-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.ss-v10-roster-team{min-width:0;padding:9px;background:#17273b;border-radius:9px}.ss-v10-roster-team h4{margin:0 0 8px;color:#ffdb61;font-size:12px}.ss-v10-roster-team h5{margin:10px 0 5px;font-size:11px;color:#aebed0}.ss-v10-roster-player{font-size:11px;padding:4px 0;border-bottom:1px solid #30445c;overflow-wrap:anywhere}.ss-v10-roster-note{margin-top:10px;font-size:11px;color:#b9c5d4}@media(max-width:400px){.ss-v10-roster{padding:8px}.ss-v10-roster-grid{gap:6px}.ss-v10-roster-team{padding:7px}}`}</style>
-                   <div className="ss-v10-roster-title">📋 MAÇ KADROSU • SADECE GÖRÜNTÜLEME</div>
-                   <div className="ss-v10-roster-grid">{["home", "away"].map(side => {
-                     const roster = demoRoster[side];
-                     const active = demoLineups[side];
-                     const bench = roster.filter(p => !active.includes(p.id));
-                     return <div className="ss-v10-roster-team" key={side}>
-                       <h4>{side === "home" ? "🟡 SARI TAKIM" : "⚫ SİYAH TAKIM"}</h4>
-                       <h5>İLK 7</h5>
-                       {active.map((id, slot) => { const p = roster.find(item => item.id === id); return <div className="ss-v10-roster-player" key={id}>{slot === 0 ? "🧤 " : ""}#{p?.number ?? "–"} {p?.name || "Oyuncu"}</div>; })}
-                       <h5>YEDEKLER</h5>
-                       {bench.map(p => <div className="ss-v10-roster-player" key={p.id}>#{p.number} {p.name}</div>)}
-                     </div>;
-                   })}</div>
-                   <div className="ss-v10-roster-note">Bu ekran izleyiciye özeldir; oyuncu seçimi, gol, kart ve değişiklik işlemleri yalnızca yönetimden yapılır. Örnek kadrolar buluta kaydedilmez.</div>
-                 </div>}
-<div className="ss26-pitch"><div className="ss26-midline"/><div className="ss26-circle"/><div className="ss26-box ss26-box-left"/><div className="ss26-box ss26-box-right"/>
+                <div className="ss26-featured-top"><span className="ss26-live-label">{liveMatch?.live ? "● CANLI MAÇ" : "MAÇ MERKEZİ"}</span><span>{stageText(liveMatch)}</span></div>
+                <div className="ss26-versus"><strong>{liveMatch.home}</strong><div><b>{scoreText(liveMatch.homeScore)}</b><span>:</span><b>{scoreText(liveMatch.awayScore)}</b><small>{liveMatch.live ? minute || "CANLI" : statusText(liveMatch)}</small></div><strong>{liveMatch.away}</strong></div>
+                <div className="ss26-pitch"><div className="ss26-midline"/><div className="ss26-circle"/><div className="ss26-box ss26-box-left"/><div className="ss26-box ss26-box-right"/>
                   {Array.from({ length: 14 }, (_, i) => {
                     const home = i < 7;
                     const side = home ? "home" : "away";
@@ -1155,9 +1129,9 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
                     // Kaleci, 3 savunma, 2 orta saha, 1 ileri oyuncu (takım başına).
                     const positions = [[8, 50], [23, 19], [23, 50], [23, 81], [37, 32], [37, 68], [44, 50]];
                     const xy = positions[j];
-                    const starters = showDesignDemo ? [] : getFeaturedStarters(liveMatch, displaySquads, remoteLineups, side);
-                    const player = showDesignDemo ? demoRoster[side].find(p => p.id === demoLineups[side][j]) : starters[j];
-                    if (!showDesignDemo && !player) return null;
+                    const starters = getFeaturedStarters(liveMatch, displaySquads, remoteLineups, side);
+                    const player = starters[j];
+                    if (!player) return null;
                     const number = player.shirtNumber ?? player.number ?? "–";
                     const name = player.name || player.playerName || "Oyuncu";
                     const photo = player.photoUrl || player.photo || player.imageUrl;
@@ -1167,10 +1141,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
                     </div>;
                   })}
                 </div>
-                <div className="ss26-featured-bottom"><span>{!showDesignDemo && !getFeaturedStarters(liveMatch, displaySquads, remoteLineups, "home").length && !getFeaturedStarters(liveMatch, displaySquads, remoteLineups, "away").length ? "⚽ İlk 7 kadroları yönetimden seçildiğinde burada görünür" : "⚽ 7'YE 7 SAHA GÖRÜNÜMÜ"}</span>{!showDesignDemo && liveMatch && <button type="button" onClick={()=>setSelectedMatch(liveMatch)}>MAÇ DETAYINI AÇ →</button>}{showDesignDemo && <span>Bu görünüm sadece önizlemedir, buluta veri yazmaz.</span>}</div>
+                <div className="ss26-featured-bottom"><span>{!getFeaturedStarters(liveMatch, displaySquads, remoteLineups, "home").length && !getFeaturedStarters(liveMatch, displaySquads, remoteLineups, "away").length ? "⚽ İlk 7 kadroları yönetimden seçildiğinde burada görünür" : "⚽ 7'YE 7 SAHA GÖRÜNÜMÜ"}</span>{<button type="button" onClick={()=>setSelectedMatch(liveMatch)}>MAÇ DETAYINI AÇ →</button>}</div>
               </div>
             ) : (
-              <div className="ss26-ready"><span>⚽</span><div><strong>YENİ SEZONA HAZIRIZ</strong><p>Henüz aktif maç yok. Yukarıdaki butondan yeni maç merkezi tasarımını takımsız deneyebilirsin.</p></div></div>
+              <div className="ss26-ready"><span>⚽</span><div><strong>YENİ SEZONA HAZIRIZ</strong><p>Henüz aktif maç yok. Maç başladığında canlı saha burada görünecek.</p></div></div>
             )}
           </section>
         )}
