@@ -251,9 +251,140 @@ function knockoutLiveBadges(match) {
   return null;
 }
 
-function MatchDetailModal({ match, onClose, now, halfDurationMinutes, squads }) {
+// V6: Salt okunur canlı saha. Kaydedilmiş ilk 7 ve maçın oyuncu değişikliği
+// olayları kullanılır; Supabase'e hiçbir yeni kayıt yazılmaz.
+function playerKey(value) {
+  return String(value || "").trim().toLocaleLowerCase("tr-TR").replace(/\s+/g, " ");
+}
+function getFeaturedStarters(match, squads, lineups, side) {
+  if (!match) return [];
+  const key = String(match.id ?? match.knockoutKey ?? `${match.home}-${match.away}-${match.week || "lig"}`);
+  const savedIds = lineups?.[key]?.[side]?.starters;
+  const team = side === "home" ? match.home : match.away;
+  const roster = Array.isArray(squads?.[team]) ? squads[team] : [];
+  if (!Array.isArray(savedIds)) return [];
+  const players = savedIds.slice(0, 7).map(id => roster.find((p, i) => String(p?.id ?? p?.playerId ?? i) === String(id)) || null);
+  const changes = getEvents(match).filter(e => e.type === "substitution" &&
+    (playerKey(e.team) === playerKey(team) || (!e.team && e.side === side)));
+  for (const event of changes) {
+    const out = playerKey(event.playerOutName || event.player);
+    const incoming = playerKey(event.playerInName);
+    if (!out || !incoming) continue;
+    const position = players.findIndex(p => p && playerKey(p.name || p.playerName) === out);
+    const replacement = roster.find(p => playerKey(p?.name || p?.playerName) === incoming);
+    if (position >= 0 && replacement) players[position] = replacement;
+  }
+  return players;
+}
+
+// V7: Olay değişimini yalnız izleyici tarafında algılar; veri kaydetmez.
+function usePitchEventFlash(match) {
+  const [flash, setFlash] = useState(null);
+  const lastSeen = useRef({ matchId: null, eventId: null });
+  const events = match ? getEvents(match) : [];
+  const latest = events.length ? events[events.length - 1] : null;
+  const matchId = String(match?.id ?? match?.knockoutKey ?? "");
+  const eventId = latest ? String(latest.id) : "";
+  useEffect(() => {
+    if (lastSeen.current.matchId !== matchId) {
+      lastSeen.current = { matchId, eventId };
+      setFlash(null);
+      return;
+    }
+    if (lastSeen.current.eventId === eventId) return;
+    lastSeen.current.eventId = eventId;
+    if (!latest || match?.live !== true) { setFlash(null); return; }
+    if (!["goal", "penalty_goal", "own_goal", "yellow_card", "red_card", "substitution"].includes(latest.type)) return;
+    setFlash(latest);
+    const timeout = window.setTimeout(() => setFlash(null), 4800);
+    return () => window.clearTimeout(timeout);
+  }, [matchId, eventId, match?.live]);
+  return flash;
+}
+
+const V7_EVENT_CSS = `
+@keyframes ss-v7-pop {0%{transform:translateY(9px);opacity:0}15%{transform:translateY(0);opacity:1}85%{opacity:1}100%{opacity:0}}
+@keyframes ss-v7-pulse {0%,100%{box-shadow:0 0 0 0 rgba(255,210,35,.1)}50%{box-shadow:0 0 0 6px rgba(255,210,35,.4)}}
+.ss-v7-banner{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;margin:8px 0;padding:10px 12px;border-radius:12px;background:#172337;color:#fff;border:1px solid #f2c94c;text-align:center;animation:ss-v7-pop 4.8s ease both;font-size:clamp(12px,3vw,16px)}
+.ss-v7-banner strong{color:#ffd23f}.ss-v7-banner small{color:#e3e7ee;font-size:inherit}
+.ss-v7-highlight .ss-pitch-avatar,.ss-v7-highlight>span:first-child{outline:3px solid #ffda48;outline-offset:2px;animation:ss-v7-pulse 1.2s ease-in-out infinite}
+@media(prefers-reduced-motion:reduce){.ss-v7-banner,.ss-v7-highlight .ss-pitch-avatar,.ss-v7-highlight>span:first-child{animation:none}}
+`;
+function V7EventBanner({ event }) {
+  if (!event) return null;
+  const substitution = event.type === "substitution";
+  const text = substitution
+    ? `${event.playerOutName || event.player || "Oyuncu"} ↓  ${event.playerInName || "Oyuncu"} ↑`
+    : event.player;
+  return <div className="ss-v7-banner" role="status" aria-live="polite">
+    <strong>{event.icon} {event.label}</strong>
+    <small>{event.minute !== "" ? `${event.minute}' • ` : ""}{text}{event.team ? ` • ${event.team}` : ""}</small>
+  </div>;
+}
+
+function LivePitch({ match, squads, lineups }) {
+  const flash = usePitchEventFlash(match);
+  const home = getFeaturedStarters(match, squads, lineups, "home");
+  const away = getFeaturedStarters(match, squads, lineups, "away");
+  if (!home.some(Boolean) && !away.some(Boolean)) return (
+    <div className="ss-pitch-pending"><style>{V7_EVENT_CSS}</style><V7EventBanner event={flash} />⚽ Saha dizilişi, yönetim ilk 7 oyuncuyu belirlediğinde burada görünecek.</div>
+  );
+  const renderSide = (players, side) => (
+    <div className={`ss-pitch-side ss-pitch-${side}`}>
+      {Array.from({ length: 7 }, (_, i) => {
+        const p = players[i];
+        const number = p?.shirtNumber ?? p?.number ?? "–";
+        const name = p?.name || p?.playerName || "Oyuncu";
+        const photo = p?.photoUrl || p?.photo || p?.imageUrl;
+        const matching = flash && playerKey(flash.team) === playerKey(side === "home" ? match.home : match.away) && playerKey(flash.type === "substitution" ? flash.playerInName : flash.player) === playerKey(name);
+        return <div className={`ss-pitch-player ${matching ? "ss-v7-highlight" : ""}`} key={`${side}-${i}`}>
+          <div className="ss-pitch-avatar">{photo ? <img src={photo} alt="" loading="lazy" /> : <span>{p ? number : "·"}</span>}</div>
+          <div className="ss-pitch-player-name">{p ? `${number} ${name}` : "—"}</div>
+        </div>;
+      })}
+    </div>
+  );
+  return <section className="ss-pitch-wrap" aria-label="Canlı saha dizilişi">
+    <style>{V7_EVENT_CSS}</style>
+    <div className="ss-pitch-header"><span>{match.home}</span><b>SAHADAKİ 7 • CANLI</b><span>{match.away}</span></div>
+    <V7EventBanner event={flash} />
+    <div className="ss-pitch-field"><div className="ss-pitch-midline"/><div className="ss-pitch-center-circle"/>{renderSide(home, "home")}{renderSide(away, "away")}</div>
+    <div className="ss-pitch-caption">{home.filter(Boolean).length !== 7 || away.filter(Boolean).length !== 7 ? "Eksik kadro seçimi var; boş konumlar gösteriliyor." : "Kaydedilmiş ilk 7 ve oyuncu değişikliklerine göre saha"}</div>
+  </section>;
+}
+
+function MatchDetailModal({ match: sourceMatch, onClose, now, halfDurationMinutes, squads, lineups }) {
+  // Maç detayı açıkken olay kayıtlarını doğrudan buluttan oku.
+  // Ana fikstür/snapshot yenilemesi gecikse bile aktif gol ve değişiklikler görünür.
+  const [liveEventRows, setLiveEventRows] = useState(null);
+  const sourceMatchId = String(sourceMatch?.id ?? "");
+  const sourceKnockoutKey = String(sourceMatch?.knockoutKey ?? "");
+  useEffect(() => {
+    if (!sourceMatch) { setLiveEventRows(null); return undefined; }
+    let disposed = false;
+    let inFlight = false;
+    setLiveEventRows(null);
+    const readEvents = async () => {
+      if (disposed || inFlight) return;
+      inFlight = true;
+      try {
+        const rows = await fetchMatchEventRows();
+        if (!disposed) setLiveEventRows(rows);
+      } catch (error) {
+        console.warn("Maç detayı olayları okunamadı:", error);
+      } finally {
+        inFlight = false;
+      }
+    };
+    readEvents();
+    const timer = window.setInterval(readEvents, 1000);
+    return () => { disposed = true; window.clearInterval(timer); };
+  }, [sourceMatchId, sourceKnockoutKey]);
+  const match = useMemo(() => {
+    if (!sourceMatch || !Array.isArray(liveEventRows)) return sourceMatch;
+    return applyMatchEventRowsToFixtures([sourceMatch], liveEventRows)[0] || sourceMatch;
+  }, [sourceMatch, liveEventRows]);
   const eventsContainerRef = useRef(null);
-  const touchYRef = useRef(null);
   const events = match ? getEvents(match) : [];
   const penaltyEvents = match ? getEvents(match).filter((event) => ["penalty_shootout_goal", "penalty_shootout_miss"].includes(event.type)) : [];
   const homePenaltyEvents = penaltyEvents.filter((event) => event.team === match.home || event.side === "home");
@@ -294,44 +425,12 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes, squads }) 
     };
   }, [match]);
 
-  const handleEventsWheel = (event) => {
-    const container = eventsContainerRef.current;
-    if (!container) return;
-    event.stopPropagation();
-    event.preventDefault();
-    container.scrollTop += event.deltaY;
-  };
-
-  const handleEventsTouchStart = (event) => {
-    if (!event.touches?.length) return;
-    touchYRef.current = event.touches[0].clientY;
-    event.stopPropagation();
-  };
-
-  const handleEventsTouchMove = (event) => {
-    const container = eventsContainerRef.current;
-    if (!container || !event.touches?.length || touchYRef.current == null) return;
-    const nextY = event.touches[0].clientY;
-    const delta = touchYRef.current - nextY;
-    if (Math.abs(delta) > 0) {
-      container.scrollTop += delta;
-      touchYRef.current = nextY;
-      event.preventDefault();
-      event.stopPropagation();
-    }
-  };
-
-  const handleEventsTouchEnd = (event) => {
-    touchYRef.current = null;
-    event.stopPropagation();
-  };
-
   if (!match) return null;
   const liveMinute = getMinute(match, now, halfDurationMinutes);
   const showScore = match.live === true || match.played === true;
   return (
     <div className="public-modal-backdrop" onMouseDown={onClose}>
-      <div className="public-match-modal" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
+      <div className="public-match-modal" style={{ overflowY: "auto", overscrollBehaviorY: "contain" }} onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
         <button className="public-modal-close" onClick={onClose} aria-label="Kapat">×</button>
         <div className="public-modal-eyebrow">{stageText(match)} • {formatDate(match.date, true)}</div>
         <div className="public-modal-status">
@@ -368,13 +467,14 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes, squads }) 
             </div>
           </div>
         )}
+        <LivePitch match={match} squads={squads} lineups={lineups} />
         <div className="public-modal-place">📍 {match.field || "Gol Park Halı Saha"} {match.time ? `• ${match.time}` : ""}</div>
         <div className="public-modal-divider" />
         <div className="public-modal-events-title"><span>MAÇ OLAYLARI</span><b>{matchEvents.length}</b></div>
         {matchEvents.length === 0 ? (
           <div className="public-modal-empty">{match.played ? "Bu maç için kayıtlı gol/kart olayı bulunmuyor." : "Maç başladığında goller ve kartlar burada görünecek."}</div>
         ) : (
-          <div className="public-modal-events" ref={eventsContainerRef} tabIndex={0} onWheel={handleEventsWheel} onTouchStart={handleEventsTouchStart} onTouchMove={handleEventsTouchMove} onTouchEnd={handleEventsTouchEnd} onTouchCancel={handleEventsTouchEnd}>
+          <div className="public-modal-events" ref={eventsContainerRef} tabIndex={0}>
             {matchEvents.map((event) => (
               <div className="public-modal-event" key={event.id}>
                 <span className="public-modal-event-minute">{event.minute !== "" ? `${event.minute}'` : "•"}</span>
@@ -404,9 +504,18 @@ function MatchDetailModal({ match, onClose, now, halfDurationMinutes, squads }) 
 
 export default function PublicTournament({ teams = [], fixtures = [], standings = [], goalScorers = [], settings = {} }) {
   const [activeTab, setActiveTab] = useState("overview");
+  const [showDesignDemo, setShowDesignDemo] = useState(false);
+  // V9: Tamamen yerel demo kadroları. Buluta hiçbir kayıt gönderilmez.
+  const demoRoster = useMemo(() => ({
+    home: Array.from({ length: 12 }, (_, i) => ({ id: `h-${i + 1}`, name: `Sarı Oyuncu ${i + 1}`, number: i === 0 ? 1 : i + 5 })),
+    away: Array.from({ length: 12 }, (_, i) => ({ id: `a-${i + 1}`, name: `Siyah Oyuncu ${i + 1}`, number: i === 0 ? 1 : i + 5 })),
+  }), []);
+  const defaultDemoLineups = () => ({ home: Array.from({ length: 7 }, (_, i) => `h-${i + 1}`), away: Array.from({ length: 7 }, (_, i) => `a-${i + 1}`) });
+  const [demoLineups] = useState(defaultDemoLineups);
   const [remoteFixtures, setRemoteFixtures] = useState(null);
   const [remoteTeams, setRemoteTeams] = useState(null);
   const [remoteSquads, setRemoteSquads] = useState(null);
+  const [remoteLineups, setRemoteLineups] = useState({});
   const [remoteKnockout, setRemoteKnockout] = useState([]);
   const [remoteKnockoutDraw, setRemoteKnockoutDraw] = useState([]);
   const [remoteKnockoutSchedule, setRemoteKnockoutSchedule] = useState({});
@@ -449,7 +558,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         supabase.from("fixtures").select("*").order("id"),
         supabase.from("app_state")
           .select("id,value,updated_at")
-          .in("id", ["squads", "knockout", "knockout_draw_v1", "knockout_schedule_v1", "knockout_match_center_v1", "active_fixture_ids", "settings", "fixtures_snapshot", "public_match_center"]),
+          .in("id", ["squads", "match_lineups", "knockout", "knockout_draw_v1", "knockout_schedule_v1", "knockout_match_center_v1", "active_fixture_ids", "settings", "fixtures_snapshot", "public_match_center"]),
         fetchMatchEventRows(),
       ]);
 
@@ -502,6 +611,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         setRemoteFixtures(mappedFixtures);
       }
 
+      const lineupValue = stateById.get("match_lineups")?.value;
+      setRemoteLineups(lineupValue && typeof lineupValue === "object" && !Array.isArray(lineupValue) ? lineupValue : {});
       const squadsRow = stateById.get("squads");
       const squadsValue = squadsRow?.value;
       setRemoteSquads(squadsValue && typeof squadsValue === "object" && !Array.isArray(squadsValue) ? squadsValue : {});
@@ -1009,6 +1120,61 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       </header>
 
       <main className="public-live-shell">
+        {activeTab === "overview" && (
+          <section className="ss26-arena" aria-label="S&S CUP yeni maç merkezi">
+            <div className="ss26-arena-head">
+              <div><span className="ss26-eyebrow">S&S CUP • RAMAZAN ÖZEL</span><h2>MAÇIN <em>NABZI</em> BURADA.</h2><p>Canlı skorlar, kadrolar ve bütün maç heyecanı tek ekranda.</p></div>
+              <button type="button" className="ss26-demo-toggle" onClick={() => setShowDesignDemo(v => !v)}>{showDesignDemo ? "✕ Önizlemeyi kapat" : "◉ Tasarımı önizle"}</button>
+            </div>
+            {(showDesignDemo || liveMatch) ? (
+              <div className="ss26-featured">
+                <div className="ss26-featured-top"><span className="ss26-live-label">{showDesignDemo ? "TASARIM DEMOSU • GERÇEK MAÇ DEĞİL" : liveMatch?.live ? "● CANLI MAÇ" : "MAÇ MERKEZİ"}</span><span>{showDesignDemo ? "ÖRNEK KARŞILAŞMA" : stageText(liveMatch)}</span></div>
+                <div className="ss26-versus"><strong>{showDesignDemo ? "SARI TAKIM" : liveMatch.home}</strong><div><b>{showDesignDemo ? 0 : scoreText(liveMatch.homeScore)}</b><span>:</span><b>{showDesignDemo ? 0 : scoreText(liveMatch.awayScore)}</b><small>{showDesignDemo ? "42′ • DEMO" : liveMatch.live ? minute || "CANLI" : statusText(liveMatch)}</small></div><strong>{showDesignDemo ? "SİYAH TAKIM" : liveMatch.away}</strong></div>
+                                 {showDesignDemo && <div className="ss-v10-roster">
+                   <style>{`.ss-v10-roster{margin:10px 0;padding:12px;background:#101c2d;border:1px solid #b38a28;border-radius:12px;color:#fff}.ss-v10-roster-title{font-size:13px;font-weight:900;color:#ffda68;margin-bottom:10px}.ss-v10-roster-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.ss-v10-roster-team{min-width:0;padding:9px;background:#17273b;border-radius:9px}.ss-v10-roster-team h4{margin:0 0 8px;color:#ffdb61;font-size:12px}.ss-v10-roster-team h5{margin:10px 0 5px;font-size:11px;color:#aebed0}.ss-v10-roster-player{font-size:11px;padding:4px 0;border-bottom:1px solid #30445c;overflow-wrap:anywhere}.ss-v10-roster-note{margin-top:10px;font-size:11px;color:#b9c5d4}@media(max-width:400px){.ss-v10-roster{padding:8px}.ss-v10-roster-grid{gap:6px}.ss-v10-roster-team{padding:7px}}`}</style>
+                   <div className="ss-v10-roster-title">📋 MAÇ KADROSU • SADECE GÖRÜNTÜLEME</div>
+                   <div className="ss-v10-roster-grid">{["home", "away"].map(side => {
+                     const roster = demoRoster[side];
+                     const active = demoLineups[side];
+                     const bench = roster.filter(p => !active.includes(p.id));
+                     return <div className="ss-v10-roster-team" key={side}>
+                       <h4>{side === "home" ? "🟡 SARI TAKIM" : "⚫ SİYAH TAKIM"}</h4>
+                       <h5>İLK 7</h5>
+                       {active.map((id, slot) => { const p = roster.find(item => item.id === id); return <div className="ss-v10-roster-player" key={id}>{slot === 0 ? "🧤 " : ""}#{p?.number ?? "–"} {p?.name || "Oyuncu"}</div>; })}
+                       <h5>YEDEKLER</h5>
+                       {bench.map(p => <div className="ss-v10-roster-player" key={p.id}>#{p.number} {p.name}</div>)}
+                     </div>;
+                   })}</div>
+                   <div className="ss-v10-roster-note">Bu ekran izleyiciye özeldir; oyuncu seçimi, gol, kart ve değişiklik işlemleri yalnızca yönetimden yapılır. Örnek kadrolar buluta kaydedilmez.</div>
+                 </div>}
+<div className="ss26-pitch"><div className="ss26-midline"/><div className="ss26-circle"/><div className="ss26-box ss26-box-left"/><div className="ss26-box ss26-box-right"/>
+                  {Array.from({ length: 14 }, (_, i) => {
+                    const home = i < 7;
+                    const side = home ? "home" : "away";
+                    const j = i % 7;
+                    // Kaleci, 3 savunma, 2 orta saha, 1 ileri oyuncu (takım başına).
+                    const positions = [[8, 50], [23, 19], [23, 50], [23, 81], [37, 32], [37, 68], [44, 50]];
+                    const xy = positions[j];
+                    const starters = showDesignDemo ? [] : getFeaturedStarters(liveMatch, displaySquads, remoteLineups, side);
+                    const player = showDesignDemo ? demoRoster[side].find(p => p.id === demoLineups[side][j]) : starters[j];
+                    if (!showDesignDemo && !player) return null;
+                    const number = player.shirtNumber ?? player.number ?? "–";
+                    const name = player.name || player.playerName || "Oyuncu";
+                    const photo = player.photoUrl || player.photo || player.imageUrl;
+                    return <div key={i} className={`ss26-player ${side}`} style={{ left: `${home ? xy[0] : 100 - xy[0]}%`, top: `${xy[1]}%` }} title={`${number} ${name}`}>
+                      <span>{photo ? <img src={photo} alt="" loading="lazy" /> : number}</span>
+                      <small>{number} {name}</small>
+                    </div>;
+                  })}
+                </div>
+                <div className="ss26-featured-bottom"><span>{!showDesignDemo && !getFeaturedStarters(liveMatch, displaySquads, remoteLineups, "home").length && !getFeaturedStarters(liveMatch, displaySquads, remoteLineups, "away").length ? "⚽ İlk 7 kadroları yönetimden seçildiğinde burada görünür" : "⚽ 7'YE 7 SAHA GÖRÜNÜMÜ"}</span>{!showDesignDemo && liveMatch && <button type="button" onClick={()=>setSelectedMatch(liveMatch)}>MAÇ DETAYINI AÇ →</button>}{showDesignDemo && <span>Bu görünüm sadece önizlemedir, buluta veri yazmaz.</span>}</div>
+              </div>
+            ) : (
+              <div className="ss26-ready"><span>⚽</span><div><strong>YENİ SEZONA HAZIRIZ</strong><p>Henüz aktif maç yok. Yukarıdaki butondan yeni maç merkezi tasarımını takımsız deneyebilirsin.</p></div></div>
+            )}
+          </section>
+        )}
+
         {championName && activeTab === "overview" && (
           <section className="public-champion-card">
             <div className="public-champion-glow glow-left" />
@@ -1227,7 +1393,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         <footer className="public-live-footer"><div><b>{tournamentName}</b><span>{displaySettings.slogan || "Kazanan Sahada Belli Olur"}</span></div><small>{lastSync ? `Son veri: ${lastSync.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Canlı veri bağlantısı kuruluyor…"}</small></footer>
       </main>
 
-      <MatchDetailModal match={selectedMatch} onClose={() => setSelectedMatch(null)} now={now} halfDurationMinutes={displaySettings.halfDurationMinutes || 30} squads={displaySquads} />
+      <MatchDetailModal match={selectedMatch} onClose={() => setSelectedMatch(null)} now={now} halfDurationMinutes={displaySettings.halfDurationMinutes || 30} squads={displaySquads} lineups={remoteLineups} />
     </div>
   );
 }

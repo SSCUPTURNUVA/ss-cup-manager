@@ -535,3 +535,201 @@
 .public-ko-balanced{display:inline-flex!important;align-items:center;justify-content:center;margin:7px auto 0!important;padding:4px 8px;border:1px solid #536173;border-radius:999px;background:#17202b;color:#c8d0da!important;font-size:8px!important;font-weight:900;white-space:nowrap}
 @keyframes publicKoBadgeIn{from{opacity:0;transform:translateY(3px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
 @media(max-width:620px){.public-ko-live-badge{font-size:8px!important;padding:4px 7px}.public-ko-balanced{font-size:7px!important}.public-score-team strong{line-height:1.12}}
+
+/* S&S CUP yeni mobil canlı saha — yalnızca izleyici sunumu */
+.public-match-modal{background:#101a2b;color:#f8fafc;border-color:#d8a936;box-sizing:border-box;max-width:760px}
+.public-modal-eyebrow,.public-modal-place{color:#bac7da}
+.public-modal-score>strong,.public-modal-score b{color:#fff;overflow-wrap:anywhere}
+.public-modal-divider{background:#31415a}
+.public-modal-events-title{color:#f8fafc}
+.public-modal-event{background:#18263c;border-color:#31415a}
+.public-modal-event strong{color:#fff}
+.public-modal-event small{color:#aebed2}
+.public-modal-empty{background:#18263c;border-color:#31415a;color:#b7c4d5}
+.ss-pitch-wrap{margin:16px 0 12px;min-width:0}
+.ss-pitch-header{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;margin-bottom:8px;font-size:11px;font-weight:900;color:#fff}
+.ss-pitch-header span:last-child{text-align:right}.ss-pitch-header span{min-width:0;overflow-wrap:anywhere}.ss-pitch-header b{color:#f5c451;font-size:10px}
+.ss-pitch-field{position:relative;isolation:isolate;display:grid;grid-template-columns:1fr 1fr;min-height:340px;overflow:hidden;border:2px solid #b4d6aa;border-radius:14px;background:repeating-linear-gradient(90deg,#177445 0%,#177445 12.5%,#1c8050 12.5%,#1c8050 25%);box-shadow:inset 0 0 32px #042d2077}
+.ss-pitch-midline{position:absolute;z-index:0;top:0;bottom:0;left:50%;border-left:2px solid #ffffff75}
+.ss-pitch-center-circle{position:absolute;z-index:0;left:50%;top:50%;width:88px;height:88px;transform:translate(-50%,-50%);border:2px solid #ffffff75;border-radius:50%}
+.ss-pitch-side{position:relative;z-index:1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:repeat(3,1fr);align-items:center;justify-items:center;gap:3px;padding:12px 4px}
+.ss-pitch-home .ss-pitch-player:nth-child(1){grid-column:1 / 4;grid-row:1}.ss-pitch-home .ss-pitch-player:nth-child(n+2):nth-child(-n+4){grid-row:2}.ss-pitch-home .ss-pitch-player:nth-child(n+5){grid-row:3}
+.ss-pitch-away .ss-pitch-player:nth-child(1){grid-column:1 / 4;grid-row:3}.ss-pitch-away .ss-pitch-player:nth-child(n+2):nth-child(-n+4){grid-row:2}.ss-pitch-away .ss-pitch-player:nth-child(n+5){grid-row:1}
+.ss-pitch-player{min-width:0;max-width:100%;display:flex;flex-direction:column;align-items:center;gap:3px;text-align:center}
+.ss-pitch-avatar{width:clamp(26px,7vw,46px);height:clamp(26px,7vw,46px);border-radius:50%;border:2px solid #fff;background:#1643a3;color:#fff;display:grid;place-items:center;font-weight:900;font-size:12px;overflow:hidden;box-shadow:0 3px 9px #0007}
+.ss-pitch-away .ss-pitch-avatar{background:#c52c3c}.ss-pitch-avatar img{width:100%;height:100%;object-fit:cover}
+.ss-pitch-player-name{max-width:100%;padding:2px 3px;border-radius:4px;background:#092d28cc;color:#fff;font-size:clamp(7px,1.7vw,10px);font-weight:800;line-height:1.15;overflow-wrap:anywhere}
+.ss-pitch-caption{text-align:center;color:#c2d0dd;font-size:10px;margin-top:7px}
+.ss-pitch-pending{margin:14px 0;padding:16px;border:1px dashed #5b7790;border-radius:12px;background:#16263b;color:#c8d5e5;text-align:center;font-size:12px}
+@media(max-width:480px){.public-modal-backdrop{padding:6px}.public-match-modal{width:100%;max-height:96dvh;padding:15px 9px}.public-modal-score{grid-template-columns:minmax(0,1fr) 74px minmax(0,1fr);gap:4px}.public-modal-score>strong{font-size:12px}.ss-pitch-field{min-height:295px}.ss-pitch-side{padding:8px 2px;gap:1px}.ss-pitch-avatar{width:30px;height:30px}.ss-pitch-player-name{font-size:7px}.public-modal-events{max-height:35dvh;overflow-y:auto;overscroll-behavior:contain}}
+
+/* RAMAZAN 2026 — ikinci aşama: izleyici arayüzü görsel cilası.
+   Salt CSS; fikstür, Supabase, skor ve eleme mantığına müdahale etmez. */
+.public-live-page,.public-tournament-page{overflow-x:clip}
+.public-live-scoreboard{border:1px solid rgba(255,207,61,.32);box-shadow:0 18px 45px rgba(0,0,0,.28),inset 0 1px rgba(255,255,255,.08);transition:transform .2s ease,border-color .2s ease}
+.public-live-scoreboard:hover{border-color:rgba(255,207,61,.7)}
+.public-live-pill{letter-spacing:.09em}
+.public-score-numbers{font-variant-numeric:tabular-nums}
+.public-section,.public-side-card{min-width:0}
+.public-night-list button,.public-results-list button,.public-fixture-card,.public-ko-card{transition:background .2s ease,transform .2s ease,border-color .2s ease}
+.public-night-list button:active,.public-results-list button:active,.public-fixture-card:active{transform:scale(.99)}
+.public-match-modal{width:min(860px,calc(100vw - 18px));max-height:min(94dvh,940px);min-width:0}
+.public-modal-score>strong{min-width:0;overflow-wrap:anywhere}
+.public-modal-events{min-width:0}
+.public-modal-event{min-width:0;grid-template-columns:38px 28px minmax(0,1fr);border-radius:12px}
+.public-modal-event div{min-width:0}.public-modal-event strong,.public-modal-event small{overflow-wrap:anywhere}
+.ss-pitch-wrap{container-type:inline-size}
+.ss-pitch-field{aspect-ratio:1.68;min-height:0;border-color:rgba(255,255,255,.68);box-shadow:inset 0 0 40px #02291b99,0 12px 25px #0004}
+.ss-pitch-field:after{content:"";position:absolute;z-index:0;inset:7px;border:1.5px solid #ffffff66;border-radius:2px;pointer-events:none}
+.ss-pitch-side{min-width:0;gap:clamp(1px,.8cqw,6px);padding:clamp(4px,1.5cqw,12px)}
+.ss-pitch-player{width:100%;gap:clamp(1px,.5cqw,4px)}
+.ss-pitch-avatar{width:clamp(26px,7.5cqw,49px);height:clamp(26px,7.5cqw,49px);font-size:clamp(9px,2.2cqw,14px);flex-shrink:0}
+.ss-pitch-player-name{font-size:clamp(7px,1.65cqw,11px);line-height:1.18;max-width:100%;text-wrap:balance;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+@container (max-width:410px){
+ .ss-pitch-field{aspect-ratio:1.08;min-height:300px}
+ .ss-pitch-side{padding:5px 2px;gap:1px}
+ .ss-pitch-avatar{width:clamp(25px,8cqw,34px);height:clamp(25px,8cqw,34px)}
+ .ss-pitch-player-name{font-size:clamp(7px,2.1cqw,9px);padding:2px 1px}
+ .ss-pitch-center-circle{width:56px;height:56px}
+}
+@media(max-width:620px){
+ .public-modal-backdrop{padding:5px;align-items:center}
+ .public-match-modal{width:100%;max-width:100%;max-height:96dvh;border-radius:15px}
+ .public-modal-score{grid-template-columns:minmax(0,1fr) minmax(74px,auto) minmax(0,1fr);gap:5px}
+ .public-modal-score>strong{font-size:clamp(11px,3vw,15px);line-height:1.25}
+ .public-modal-event{padding:10px 8px}
+ .public-tabbar{scrollbar-width:none}
+ .public-tabbar::-webkit-scrollbar{display:none}
+ .public-tabbar button{min-height:49px;line-height:1.2;overflow-wrap:anywhere}
+}
+@media(prefers-reduced-motion:reduce){.public-live-scoreboard,.public-night-list button,.public-results-list button,.public-fixture-card{transition:none}}
+
+/* S&S CUP Ramazan V3 — standalone spectator redesign / read-only demo */
+.public-live-page{background:#090e18;color:#f7f7f9}
+.public-live-header{background:linear-gradient(125deg,#0a1120,#141e31 55%,#080d17);border-bottom-color:#e7bb52;min-height:190px}
+.public-brand-mark{background:linear-gradient(145deg,#fbe19b,#c99c3d);box-shadow:0 12px 34px #d6aa4d33}
+.public-kicker{color:#f5d58a;border-color:#d7af6280}
+.public-live-shell{margin-top:-42px}
+.ss26-arena{position:relative;isolation:isolate;overflow:hidden;background:radial-gradient(circle at 90% 0%,#25395b 0%,transparent 45%),linear-gradient(135deg,#101c2d,#0a111d);border:1px solid #ffffff24;border-radius:24px;padding:clamp(16px,3vw,30px);box-shadow:0 20px 60px #0008;margin-bottom:22px;color:#f7f8fc}
+.ss26-arena:before{content:"";position:absolute;inset:0 0 auto;height:3px;background:linear-gradient(90deg,#d1a345,#fff0a3,#d1a345)}
+.ss26-arena-head{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap}
+.ss26-eyebrow{color:#e8bf66;font-size:11px;font-weight:900;letter-spacing:.18em}
+.ss26-arena h2{font-size:clamp(25px,5vw,47px);letter-spacing:-.045em;line-height:1.05;margin:10px 0;color:#fff;font-weight:950}
+.ss26-arena h2 em{font-style:normal;color:#f4ca70}
+.ss26-arena-head p{color:#bac6d8;margin:0;font-size:13px}
+.ss26-demo-toggle{background:#e8bd63!important;color:#111824!important;border:0!important;border-radius:12px;padding:13px 17px;font-weight:900!important;cursor:pointer;white-space:nowrap}
+.ss26-ready{display:flex;align-items:center;gap:16px;border:1px dashed #5d7394;background:#101d31;border-radius:18px;padding:20px;margin-top:20px}
+.ss26-ready>span{font-size:36px}.ss26-ready strong{color:#f5d17e;font-size:16px}.ss26-ready p{color:#b9c6d8;margin:6px 0 0;font-size:13px}
+.ss26-featured{background:#080e19;border:1px solid #33415a;border-radius:18px;margin-top:20px;padding:clamp(12px,2.5vw,20px);min-width:0}
+.ss26-featured-top,.ss26-featured-bottom{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;font-size:10px;font-weight:850;letter-spacing:.08em;color:#aab9cc}
+.ss26-live-label{color:#f3ce83}.ss26-versus{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:10px;padding:20px 0}
+.ss26-versus>strong{min-width:0;overflow-wrap:anywhere;font-size:clamp(12px,2.5vw,22px);line-height:1.2}.ss26-versus>strong:last-child{text-align:right}
+.ss26-versus>div{display:flex;align-items:center;gap:8px;position:relative;padding-bottom:19px}.ss26-versus b{font-size:clamp(28px,6vw,54px);color:#fff;font-variant-numeric:tabular-nums}.ss26-versus>div>span{font-size:30px;color:#e8bd63}.ss26-versus small{position:absolute;bottom:0;left:0;right:0;text-align:center;white-space:nowrap;color:#e8bd63;font-size:10px}
+.ss26-pitch{position:relative;height:clamp(245px,45vw,400px);border-radius:14px;border:3px solid #e0f5d099;background:repeating-linear-gradient(90deg,#176c48 0%,#176c48 12.5%,#1a7a50 12.5%,#1a7a50 25%);box-shadow:inset 0 0 65px #001b18a6;overflow:hidden}
+.ss26-pitch:before{content:"";position:absolute;inset:10px;border:2px solid #ffffff7a;border-radius:3px}.ss26-midline{position:absolute;top:10px;bottom:10px;left:50%;border-left:2px solid #ffffff8c}.ss26-circle{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:20%;aspect-ratio:1;border:2px solid #ffffff8c;border-radius:50%}.ss26-box{position:absolute;top:27%;height:46%;width:13%;border:2px solid #ffffff8c}.ss26-box-left{left:10px;border-left:0}.ss26-box-right{right:10px;border-right:0}
+.ss26-player{position:absolute;transform:translate(-50%,-50%);z-index:2;display:flex;align-items:center;flex-direction:column;gap:3px;width:clamp(34px,7vw,70px);text-align:center}.ss26-player span{width:clamp(26px,5vw,47px);height:clamp(26px,5vw,47px);border-radius:50%;display:grid;place-items:center;background:#f5cf70;color:#152035;font-size:clamp(10px,2vw,16px);font-weight:950;border:2px solid #fff;box-shadow:0 4px 12px #0008}.ss26-player.away span{background:#111b30;color:#fff;border-color:#d4b566}.ss26-player small{max-width:100%;color:#fff;font-size:clamp(7px,1.4vw,10px);text-shadow:0 2px 5px #000;white-space:nowrap}.ss26-featured-bottom{margin-top:12px}.ss26-featured-bottom button{background:#e8bd63;color:#0b1321;border:0;border-radius:8px;padding:9px 12px;font-weight:900;cursor:pointer}
+.public-section,.public-side-card{background:#111c2d!important;color:#f2f5fa!important;border:1px solid #34435b!important;border-radius:17px!important}.public-section-head h2,.public-side-title{color:#f6d07e!important}.public-empty-box,.public-side-empty{background:#17263a!important;color:#b8c9dc!important;border-color:#34435b!important}.public-tabbar{background:#0f192a!important;border:1px solid #34435b!important;border-radius:14px!important}.public-tabbar button{color:#d7e0ed!important}.public-tabbar button.active{background:#e6ba61!important;color:#0b1524!important}.public-live-footer{color:#a9b9d0!important}
+@media(max-width:600px){.public-live-header{min-height:160px}.public-live-shell{width:calc(100% - 16px);margin-top:-24px}.ss26-arena{border-radius:17px;padding:16px}.ss26-arena-head{align-items:stretch}.ss26-demo-toggle{width:100%}.ss26-pitch{height:280px}.ss26-player{width:36px}.ss26-player span{width:29px;height:29px}.ss26-player small{font-size:7px}.ss26-versus{gap:5px}.ss26-featured{padding:9px}.ss26-featured-bottom{font-size:9px}.ss26-ready{padding:14px}}
+
+/* S&S CUP RAMAZAN V4 — header separation, legibility and responsive layout */
+.public-live-page .public-live-header{
+  min-height:0!important;
+  padding:26px max(20px,calc((100vw - 1380px)/2)) 28px!important;
+  align-items:center;
+  flex-wrap:wrap;
+  gap:16px 24px;
+}
+.public-live-page .public-live-shell{
+  margin-top:20px!important;
+  width:min(1380px,calc(100% - 32px));
+}
+.public-live-page .public-brand-block{min-width:0;flex:1 1 320px}
+.public-live-page .public-brand-block>div{min-width:0}
+.public-live-page .public-brand-block h1{line-height:1.1;overflow-wrap:anywhere}
+.public-live-page .public-header-meta{flex:0 1 auto;min-width:0}
+.public-live-page .ss26-arena{margin-top:0;clear:both}
+.public-live-page .public-stat-grid,
+.public-live-page .public-dashboard-grid,
+.public-live-page .public-dashboard-main,
+.public-live-page .public-dashboard-side{min-width:0}
+.public-live-page .public-dashboard-grid{gap:16px}
+.public-live-page .public-dashboard-grid>*{min-width:0}
+.public-live-page .public-section,
+.public-live-page .public-side-card{min-width:0;overflow:hidden}
+.public-live-page .public-side-title{
+  background:linear-gradient(135deg,#ffdb50,#efb62c)!important;
+  color:#111827!important;
+  font-size:15px!important;
+  font-weight:950!important;
+  line-height:1.35;
+  letter-spacing:.035em;
+  text-shadow:none!important;
+  padding:14px 16px;
+}
+.public-live-page .public-side-table-wrap{overflow-x:auto;overflow-y:visible;max-width:100%;}
+.public-live-page .public-side-table{width:100%;min-width:315px}
+.public-live-page .public-side-table th{
+  background:#192b40!important;color:#f4d484!important;
+  font-size:11px!important;font-weight:850!important;
+  padding:11px 6px!important;white-space:nowrap;
+  border-bottom:1px solid #40506a!important;
+}
+.public-live-page .public-side-table td{
+  color:#e4ebf5!important;font-size:12px!important;
+  padding:11px 6px!important;border-color:#34435b!important;
+}
+.public-live-page .public-side-table td strong{color:#fff!important;font-size:12px!important;line-height:1.3;overflow-wrap:anywhere}
+.public-live-page .public-side-table td b{color:#f8d17b!important;font-size:13px!important}
+.public-live-page .public-side-empty{font-size:13px!important;color:#d1dcec!important;padding:26px 14px}
+.public-live-page .public-mini-scorers strong{font-size:13px!important;color:#fff!important}
+.public-live-page .public-mini-scorers strong small{font-size:11px!important;color:#b4c5d8!important}
+.public-live-page .public-mini-scorers b{font-size:16px!important;color:#f7d37c!important}
+.public-live-page .public-section-head h2{color:#fff!important;line-height:1.2}
+.public-live-page .public-tabbar{grid-template-columns:repeat(7,minmax(0,1fr));overflow:visible}
+.public-live-page .public-tabbar button{min-width:0;height:auto;min-height:54px;padding:10px 6px;font-size:11px;line-height:1.25}
+@media(max-width:900px){
+  .public-live-page .public-dashboard-grid{grid-template-columns:minmax(0,1fr)!important}
+  .public-live-page .public-dashboard-side{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}
+  .public-live-page .public-tabbar{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
+@media(max-width:600px){
+  .public-live-page .public-live-header{padding:18px 14px 20px!important;gap:12px}
+  .public-live-page .public-brand-block{flex-basis:100%;gap:12px}
+  .public-live-page .public-brand-block h1{font-size:clamp(28px,8vw,36px)!important}
+  .public-live-page .public-header-meta{justify-content:flex-start;padding-top:0}
+  .public-live-page .public-header-meta>span{font-size:9px;padding:6px 8px}
+  .public-live-page .public-live-shell{width:calc(100% - 20px);margin-top:14px!important}
+  .public-live-page .ss26-arena{padding:16px 12px}
+  .public-live-page .public-dashboard-side{display:flex}
+  .public-live-page .public-tabbar{grid-template-columns:repeat(2,minmax(0,1fr));gap:1px}
+  .public-live-page .public-tabbar button{font-size:12px;min-height:44px}
+  .public-live-page .public-side-table th{font-size:10px!important;padding:9px 5px!important}
+  .public-live-page .public-side-table td{font-size:11px!important;padding:9px 5px!important}
+}
+
+/* V5 — responsive photo lineup in the public featured match pitch */
+.ss26-pitch{container-type:inline-size;isolation:isolate}
+.ss26-player{width:clamp(31px,9cqw,72px);min-width:0;pointer-events:none}
+.ss26-player span{width:clamp(25px,6.6cqw,46px);height:clamp(25px,6.6cqw,46px);overflow:hidden;flex-shrink:0}
+.ss26-player span img{display:block;width:100%;height:100%;object-fit:cover;border-radius:50%}
+.ss26-player small{max-width:100%;font-size:clamp(7px,1.65cqw,11px);line-height:1.12;white-space:normal;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;padding:2px 3px;border-radius:4px;background:#071b1cba;text-shadow:0 1px 3px #000}
+@media(max-width:600px){.ss26-pitch{height:clamp(270px,80vw,360px)}.ss26-player{width:clamp(29px,10cqw,42px)}.ss26-player span{width:clamp(25px,8cqw,33px);height:clamp(25px,8cqw,33px)}.ss26-player small{font-size:clamp(7px,2.1cqw,9px)}}
+
+/* TEST V10 PC: only the match modal scrolls; mobile rules remain unchanged. */
+@media (min-width: 681px) and (hover: hover) and (pointer: fine) {
+  .public-modal-backdrop { overflow: hidden !important; }
+  .public-match-modal {
+    display: block !important;
+    max-height: calc(100vh - 36px) !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    overscroll-behavior-y: contain !important;
+  }
+  .public-modal-events {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    touch-action: auto !important;
+  }
+}
