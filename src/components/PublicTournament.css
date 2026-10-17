@@ -733,3 +733,49 @@
     touch-action: auto !important;
   }
 }
+
+/* V10 — Canlı saha: tam oyuncu isimleri ve fotoğraf numarası.
+   Sadece ss-pitch sınıflarını etkiler; maç olayları/kaydırma korunur. */
+.ss-pitch-player{position:relative;overflow:visible;min-width:0}
+.ss-pitch-player-name{
+  box-sizing:border-box;
+  width:max-content;
+  max-width:clamp(64px,19cqw,116px);
+  padding:3px 4px;
+  white-space:normal;
+  overflow-wrap:break-word;
+  word-break:normal;
+  display:block;
+  overflow:visible;
+  -webkit-line-clamp:unset;
+  line-height:1.2;
+  text-align:center;
+  font-size:clamp(8px,1.7cqw,11px);
+  background:rgba(3,27,27,.90);
+  border-radius:5px;
+}
+.ss-pitch-avatar{position:relative;overflow:visible}
+.ss-pitch-avatar img{display:block;border-radius:50%;width:100%;height:100%;object-fit:cover}
+.ss-pitch-photo-number{
+  position:absolute;
+  right:-7px;
+  bottom:-5px;
+  min-width:18px;
+  height:18px;
+  padding:0 3px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:#f6c850;
+  color:#102033;
+  border:1px solid #fff;
+  border-radius:10px;
+  font-size:10px;
+  line-height:1;
+  font-weight:900;
+  box-shadow:0 2px 5px #0007;
+}
+@media(max-width:480px){
+  .ss-pitch-player-name{max-width:clamp(58px,19cqw,82px);font-size:8px;padding:2px 3px}
+  .ss-pitch-photo-number{min-width:15px;height:15px;font-size:9px;right:-5px;bottom:-4px}
+}

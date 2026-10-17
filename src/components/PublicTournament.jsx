@@ -338,8 +338,8 @@ function LivePitch({ match, squads, lineups }) {
         const photo = p?.photoUrl || p?.photo || p?.imageUrl;
         const matching = flash && playerKey(flash.team) === playerKey(side === "home" ? match.home : match.away) && playerKey(flash.type === "substitution" ? flash.playerInName : flash.player) === playerKey(name);
         return <div className={`ss-pitch-player ${matching ? "ss-v7-highlight" : ""}`} key={`${side}-${i}`}>
-          <div className="ss-pitch-avatar">{photo ? <img src={photo} alt="" loading="lazy" /> : <span>{p ? number : "·"}</span>}</div>
-          <div className="ss-pitch-player-name">{p ? `${number} ${name}` : "—"}</div>
+          <div className="ss-pitch-avatar">{photo ? <><img src={photo} alt={name} loading="lazy" /><span className="ss-pitch-photo-number">{number}</span></> : <span>{p ? number : "·"}</span>}</div>
+          <div className="ss-pitch-player-name" title={p ? name : ""}>{p ? name : "—"}</div>
         </div>;
       })}
     </div>
