@@ -779,3 +779,37 @@
   .ss-pitch-player-name{max-width:clamp(58px,19cqw,82px);font-size:8px;padding:2px 3px}
   .ss-pitch-photo-number{min-width:15px;height:15px;font-size:9px;right:-5px;bottom:-4px}
 }
+
+/* V10: Only mobile portrait — full-width stacked team halves for readable names. */
+@media (max-width: 600px) and (orientation: portrait) {
+  .ss-pitch-wrap { container-type: inline-size; }
+  .ss-pitch-field {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+    aspect-ratio: auto;
+    height: 620px;
+    min-height: 620px;
+    overflow: hidden;
+  }
+  .ss-pitch-midline {
+    top: 50%; bottom: auto; left: 0; right: 0;
+    width: 100%; border-left: 0; border-top: 2px solid #ffffff75;
+  }
+  .ss-pitch-center-circle { width: 66px; height: 66px; }
+  .ss-pitch-side {
+    width: 100%; min-width: 0; min-height: 0;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: repeat(3, minmax(0, 1fr));
+    padding: 12px 8px; gap: 3px 6px;
+  }
+  .ss-pitch-player { width: 100%; min-width: 0; max-width: 100%; gap: 4px; }
+  .ss-pitch-avatar { width: 36px; height: 36px; }
+  .ss-pitch-player-name {
+    width: 100%; max-width: 110px; min-width: 0;
+    margin: 0 auto; padding: 3px 4px;
+    font-size: clamp(9px, 2.7vw, 11px); line-height: 1.18;
+    white-space: normal; overflow-wrap: anywhere; word-break: normal;
+    display: block; overflow: visible; -webkit-line-clamp: unset;
+  }
+  .ss-pitch-photo-number { min-width: 16px; height: 16px; font-size: 9px; }
+}
