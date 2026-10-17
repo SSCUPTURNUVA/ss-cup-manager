@@ -8,18 +8,18 @@ const GOAL_EVENT_TYPES = new Set(["goal", "own_goal", "penalty_goal", "penalty_s
 const SCORER_EVENT_TYPES = new Set(["goal", "penalty_goal", "scorer_record"]);
 
 const EVENT_META = {
-  goal: { icon: "⚽", label: "GOL" },
-  penalty_goal: { icon: "🥅", label: "PENALTI GOLÜ" },
-  own_goal: { icon: "🥴", label: "KENDİ KALESİNE" },
-  penalty_shootout_goal: { icon: "⚽", label: "PENALTI GOLÜ" },
-  penalty_shootout_miss: { icon: "❌", label: "PENALTI KAÇTI" },
-  scorer_record: { icon: "⚽", label: "GOL" },
-  assist: { icon: "🅰️", label: "ASİST" },
-  yellow_card: { icon: "🟨", label: "SARI KART" },
-  red_card: { icon: "🟥", label: "KIRMIZI KART" },
-  substitution: { icon: "🔄", label: "DEĞİŞİKLİK" },
-  penalty_miss: { icon: "❌", label: "PENALTI KAÇTI" },
-  injury: { icon: "🤕", label: "SAKATLIK" },
+  goal: { icon: "âš½", label: "GOL" },
+  penalty_goal: { icon: "ğŸ¥…", label: "PENALTI GOLÃœ" },
+  own_goal: { icon: "ğŸ¥´", label: "KENDÄ° KALESÄ°NE" },
+  penalty_shootout_goal: { icon: "âš½", label: "PENALTI GOLÃœ" },
+  penalty_shootout_miss: { icon: "âŒ", label: "PENALTI KAÃ‡TI" },
+  scorer_record: { icon: "âš½", label: "GOL" },
+  assist: { icon: "ğŸ…°ï¸", label: "ASÄ°ST" },
+  yellow_card: { icon: "ğŸŸ¨", label: "SARI KART" },
+  red_card: { icon: "ğŸŸ¥", label: "KIRMIZI KART" },
+  substitution: { icon: "ğŸ”„", label: "DEÄÄ°ÅÄ°KLÄ°K" },
+  penalty_miss: { icon: "âŒ", label: "PENALTI KAÃ‡TI" },
+  injury: { icon: "ğŸ¤•", label: "SAKATLIK" },
 };
 
 function safeNumber(value, fallback = 0) {
@@ -29,7 +29,7 @@ function safeNumber(value, fallback = 0) {
 
 function normalizeEvent(event, index) {
   const type = event?.type || event?.eventType || event?.kind || "goal";
-  const meta = EVENT_META[type] || { icon: "•", label: String(type).toUpperCase() };
+  const meta = EVENT_META[type] || { icon: "â€¢", label: String(type).toUpperCase() };
   return {
     ...event,
     id: event?.id || `${type}-${index}`,
@@ -63,9 +63,9 @@ function getEvents(match) {
 
 function mapCloudFixture(item) {
   const played = item.played === true;
-  // Maç merkezine alınmış olmak tek başına CANLI değildir.
-  // Yalnız devre/penaltı gerçekten başladıysa canlı sayılır; waiting/null fikstürde kalır.
-  // Ayrıca fikstür tarihi henüz gelmemiş bir maç eski bir test kaydı yüzünden CANLI kalamaz.
+  // MaÃ§ merkezine alÄ±nmÄ±ÅŸ olmak tek baÅŸÄ±na CANLI deÄŸildir.
+  // YalnÄ±z devre/penaltÄ± gerÃ§ekten baÅŸladÄ±ysa canlÄ± sayÄ±lÄ±r; waiting/null fikstÃ¼rde kalÄ±r.
+  // AyrÄ±ca fikstÃ¼r tarihi henÃ¼z gelmemiÅŸ bir maÃ§ eski bir test kaydÄ± yÃ¼zÃ¼nden CANLI kalamaz.
   const activePhases = new Set(["first_half", "halftime", "second_half", "penalty"]);
   const now = new Date();
   const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -106,8 +106,8 @@ function calculateStandings(teams, fixtures) {
   });
 
   (fixtures || [])
-    // CANLI lig maçı, yalnız izleyici ekranındaki geçici puan durumuna dahil edilir.
-    // Supabase'e puan/standings yazılmaz; maç bitince played sonucu normal şekilde devralır.
+    // CANLI lig maÃ§Ä±, yalnÄ±z izleyici ekranÄ±ndaki geÃ§ici puan durumuna dahil edilir.
+    // Supabase'e puan/standings yazÄ±lmaz; maÃ§ bitince played sonucu normal ÅŸekilde devralÄ±r.
     .filter((match) => match?.isKnockout !== true && (match?.played === true || match?.live === true))
     .forEach((match) => {
       const home = match?.home;
@@ -139,8 +139,8 @@ function calculateStandings(teams, fixtures) {
 
 function canonicalTeamName(name) {
   const raw = String(name || "").trim();
-  const normalized = raw.toLocaleLowerCase("tr-TR").replace(/[^a-z0-9çğıöşü]+/gi, " ").trim();
-  if (normalized === "cmt insaat" || normalized === "cmt inşaat") return "Cem Taş CMT İnşaat";
+  const normalized = raw.toLocaleLowerCase("tr-TR").replace(/[^a-z0-9Ã§ÄŸÄ±Ã¶ÅŸÃ¼]+/gi, " ").trim();
+  if (normalized === "cmt insaat" || normalized === "cmt inÅŸaat") return "Cem TaÅŸ CMT Ä°nÅŸaat";
   return raw;
 }
 
@@ -169,7 +169,7 @@ function deriveScorers(fixtures) {
 }
 
 function formatDate(date, long = false) {
-  if (!date) return "Tarih açıklanacak";
+  if (!date) return "Tarih aÃ§Ä±klanacak";
   try {
     return new Intl.DateTimeFormat("tr-TR", long
       ? { day: "2-digit", month: "long", weekday: "long" }
@@ -206,7 +206,7 @@ function stageText(match, fallbackIndex = 0) {
 function statusText(match) {
   if (match?.live === true && match?.played !== true) return "CANLI";
   if (match?.played === true) return "MS";
-  return match?.time || "SAAT BEKLENİYOR";
+  return match?.time || "SAAT BEKLENÄ°YOR";
 }
 
 function knockoutLiveBadges(match) {
@@ -227,32 +227,32 @@ function knockoutLiveBadges(match) {
   const homeAhead = homeValue > awayValue;
   const key = String(match.knockoutKey || "");
   const stage = String(match.stageLabel || "").toLocaleUpperCase("tr-TR");
-  const isQuarter = key.startsWith("quarter-") || stage.includes("ÇEYREK");
+  const isQuarter = key.startsWith("quarter-") || stage.includes("Ã‡EYREK");
   const isSemi = key.startsWith("semi-") || stage.includes("YARI");
-  const isFinal = key === "final-0" || (stage.includes("FİNAL") && !stage.includes("YARI"));
-  const isThird = key.startsWith("third-place") || stage.includes("3.") || stage.includes("ÜÇÜNC");
+  const isFinal = key === "final-0" || (stage.includes("FÄ°NAL") && !stage.includes("YARI"));
+  const isThird = key.startsWith("third-place") || stage.includes("3.") || stage.includes("ÃœÃ‡ÃœNC");
 
   if (isQuarter) {
-    return { balanced: false, home: homeAhead ? { icon: "↗", text: "Yarı Finale", tone: "gold" } : null, away: !homeAhead ? { icon: "↗", text: "Yarı Finale", tone: "gold" } : null };
+    return { balanced: false, home: homeAhead ? { icon: "â†—", text: "YarÄ± Finale", tone: "gold" } : null, away: !homeAhead ? { icon: "â†—", text: "YarÄ± Finale", tone: "gold" } : null };
   }
   if (isSemi) {
     return {
       balanced: false,
-      home: homeAhead ? { icon: "🏆", text: "Finale", tone: "gold" } : { icon: "🥉", text: "3.'lük Maçına", tone: "bronze" },
-      away: !homeAhead ? { icon: "🏆", text: "Finale", tone: "gold" } : { icon: "🥉", text: "3.'lük Maçına", tone: "bronze" },
+      home: homeAhead ? { icon: "ğŸ†", text: "Finale", tone: "gold" } : { icon: "ğŸ¥‰", text: "3.'lÃ¼k MaÃ§Ä±na", tone: "bronze" },
+      away: !homeAhead ? { icon: "ğŸ†", text: "Finale", tone: "gold" } : { icon: "ğŸ¥‰", text: "3.'lÃ¼k MaÃ§Ä±na", tone: "bronze" },
     };
   }
   if (isFinal) {
-    return { balanced: false, home: homeAhead ? { icon: "👑", text: "Şampiyonluğa", tone: "gold" } : null, away: !homeAhead ? { icon: "👑", text: "Şampiyonluğa", tone: "gold" } : null };
+    return { balanced: false, home: homeAhead ? { icon: "ğŸ‘‘", text: "ÅampiyonluÄŸa", tone: "gold" } : null, away: !homeAhead ? { icon: "ğŸ‘‘", text: "ÅampiyonluÄŸa", tone: "gold" } : null };
   }
   if (isThird) {
-    return { balanced: false, home: homeAhead ? { icon: "🥉", text: "3.'lüğe", tone: "bronze" } : null, away: !homeAhead ? { icon: "🥉", text: "3.'lüğe", tone: "bronze" } : null };
+    return { balanced: false, home: homeAhead ? { icon: "ğŸ¥‰", text: "3.'lÃ¼ÄŸe", tone: "bronze" } : null, away: !homeAhead ? { icon: "ğŸ¥‰", text: "3.'lÃ¼ÄŸe", tone: "bronze" } : null };
   }
   return null;
 }
 
-// V6: Salt okunur canlı saha. Kaydedilmiş ilk 7 ve maçın oyuncu değişikliği
-// olayları kullanılır; Supabase'e hiçbir yeni kayıt yazılmaz.
+// V6: Salt okunur canlÄ± saha. KaydedilmiÅŸ ilk 7 ve maÃ§Ä±n oyuncu deÄŸiÅŸikliÄŸi
+// olaylarÄ± kullanÄ±lÄ±r; Supabase'e hiÃ§bir yeni kayÄ±t yazÄ±lmaz.
 function playerKey(value) {
   return String(value || "").trim().toLocaleLowerCase("tr-TR").replace(/\s+/g, " ");
 }
@@ -277,7 +277,7 @@ function getFeaturedStarters(match, squads, lineups, side) {
   return players;
 }
 
-// V7: Olay değişimini yalnız izleyici tarafında algılar; veri kaydetmez.
+// V7: Olay deÄŸiÅŸimini yalnÄ±z izleyici tarafÄ±nda algÄ±lar; veri kaydetmez.
 function usePitchEventFlash(match) {
   const [flash, setFlash] = useState(null);
   const lastSeen = useRef({ matchId: null, eventId: null });
@@ -314,11 +314,11 @@ function V7EventBanner({ event }) {
   if (!event) return null;
   const substitution = event.type === "substitution";
   const text = substitution
-    ? `${event.playerOutName || event.player || "Oyuncu"} ↓  ${event.playerInName || "Oyuncu"} ↑`
+    ? `${event.playerOutName || event.player || "Oyuncu"} â†“  ${event.playerInName || "Oyuncu"} â†‘`
     : event.player;
   return <div className="ss-v7-banner" role="status" aria-live="polite">
     <strong>{event.icon} {event.label}</strong>
-    <small>{event.minute !== "" ? `${event.minute}' • ` : ""}{text}{event.team ? ` • ${event.team}` : ""}</small>
+    <small>{event.minute !== "" ? `${event.minute}' â€¢ ` : ""}{text}{event.team ? ` â€¢ ${event.team}` : ""}</small>
   </div>;
 }
 
@@ -327,35 +327,35 @@ function LivePitch({ match, squads, lineups }) {
   const home = getFeaturedStarters(match, squads, lineups, "home");
   const away = getFeaturedStarters(match, squads, lineups, "away");
   if (!home.some(Boolean) && !away.some(Boolean)) return (
-    <div className="ss-pitch-pending"><style>{V7_EVENT_CSS}</style><V7EventBanner event={flash} />⚽ Saha dizilişi, yönetim ilk 7 oyuncuyu belirlediğinde burada görünecek.</div>
+    <div className="ss-pitch-pending"><style>{V7_EVENT_CSS}</style><V7EventBanner event={flash} />âš½ Saha diziliÅŸi, yÃ¶netim ilk 7 oyuncuyu belirlediÄŸinde burada gÃ¶rÃ¼necek.</div>
   );
   const renderSide = (players, side) => (
     <div className={`ss-pitch-side ss-pitch-${side}`}>
       {Array.from({ length: 7 }, (_, i) => {
         const p = players[i];
-        const number = p?.shirtNumber ?? p?.number ?? "–";
+        const number = p?.shirtNumber ?? p?.number ?? "â€“";
         const name = p?.name || p?.playerName || "Oyuncu";
         const photo = p?.photoUrl || p?.photo || p?.imageUrl;
         const matching = flash && playerKey(flash.team) === playerKey(side === "home" ? match.home : match.away) && playerKey(flash.type === "substitution" ? flash.playerInName : flash.player) === playerKey(name);
         return <div className={`ss-pitch-player ${matching ? "ss-v7-highlight" : ""}`} key={`${side}-${i}`}>
-          <div className="ss-pitch-avatar">{photo ? <><img src={photo} alt={name} loading="lazy" /><span className="ss-pitch-photo-number">{number}</span></> : <span>{p ? number : "·"}</span>}</div>
-          <div className="ss-pitch-player-name" title={p ? name : ""}>{p ? name : "—"}</div>
+          <div className="ss-pitch-avatar">{photo ? <><img src={photo} alt={name} loading="lazy" /><span className="ss-pitch-photo-number">{number}</span></> : <span>{p ? number : "Â·"}</span>}</div>
+          <div className="ss-pitch-player-name" title={p ? name : ""}>{p ? name : "â€”"}</div>
         </div>;
       })}
     </div>
   );
-  return <section className="ss-pitch-wrap" aria-label="Canlı saha dizilişi">
+  return <section className="ss-pitch-wrap" aria-label="CanlÄ± saha diziliÅŸi">
     <style>{V7_EVENT_CSS}</style>
-    <div className="ss-pitch-header"><span>{match.home}</span><b>SAHADAKİ 7 • CANLI</b><span>{match.away}</span></div>
+    <div className="ss-pitch-header"><span>{match.home}</span><b>SAHADAKÄ° 7 â€¢ CANLI</b><span>{match.away}</span></div>
     <V7EventBanner event={flash} />
     <div className="ss-pitch-field"><div className="ss-pitch-midline"/><div className="ss-pitch-center-circle"/>{renderSide(home, "home")}{renderSide(away, "away")}</div>
-    <div className="ss-pitch-caption">{home.filter(Boolean).length !== 7 || away.filter(Boolean).length !== 7 ? "Eksik kadro seçimi var; boş konumlar gösteriliyor." : "Kaydedilmiş ilk 7 ve oyuncu değişikliklerine göre saha"}</div>
+    <div className="ss-pitch-caption">{home.filter(Boolean).length !== 7 || away.filter(Boolean).length !== 7 ? "Eksik kadro seÃ§imi var; boÅŸ konumlar gÃ¶steriliyor." : "KaydedilmiÅŸ ilk 7 ve oyuncu deÄŸiÅŸikliklerine gÃ¶re saha"}</div>
   </section>;
 }
 
 function MatchDetailModal({ match: sourceMatch, onClose, now, halfDurationMinutes, squads, lineups }) {
-  // Maç detayı açıkken olay kayıtlarını doğrudan buluttan oku.
-  // Ana fikstür/snapshot yenilemesi gecikse bile aktif gol ve değişiklikler görünür.
+  // MaÃ§ detayÄ± aÃ§Ä±kken olay kayÄ±tlarÄ±nÄ± doÄŸrudan buluttan oku.
+  // Ana fikstÃ¼r/snapshot yenilemesi gecikse bile aktif gol ve deÄŸiÅŸiklikler gÃ¶rÃ¼nÃ¼r.
   const [liveEventRows, setLiveEventRows] = useState(null);
   const sourceMatchId = String(sourceMatch?.id ?? "");
   const sourceKnockoutKey = String(sourceMatch?.knockoutKey ?? "");
@@ -371,7 +371,7 @@ function MatchDetailModal({ match: sourceMatch, onClose, now, halfDurationMinute
         const rows = await fetchMatchEventRows();
         if (!disposed) setLiveEventRows(rows);
       } catch (error) {
-        console.warn("Maç detayı olayları okunamadı:", error);
+        console.warn("MaÃ§ detayÄ± olaylarÄ± okunamadÄ±:", error);
       } finally {
         inFlight = false;
       }
@@ -412,7 +412,7 @@ function MatchDetailModal({ match: sourceMatch, onClose, now, halfDurationMinute
     return () => window.cancelAnimationFrame(frame);
   }, [match?.id, match?.knockoutKey, matchEvents.length, latestEventId]);
 
-  // Canlı maç detayı açıkken arka sayfanın kaymasını engelle.
+  // CanlÄ± maÃ§ detayÄ± aÃ§Ä±kken arka sayfanÄ±n kaymasÄ±nÄ± engelle.
   useEffect(() => {
     if (!match) return undefined;
     const previousOverflow = document.body.style.overflow;
@@ -431,10 +431,10 @@ function MatchDetailModal({ match: sourceMatch, onClose, now, halfDurationMinute
   return (
     <div className="public-modal-backdrop" onMouseDown={onClose}>
       <div className="public-match-modal" style={{ overflowY: "auto", overscrollBehaviorY: "contain" }} onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-        <button className="public-modal-close" onClick={onClose} aria-label="Kapat">×</button>
-        <div className="public-modal-eyebrow">{stageText(match)} • {formatDate(match.date, true)}</div>
+        <button className="public-modal-close" onClick={onClose} aria-label="Kapat">Ã—</button>
+        <div className="public-modal-eyebrow">{stageText(match)} â€¢ {formatDate(match.date, true)}</div>
         <div className="public-modal-status">
-          <span className={match.live ? "live" : match.played ? "finished" : "scheduled"}>{match.live ? `● CANLI ${liveMinute}` : match.played ? "MAÇ SONU" : match.time || "PROGRAM"}</span>
+          <span className={match.live ? "live" : match.played ? "finished" : "scheduled"}>{match.live ? `â— CANLI ${liveMinute}` : match.played ? "MAÃ‡ SONU" : match.time || "PROGRAM"}</span>
         </div>
         <div className="public-modal-score">
           <strong>{match.home}</strong>
@@ -446,7 +446,7 @@ function MatchDetailModal({ match: sourceMatch, onClose, now, halfDurationMinute
         )}
         {penaltyEvents.length > 0 && (
           <div className="public-modal-penalty-list">
-            <b>⚽ PENALTILAR</b>
+            <b>âš½ PENALTILAR</b>
             <div className="public-modal-penalty-teams">
               {[
                 { team: match.home, events: homePenaltyEvents, side: "home" },
@@ -455,11 +455,11 @@ function MatchDetailModal({ match: sourceMatch, onClose, now, halfDurationMinute
                 <div className={`public-modal-penalty-team ${group.side}`} key={group.side}>
                   <h4>{group.team}</h4>
                   {group.events.length === 0 ? (
-                    <div className="public-modal-penalty-empty">Henüz atış yok</div>
+                    <div className="public-modal-penalty-empty">HenÃ¼z atÄ±ÅŸ yok</div>
                   ) : group.events.map((event) => (
                     <div className="public-modal-penalty-row" key={`pen-${event.id}`}>
                       <span>{findShirtNumber(event.team, event.player, event.shirtNumber) !== "" ? `#${findShirtNumber(event.team, event.player, event.shirtNumber)} ` : ""}{event.player} <small>PEN.</small></span>
-                      <strong className={event.type === "penalty_shootout_goal" ? "ok" : "miss"}>{event.type === "penalty_shootout_goal" ? "✓" : "✕"}</strong>
+                      <strong className={event.type === "penalty_shootout_goal" ? "ok" : "miss"}>{event.type === "penalty_shootout_goal" ? "âœ“" : "âœ•"}</strong>
                     </div>
                   ))}
                 </div>
@@ -468,23 +468,23 @@ function MatchDetailModal({ match: sourceMatch, onClose, now, halfDurationMinute
           </div>
         )}
         <LivePitch match={match} squads={squads} lineups={lineups} />
-        <div className="public-modal-place">📍 {match.field || "Gol Park Halı Saha"} {match.time ? `• ${match.time}` : ""}</div>
+        <div className="public-modal-place">ğŸ“ {match.field || "Gol Park HalÄ± Saha"} {match.time ? `â€¢ ${match.time}` : ""}</div>
         <div className="public-modal-divider" />
-        <div className="public-modal-events-title"><span>MAÇ OLAYLARI</span><b>{matchEvents.length}</b></div>
+        <div className="public-modal-events-title"><span>MAÃ‡ OLAYLARI</span><b>{matchEvents.length}</b></div>
         {matchEvents.length === 0 ? (
-          <div className="public-modal-empty">{match.played ? "Bu maç için kayıtlı gol/kart olayı bulunmuyor." : "Maç başladığında goller ve kartlar burada görünecek."}</div>
+          <div className="public-modal-empty">{match.played ? "Bu maÃ§ iÃ§in kayÄ±tlÄ± gol/kart olayÄ± bulunmuyor." : "MaÃ§ baÅŸladÄ±ÄŸÄ±nda goller ve kartlar burada gÃ¶rÃ¼necek."}</div>
         ) : (
           <div className="public-modal-events" ref={eventsContainerRef} tabIndex={0}>
             {matchEvents.map((event) => (
               <div className="public-modal-event" key={event.id}>
-                <span className="public-modal-event-minute">{event.minute !== "" ? `${event.minute}'` : "•"}</span>
+                <span className="public-modal-event-minute">{event.minute !== "" ? `${event.minute}'` : "â€¢"}</span>
                 <span className="public-modal-event-icon">{event.icon}</span>
                 <div>
                   <b>{event.label}</b>
                   {event.type === "substitution" ? (
                     <>
-                      <strong>Çıktı: {findShirtNumber(event.team, event.playerOutName || event.player, event.shirtNumber) !== "" ? `#${findShirtNumber(event.team, event.playerOutName || event.player, event.shirtNumber)} ` : ""}{event.playerOutName || event.player}</strong>
-                      <small>Girdi: {findShirtNumber(event.team, event.playerInName, event.secondPlayerShirtNumber) !== "" ? `#${findShirtNumber(event.team, event.playerInName, event.secondPlayerShirtNumber)} ` : ""}{event.playerInName || "Oyuncu"} • {event.team}</small>
+                      <strong>Ã‡Ä±ktÄ±: {findShirtNumber(event.team, event.playerOutName || event.player, event.shirtNumber) !== "" ? `#${findShirtNumber(event.team, event.playerOutName || event.player, event.shirtNumber)} ` : ""}{event.playerOutName || event.player}</strong>
+                      <small>Girdi: {findShirtNumber(event.team, event.playerInName, event.secondPlayerShirtNumber) !== "" ? `#${findShirtNumber(event.team, event.playerInName, event.secondPlayerShirtNumber)} ` : ""}{event.playerInName || "Oyuncu"} â€¢ {event.team}</small>
                     </>
                   ) : (
                     <>
@@ -535,8 +535,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   }, []);
 
   const refresh = useCallback(async () => {
-    // Telefonda ağ 1 saniyeden yavaşsa üst üste refresh başlatmak eski kodda
-    // her cevabı iptal ediyordu. Tek istek bitsin, sonra yenisi başlasın.
+    // Telefonda aÄŸ 1 saniyeden yavaÅŸsa Ã¼st Ã¼ste refresh baÅŸlatmak eski kodda
+    // her cevabÄ± iptal ediyordu. Tek istek bitsin, sonra yenisi baÅŸlasÄ±n.
     if (refreshInFlight.current) {
       refreshQueued.current = true;
       return;
@@ -573,9 +573,9 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         mappedFixtures = sortFixturesBySchedule(currentRows.map(mapCloudFixture));
       }
 
-      // fixtures tablosu skor + played için TEK OTORİTEDİR. Snapshot yalnız
-      // canlı runtime (faz/sayaç/olaylar) taşır. Böylece eski snapshot 3 bitmiş
-      // maçı tekrar oynanmış yapamaz.
+      // fixtures tablosu skor + played iÃ§in TEK OTORÄ°TEDÄ°R. Snapshot yalnÄ±z
+      // canlÄ± runtime (faz/sayaÃ§/olaylar) taÅŸÄ±r. BÃ¶ylece eski snapshot 3 bitmiÅŸ
+      // maÃ§Ä± tekrar oynanmÄ±ÅŸ yapamaz.
       const snapshotRow = stateById.get("fixtures_snapshot");
       if (Array.isArray(mappedFixtures) && Array.isArray(snapshotRow?.value)) {
         const snapshotById = new Map(snapshotRow.value.map((m) => [String(m?.id), m]));
@@ -628,10 +628,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       const value = knockoutRow?.value && typeof knockoutRow.value === "object" ? knockoutRow.value : {};
       const cloudUpdatedAt = knockoutRow?.updated_at || "";
       stagedKnockout = [
-        ...(Array.isArray(value.quarter) ? value.quarter.map((m, i) => ({ ...m, knockoutKey: `quarter-${i}`, stageLabel: "ÇEYREK FİNAL" })) : []),
-        ...(Array.isArray(value.semi) ? value.semi.map((m, i) => ({ ...m, knockoutKey: `semi-${i}`, stageLabel: "YARI FİNAL" })) : []),
-        ...(value.finalMatch ? [{ ...value.finalMatch, knockoutKey: "final-0", stageLabel: "FİNAL" }] : []),
-        ...(value.thirdPlace ? [{ ...value.thirdPlace, knockoutKey: "third-place-0", stageLabel: "3.'LÜK MAÇI" }] : []),
+        ...(Array.isArray(value.quarter) ? value.quarter.map((m, i) => ({ ...m, knockoutKey: `quarter-${i}`, stageLabel: "Ã‡EYREK FÄ°NAL" })) : []),
+        ...(Array.isArray(value.semi) ? value.semi.map((m, i) => ({ ...m, knockoutKey: `semi-${i}`, stageLabel: "YARI FÄ°NAL" })) : []),
+        ...(value.finalMatch ? [{ ...value.finalMatch, knockoutKey: "final-0", stageLabel: "FÄ°NAL" }] : []),
+        ...(value.thirdPlace ? [{ ...value.thirdPlace, knockoutKey: "third-place-0", stageLabel: "3.'LÃœK MAÃ‡I" }] : []),
       ].filter((m) => m?.home && m?.away).map((m, i) => ({
         ...m,
         id: m.id || `ko-${m.knockoutKey || i}`,
@@ -644,15 +644,15 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         field: m.field || m.pitch || "Saha 1",
         cloudUpdatedAt: m.updated_at || m.updatedAt || cloudUpdatedAt,
       }));
-      // Eleme Maç Merkezi bağımsız tutulduğu için canlı ekran aktif eleme maçını
-      // doğrudan onun kendi app_state kaydından da okur. Böylece knockout aynası
-      // gecikse bile gol/skor/olay değişikliği canlı ekrana anında düşer.
+      // Eleme MaÃ§ Merkezi baÄŸÄ±msÄ±z tutulduÄŸu iÃ§in canlÄ± ekran aktif eleme maÃ§Ä±nÄ±
+      // doÄŸrudan onun kendi app_state kaydÄ±ndan da okur. BÃ¶ylece knockout aynasÄ±
+      // gecikse bile gol/skor/olay deÄŸiÅŸikliÄŸi canlÄ± ekrana anÄ±nda dÃ¼ÅŸer.
       const knockoutCenterRow = stateById.get("knockout_match_center_v1");
       const activeKnockout = knockoutCenterRow?.value?.activeMatch;
       if (activeKnockout?.id && activeKnockout?.home && activeKnockout?.away) {
-        // Yeni bağımsız Eleme Maç Merkezi quarter-1..4 / semi-1..2 kullanıyor.
-        // Canlı eleme ağacı ise quarter-0..3 / semi-0..1 anahtarlarıyla çalışıyor.
-        // Aynı maçı iki farklı slot sanmaması için burada yalnız CANLI görünüm anahtarını normalize et.
+        // Yeni baÄŸÄ±msÄ±z Eleme MaÃ§ Merkezi quarter-1..4 / semi-1..2 kullanÄ±yor.
+        // CanlÄ± eleme aÄŸacÄ± ise quarter-0..3 / semi-0..1 anahtarlarÄ±yla Ã§alÄ±ÅŸÄ±yor.
+        // AynÄ± maÃ§Ä± iki farklÄ± slot sanmamasÄ± iÃ§in burada yalnÄ±z CANLI gÃ¶rÃ¼nÃ¼m anahtarÄ±nÄ± normalize et.
         const rawActiveKey = String(activeKnockout.knockoutKey || "");
         const quarterKeyMatch = rawActiveKey.match(/^quarter-(\d+)$/);
         const semiKeyMatch = rawActiveKey.match(/^semi-(\d+)$/);
@@ -690,14 +690,14 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       setLastSync(new Date());
       setSelectedMatch((current) => {
         if (!current) return current;
-        // Eleme maç detayını genel refresh'in daha eski knockout aynasıyla ezme.
-        // Aktif eleme modalının tek sahibi aşağıdaki hızlı knockout_match_center_v1 okuyucusudur.
+        // Eleme maÃ§ detayÄ±nÄ± genel refresh'in daha eski knockout aynasÄ±yla ezme.
+        // Aktif eleme modalÄ±nÄ±n tek sahibi aÅŸaÄŸÄ±daki hÄ±zlÄ± knockout_match_center_v1 okuyucusudur.
         if (current.isKnockout === true || current.knockoutKey) return current;
         const candidates = mappedFixtures || [];
         return candidates.find((m) => String(m.id) === String(current.id)) || null;
       });
     } catch (error) {
-      console.error("Canlı takip yenileme hatası:", error);
+      console.error("CanlÄ± takip yenileme hatasÄ±:", error);
     } finally {
       refreshInFlight.current = false;
       if (refreshQueued.current) {
@@ -709,7 +709,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
   useEffect(() => {
     refreshTeams();
-    // Realtime ana kaynak. 60 sn yalnız bağlantı kopmasına karşı emniyet yenilemesidir.
+    // Realtime ana kaynak. 60 sn yalnÄ±z baÄŸlantÄ± kopmasÄ±na karÅŸÄ± emniyet yenilemesidir.
     const teamPoll = window.setInterval(refreshTeams, 60000);
 
     const teamChannel = supabase
@@ -725,9 +725,9 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
   useEffect(() => {
     refresh();
-    // Eleme canlı maçında Realtime/Broadcast kaçırılırsa bile açık canlı ekran
-    // en geç 1 saniye içinde Supabase'deki güncel skor/olay kaydını yeniden okur.
-    // Böylece gol ekleme ve geri alma için çık-gir/F5 gerekmez.
+    // Eleme canlÄ± maÃ§Ä±nda Realtime/Broadcast kaÃ§Ä±rÄ±lÄ±rsa bile aÃ§Ä±k canlÄ± ekran
+    // en geÃ§ 1 saniye iÃ§inde Supabase'deki gÃ¼ncel skor/olay kaydÄ±nÄ± yeniden okur.
+    // BÃ¶ylece gol ekleme ve geri alma iÃ§in Ã§Ä±k-gir/F5 gerekmez.
     const poll = window.setInterval(refresh, 1000);
 
     const onVisible = () => {
@@ -761,15 +761,15 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
         if (status === "SUBSCRIBED") refresh();
       });
 
-    // Eleme Maç Merkezi ayrı tutulduğu için ayrıca Broadcast sinyali dinlenir.
-    // Bu, app_state tablosunda postgres_changes yayını kapalı olsa bile canlı
-    // sayfanın açıkken anında yeniden okuma yapmasını sağlar.
+    // Eleme MaÃ§ Merkezi ayrÄ± tutulduÄŸu iÃ§in ayrÄ±ca Broadcast sinyali dinlenir.
+    // Bu, app_state tablosunda postgres_changes yayÄ±nÄ± kapalÄ± olsa bile canlÄ±
+    // sayfanÄ±n aÃ§Ä±kken anÄ±nda yeniden okuma yapmasÄ±nÄ± saÄŸlar.
     const knockoutBroadcast = supabase
       .channel("sscup-knockout-live-broadcast")
       .on("broadcast", { event: "knockout_changed" }, () => {
-        // İlk okuma anlık güncellemeyi sağlar. Olay geri alma gibi aynı anda
-        // Supabase yazısı tamamlanan işlemlerde kısa ikinci okuma, eski satırın
-        // ekranda kalmasını engeller.
+        // Ä°lk okuma anlÄ±k gÃ¼ncellemeyi saÄŸlar. Olay geri alma gibi aynÄ± anda
+        // Supabase yazÄ±sÄ± tamamlanan iÅŸlemlerde kÄ±sa ikinci okuma, eski satÄ±rÄ±n
+        // ekranda kalmasÄ±nÄ± engeller.
         refresh();
         window.setTimeout(() => refresh(), 250);
       })
@@ -789,10 +789,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     };
   }, [refresh]);
 
-  // Eleme canlı skoru için ağır genel refresh zincirinden bağımsız hızlı okuma.
-  // Genel refresh; fixtures + app_state + event satırlarını birlikte beklediği için
-  // yavaş bir istek bütün 1 sn polling çağrılarını kilitleyebiliyordu. Burada yalnız
-  // aktif Eleme Maç Merkezi satırını okur ve ekrandaki ilgili eleme slotunu güncelleriz.
+  // Eleme canlÄ± skoru iÃ§in aÄŸÄ±r genel refresh zincirinden baÄŸÄ±msÄ±z hÄ±zlÄ± okuma.
+  // Genel refresh; fixtures + app_state + event satÄ±rlarÄ±nÄ± birlikte beklediÄŸi iÃ§in
+  // yavaÅŸ bir istek bÃ¼tÃ¼n 1 sn polling Ã§aÄŸrÄ±larÄ±nÄ± kilitleyebiliyordu. Burada yalnÄ±z
+  // aktif Eleme MaÃ§ Merkezi satÄ±rÄ±nÄ± okur ve ekrandaki ilgili eleme slotunu gÃ¼ncelleriz.
   useEffect(() => {
     let disposed = false;
     let inFlight = false;
@@ -847,9 +847,9 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           return next;
         });
 
-        // Canlı maç detay penceresi açıksa sadece listeyi değil, ekranda render edilen
-        // seçili maç state'ini de güncelle. Önceden gol/olay Supabase'e geliyor fakat
-        // modal eski nesneyi tuttuğu için kapat-aç yapmadan görünmüyordu.
+        // CanlÄ± maÃ§ detay penceresi aÃ§Ä±ksa sadece listeyi deÄŸil, ekranda render edilen
+        // seÃ§ili maÃ§ state'ini de gÃ¼ncelle. Ã–nceden gol/olay Supabase'e geliyor fakat
+        // modal eski nesneyi tuttuÄŸu iÃ§in kapat-aÃ§ yapmadan gÃ¶rÃ¼nmÃ¼yordu.
         setSelectedMatch((current) => {
           if (!current) return current;
           const sameId = String(current?.id || "") === String(mapped.id || "");
@@ -857,7 +857,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           return sameId || sameKey ? { ...current, ...mapped } : current;
         });
       } catch (error) {
-        console.error("Eleme canlı hızlı yenileme hatası:", error);
+        console.error("Eleme canlÄ± hÄ±zlÄ± yenileme hatasÄ±:", error);
       } finally {
         inFlight = false;
       }
@@ -902,8 +902,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const localKnockout = (fixtures || []).filter((match) => match?.isKnockout === true);
   const rawKnockoutMatches = remoteKnockout.length > 0 ? remoteKnockout : localKnockout;
 
-  // Takipçi eleme kurası çekildiği anda bütün yolu görsün. Henüz sonucu
-  // belli olmayan eşleşmeler "ÇF 1 Galibi" / "YF 1 Mağlubu" şeklinde kalır.
+  // TakipÃ§i eleme kurasÄ± Ã§ekildiÄŸi anda bÃ¼tÃ¼n yolu gÃ¶rsÃ¼n. HenÃ¼z sonucu
+  // belli olmayan eÅŸleÅŸmeler "Ã‡F 1 Galibi" / "YF 1 MaÄŸlubu" ÅŸeklinde kalÄ±r.
   const byKoKey = new Map(rawKnockoutMatches.map((m) => [m.knockoutKey, m]));
   const koWinner = (match, home, away) => {
     if (!match || match.played !== true) return "";
@@ -926,13 +926,13 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const qTeams = [0,1,2,3].map((i) => {
     const m = byKoKey.get(`quarter-${i}`);
     const drawPair = Array.isArray(remoteKnockoutDraw?.[i]) ? remoteKnockoutDraw[i] : [];
-    const home = m?.home || drawPair[0] || `ÇF ${i + 1} Takım 1`;
-    const away = m?.away || drawPair[1] || `ÇF ${i + 1} Takım 2`;
+    const home = m?.home || drawPair[0] || `Ã‡F ${i + 1} TakÄ±m 1`;
+    const away = m?.away || drawPair[1] || `Ã‡F ${i + 1} TakÄ±m 2`;
     return { home, away, winner: koWinner(m, home, away) };
   });
   const semiPairs = [
-    { home: qTeams[0].winner || "ÇF 1 Galibi", away: qTeams[2].winner || "ÇF 3 Galibi" },
-    { home: qTeams[1].winner || "ÇF 2 Galibi", away: qTeams[3].winner || "ÇF 4 Galibi" },
+    { home: qTeams[0].winner || "Ã‡F 1 Galibi", away: qTeams[2].winner || "Ã‡F 3 Galibi" },
+    { home: qTeams[1].winner || "Ã‡F 2 Galibi", away: qTeams[3].winner || "Ã‡F 4 Galibi" },
   ];
   const semi0 = byKoKey.get("semi-0");
   const semi1 = byKoKey.get("semi-1");
@@ -943,11 +943,11 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
   const hasKnockoutDraw = remoteKnockoutDraw.some((pair) => Array.isArray(pair) && pair[0] && pair[1]);
   const knockoutMatches = (rawKnockoutMatches.length === 0 && !hasKnockoutDraw) ? [] : [
-    ...[0,1,2,3].map((i) => ({ ...(byKoKey.get(`quarter-${i}`) || {}), id: byKoKey.get(`quarter-${i}`)?.id || `ko-quarter-${i}`, knockoutKey: `quarter-${i}`, isKnockout: true, stageLabel: "ÇEYREK FİNAL", home: qTeams[i].home, away: qTeams[i].away })),
-    { ...(semi0 || {}), id: semi0?.id || "ko-semi-0", knockoutKey: "semi-0", isKnockout: true, stageLabel: "YARI FİNAL", home: semiPairs[0].home, away: semiPairs[0].away },
-    { ...(semi1 || {}), id: semi1?.id || "ko-semi-1", knockoutKey: "semi-1", isKnockout: true, stageLabel: "YARI FİNAL", home: semiPairs[1].home, away: semiPairs[1].away },
-    { ...(byKoKey.get("third-place-0") || {}), id: byKoKey.get("third-place-0")?.id || "ko-third-place-0", knockoutKey: "third-place-0", isKnockout: true, stageLabel: "3.'LÜK MAÇI", home: s0l || "YF 1 Mağlubu", away: s1l || "YF 2 Mağlubu" },
-    { ...(byKoKey.get("final-0") || {}), id: byKoKey.get("final-0")?.id || "ko-final-0", knockoutKey: "final-0", isKnockout: true, stageLabel: "FİNAL", home: s0w || "YF 1 Galibi", away: s1w || "YF 2 Galibi" },
+    ...[0,1,2,3].map((i) => ({ ...(byKoKey.get(`quarter-${i}`) || {}), id: byKoKey.get(`quarter-${i}`)?.id || `ko-quarter-${i}`, knockoutKey: `quarter-${i}`, isKnockout: true, stageLabel: "Ã‡EYREK FÄ°NAL", home: qTeams[i].home, away: qTeams[i].away })),
+    { ...(semi0 || {}), id: semi0?.id || "ko-semi-0", knockoutKey: "semi-0", isKnockout: true, stageLabel: "YARI FÄ°NAL", home: semiPairs[0].home, away: semiPairs[0].away },
+    { ...(semi1 || {}), id: semi1?.id || "ko-semi-1", knockoutKey: "semi-1", isKnockout: true, stageLabel: "YARI FÄ°NAL", home: semiPairs[1].home, away: semiPairs[1].away },
+    { ...(byKoKey.get("third-place-0") || {}), id: byKoKey.get("third-place-0")?.id || "ko-third-place-0", knockoutKey: "third-place-0", isKnockout: true, stageLabel: "3.'LÃœK MAÃ‡I", home: s0l || "YF 1 MaÄŸlubu", away: s1l || "YF 2 MaÄŸlubu" },
+    { ...(byKoKey.get("final-0") || {}), id: byKoKey.get("final-0")?.id || "ko-final-0", knockoutKey: "final-0", isKnockout: true, stageLabel: "FÄ°NAL", home: s0w || "YF 1 Galibi", away: s1w || "YF 2 Galibi" },
   ];
   const scheduledKnockoutMatches = knockoutMatches.map((m) => ({
     ...m,
@@ -956,13 +956,13 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   }));
   const knockoutKeys = new Set(scheduledKnockoutMatches.map((m) => m.knockoutKey).filter(Boolean));
   // TEK KAYNAK SIRASI:
-  // Önce tarih, aynı tarihte saat. Bundan sonraki bütün Canlı Takip
-  // bölümleri bu kronolojik listeyi kullanır.
+  // Ã–nce tarih, aynÄ± tarihte saat. Bundan sonraki bÃ¼tÃ¼n CanlÄ± Takip
+  // bÃ¶lÃ¼mleri bu kronolojik listeyi kullanÄ±r.
   const displayFixtures = sortFixturesBySchedule([
-    // Eleme maçlarının canlıdaki tek kaynağı remoteKnockout/knockoutMatches olsun.
-    // fixtures içinde geçmişten kalmış eleme satırı varsa knockoutKey formatı farklı
-    // olduğunda (quarter-1 / quarter-0) ikinci bir CANLI maç olarak seçilebiliyordu.
-    // Bu da ekranda güncel eleme state'i yerine eski skoru göstermeye devam ediyordu.
+    // Eleme maÃ§larÄ±nÄ±n canlÄ±daki tek kaynaÄŸÄ± remoteKnockout/knockoutMatches olsun.
+    // fixtures iÃ§inde geÃ§miÅŸten kalmÄ±ÅŸ eleme satÄ±rÄ± varsa knockoutKey formatÄ± farklÄ±
+    // olduÄŸunda (quarter-1 / quarter-0) ikinci bir CANLI maÃ§ olarak seÃ§ilebiliyordu.
+    // Bu da ekranda gÃ¼ncel eleme state'i yerine eski skoru gÃ¶stermeye devam ediyordu.
     ...leagueFixtures.filter((m) => m?.isKnockout !== true),
     ...scheduledKnockoutMatches,
   ]);
@@ -993,8 +993,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   const todayKey = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, "0")}-${String(todayDate.getDate()).padStart(2, "0")}`;
 
   const nightMatches = useMemo(() => {
-    // Maç Merkezi seçimi / geri çekme sıralamayı ASLA etkilemez.
-    // Gecenin maçları yalnız gerçek fikstür saatine göre dizilir.
+    // MaÃ§ Merkezi seÃ§imi / geri Ã§ekme sÄ±ralamayÄ± ASLA etkilemez.
+    // Gecenin maÃ§larÄ± yalnÄ±z gerÃ§ek fikstÃ¼r saatine gÃ¶re dizilir.
     return displayFixtures
       .filter((match) => normalizeFixtureDate(match?.date) === todayKey)
       .slice()
@@ -1027,7 +1027,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     const result = new Map();
     byWeek.forEach((playedTeams, week) => {
       const missing = teamNames.filter((name) => !playedTeams.has(name));
-      // Eksik fikstürü yanlışlıkla BAY saymamak için yalnız tam 1 takım eksikse göster.
+      // Eksik fikstÃ¼rÃ¼ yanlÄ±ÅŸlÄ±kla BAY saymamak iÃ§in yalnÄ±z tam 1 takÄ±m eksikse gÃ¶ster.
       if (missing.length === 1) result.set(week, missing[0]);
     });
     return result;
@@ -1048,8 +1048,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   }, [upcoming]);
 
   const liveStandings = useMemo(() => {
-    // Takip sayfasında eski tarayıcı/localStorage verisine geri düşme.
-    // Bulut fikstürü geldiyse puan durumu yalnızca güncel turnuvadan hesaplanır.
+    // Takip sayfasÄ±nda eski tarayÄ±cÄ±/localStorage verisine geri dÃ¼ÅŸme.
+    // Bulut fikstÃ¼rÃ¼ geldiyse puan durumu yalnÄ±zca gÃ¼ncel turnuvadan hesaplanÄ±r.
     if (Array.isArray(remoteFixtures)) {
       return calculateStandings(displayTeams, displayFixtures);
     }
@@ -1058,8 +1058,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
   }, [displayTeams, displayFixtures, standings, remoteFixtures]);
 
   const liveScorers = useMemo(() => {
-    // Yeni turnuvada henüz gol yoksa [] dönmeli; eski local gol krallığına
-    // fallback yapmak eski golcüleri canlı takipte yeniden gösteriyordu.
+    // Yeni turnuvada henÃ¼z gol yoksa [] dÃ¶nmeli; eski local gol krallÄ±ÄŸÄ±na
+    // fallback yapmak eski golcÃ¼leri canlÄ± takipte yeniden gÃ¶steriyordu.
     if (Array.isArray(remoteFixtures)) {
       return deriveScorers(displayFixtures);
     }
@@ -1079,8 +1079,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
     .reduce((sum, match) => sum + safeNumber(match?.homeScore) + safeNumber(match?.awayScore), 0);
   const tournamentName = displaySettings.tournamentName || displaySettings.title || "S&S CUP";
 
-  // Final tamamlandığında şampiyonu doğrudan final skorundan/penaltısından bul.
-  // Böylece app_state içinde ayrıca winner/champion alanı tutulmasına ihtiyaç kalmaz.
+  // Final tamamlandÄ±ÄŸÄ±nda ÅŸampiyonu doÄŸrudan final skorundan/penaltÄ±sÄ±ndan bul.
+  // BÃ¶ylece app_state iÃ§inde ayrÄ±ca winner/champion alanÄ± tutulmasÄ±na ihtiyaÃ§ kalmaz.
   const finalMatch = knockoutMatches.find((match) => match?.knockoutKey === "final-0");
   const finalCompleted = Boolean(
     finalMatch && (
@@ -1105,34 +1105,34 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
       <div className="public-stadium-light light-right" />
       <header className="public-live-header">
         <div className="public-brand-block">
-          <div className="public-brand-mark">🏆</div>
-          <div><span className="public-kicker">RESMİ CANLI TURNUVA MERKEZİ</span><h1>{tournamentName}</h1><p>{displaySettings.slogan || "Kazanan Sahada Belli Olur"}</p>{displaySettings.mainSponsor && <small style={{ display: "block", marginTop: "5px", fontWeight: 900 }}>🤝 ANA SPONSOR • {displaySettings.mainSponsor}</small>}</div>
+          <div className="public-brand-mark">ğŸ†</div>
+          <div><span className="public-kicker">RESMÄ° CANLI TURNUVA MERKEZÄ°</span><h1>{tournamentName}</h1><p>{displaySettings.slogan || "Kazanan Sahada Belli Olur"}</p>{displaySettings.mainSponsor && <small style={{ display: "block", marginTop: "5px", fontWeight: 900 }}>ğŸ¤ ANA SPONSOR â€¢ {displaySettings.mainSponsor}</small>}</div>
         </div>
-        <div className="public-header-meta"><span>{displaySettings.season || "2026"}</span><span>📍 {displaySettings.venue || "Gol Park"}</span><span className="public-sync-dot">● CANLI VERİ</span></div>
+        <div className="public-header-meta"><span>{displaySettings.season || "2026"}</span><span>ğŸ“ {displaySettings.venue || "Gol Park"}</span><span className="public-sync-dot">â— CANLI VERÄ°</span></div>
       </header>
 
       <main className="public-live-shell">
         {activeTab === "overview" && (
-          <section className="ss26-arena" aria-label="S&S CUP yeni maç merkezi">
+          <section className="ss26-arena" aria-label="S&S CUP yeni maÃ§ merkezi">
             <div className="ss26-arena-head">
-              <div><span className="ss26-eyebrow">S&S CUP • RAMAZAN ÖZEL</span><h2>MAÇIN <em>NABZI</em> BURADA.</h2><p>Canlı skorlar, kadrolar ve bütün maç heyecanı tek ekranda.</p></div>
+              <div><span className="ss26-eyebrow">S&S CUP â€¢ RAMAZAN Ã–ZEL</span><h2>MAÃ‡IN <em>NABZI</em> BURADA.</h2><p>CanlÄ± skorlar, kadrolar ve bÃ¼tÃ¼n maÃ§ heyecanÄ± tek ekranda.</p></div>
             </div>
             {liveMatch ? (
               <div className="ss26-featured">
-                <div className="ss26-featured-top"><span className="ss26-live-label">{liveMatch?.live ? "● CANLI MAÇ" : "MAÇ MERKEZİ"}</span><span>{stageText(liveMatch)}</span></div>
+                <div className="ss26-featured-top"><span className="ss26-live-label">{liveMatch?.live ? "â— CANLI MAÃ‡" : "MAÃ‡ MERKEZÄ°"}</span><span>{stageText(liveMatch)}</span></div>
                 <div className="ss26-versus"><strong>{liveMatch.home}</strong><div><b>{scoreText(liveMatch.homeScore)}</b><span>:</span><b>{scoreText(liveMatch.awayScore)}</b><small>{liveMatch.live ? minute || "CANLI" : statusText(liveMatch)}</small></div><strong>{liveMatch.away}</strong></div>
                 <div className="ss26-pitch"><div className="ss26-midline"/><div className="ss26-circle"/><div className="ss26-box ss26-box-left"/><div className="ss26-box ss26-box-right"/>
                   {Array.from({ length: 14 }, (_, i) => {
                     const home = i < 7;
                     const side = home ? "home" : "away";
                     const j = i % 7;
-                    // Kaleci, 3 savunma, 2 orta saha, 1 ileri oyuncu (takım başına).
+                    // Kaleci, 3 savunma, 2 orta saha, 1 ileri oyuncu (takÄ±m baÅŸÄ±na).
                     const positions = [[8, 50], [23, 19], [23, 50], [23, 81], [37, 32], [37, 68], [44, 50]];
                     const xy = positions[j];
                     const starters = getFeaturedStarters(liveMatch, displaySquads, remoteLineups, side);
                     const player = starters[j];
                     if (!player) return null;
-                    const number = player.shirtNumber ?? player.number ?? "–";
+                    const number = player.shirtNumber ?? player.number ?? "â€“";
                     const name = player.name || player.playerName || "Oyuncu";
                     const photo = player.photoUrl || player.photo || player.imageUrl;
                     return <div key={i} className={`ss26-player ${side}`} style={{ left: `${home ? xy[0] : 100 - xy[0]}%`, top: `${xy[1]}%` }} title={`${number} ${name}`}>
@@ -1141,10 +1141,24 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
                     </div>;
                   })}
                 </div>
-                <div className="ss26-featured-bottom"><span>{!getFeaturedStarters(liveMatch, displaySquads, remoteLineups, "home").length && !getFeaturedStarters(liveMatch, displaySquads, remoteLineups, "away").length ? "⚽ İlk 7 kadroları yönetimden seçildiğinde burada görünür" : "⚽ 7'YE 7 SAHA GÖRÜNÜMÜ"}</span>{<button type="button" onClick={()=>setSelectedMatch(liveMatch)}>MAÇ DETAYINI AÇ →</button>}</div>
+                <div className="ss-v10-mobile-rosters" aria-label="Sahadaki oyuncularin tam isimleri">
+                  {[["home", liveMatch.home], ["away", liveMatch.away]].map(([side, team]) => (
+                    <div className={`ss-v10-roster-side ${side}`} key={side}>
+                      <strong>{team}</strong>
+                      {getFeaturedStarters(liveMatch, displaySquads, remoteLineups, side).map((player, idx) => (
+                        <div className="ss-v10-roster-player" key={idx}>
+                          <b>{player.shirtNumber ?? player.number ?? "â€“"}</b>
+                          <span>{player.name || player.playerName || "Oyuncu"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+                {lastGoal && <div className="ss-v10-last-goal"><span>âš½ SON GOL</span><strong>{lastGoal.player}</strong><small>{lastGoal.team}{lastGoal.minute !== "" ? ` â€¢ ${lastGoal.minute}'` : ""}</small></div>}
+                <div className="ss26-featured-bottom"><span>{!getFeaturedStarters(liveMatch, displaySquads, remoteLineups, "home").length && !getFeaturedStarters(liveMatch, displaySquads, remoteLineups, "away").length ? "âš½ Ä°lk 7 kadrolarÄ± yÃ¶netimden seÃ§ildiÄŸinde burada gÃ¶rÃ¼nÃ¼r" : "âš½ 7'YE 7 SAHA GÃ–RÃœNÃœMÃœ"}</span>{<button type="button" onClick={()=>setSelectedMatch(liveMatch)}>MAÃ‡ DETAYINI AÃ‡ â†’</button>}</div>
               </div>
             ) : (
-              <div className="ss26-ready"><span>⚽</span><div><strong>YENİ SEZONA HAZIRIZ</strong><p>Henüz aktif maç yok. Maç başladığında canlı saha burada görünecek.</p></div></div>
+              <div className="ss26-ready"><span>âš½</span><div><strong>YENÄ° SEZONA HAZIRIZ</strong><p>HenÃ¼z aktif maÃ§ yok. MaÃ§ baÅŸladÄ±ÄŸÄ±nda canlÄ± saha burada gÃ¶rÃ¼necek.</p></div></div>
             )}
           </section>
         )}
@@ -1153,14 +1167,14 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           <section className="public-champion-card">
             <div className="public-champion-glow glow-left" />
             <div className="public-champion-glow glow-right" />
-            <div className="public-champion-trophy trophy-left">🏆</div>
-            <div className="public-champion-trophy trophy-right">🏆</div>
+            <div className="public-champion-trophy trophy-left">ğŸ†</div>
+            <div className="public-champion-trophy trophy-right">ğŸ†</div>
             <div className="public-champion-content">
-              <span className="public-champion-kicker">🏆 S&S CUP ŞAMPİYONU 🏆</span>
+              <span className="public-champion-kicker">ğŸ† S&S CUP ÅAMPÄ°YONU ğŸ†</span>
               <h2>{championName}</h2>
-              <strong>{displaySettings.season || "2026"} ŞAMPİYONU</strong>
+              <strong>{displaySettings.season || "2026"} ÅAMPÄ°YONU</strong>
               <div className="public-champion-final">
-                <span>FİNAL</span>
+                <span>FÄ°NAL</span>
                 <b>{finalMatch.home}</b>
                 <strong>{scoreText(finalMatch.homeScore)} - {scoreText(finalMatch.awayScore)}</strong>
                 <b className="champion-winner-side">{finalMatch.away}</b>
@@ -1170,28 +1184,28 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           </section>
         )}
 
-        {liveMatch && (
+        {liveMatch && activeTab !== "overview" && (
           <section className="public-live-scoreboard public-clickable" onClick={() => setSelectedMatch(liveMatch)}>
-            <div className="public-scoreboard-topline"><div className="public-live-pill"><i /> {actuallyLiveMatch ? "CANLI" : "MAÇ MERKEZİ"}</div><div className="public-match-status">{actuallyLiveMatch ? (minute || "CANLI") : "BAŞLAMAYI BEKLİYOR"}</div><div className="public-stage-label">{stageText(liveMatch)}</div></div>
+            <div className="public-scoreboard-topline"><div className="public-live-pill"><i /> {actuallyLiveMatch ? "CANLI" : "MAÃ‡ MERKEZÄ°"}</div><div className="public-match-status">{actuallyLiveMatch ? (minute || "CANLI") : "BAÅLAMAYI BEKLÄ°YOR"}</div><div className="public-stage-label">{stageText(liveMatch)}</div></div>
             <div className="public-score-grid">
-              <div className="public-score-team home"><span>EV SAHİBİ</span><strong>{liveMatch.home}</strong>{knockoutBadges?.home && <small className={`public-ko-live-badge ${knockoutBadges.home.tone}`}>{knockoutBadges.home.icon} {knockoutBadges.home.text}</small>}</div>
-              <div className="public-score-center"><div className="public-score-numbers"><b>{scoreText(liveMatch.homeScore)}</b><em>:</em><b>{scoreText(liveMatch.awayScore)}</b></div><small>{liveMatch.time || ""} {liveMatch.field ? `• ${liveMatch.field}` : ""}</small>{knockoutBadges?.balanced && <small className="public-ko-balanced">⚖ Tur dengede</small>}</div>
+              <div className="public-score-team home"><span>EV SAHÄ°BÄ°</span><strong>{liveMatch.home}</strong>{knockoutBadges?.home && <small className={`public-ko-live-badge ${knockoutBadges.home.tone}`}>{knockoutBadges.home.icon} {knockoutBadges.home.text}</small>}</div>
+              <div className="public-score-center"><div className="public-score-numbers"><b>{scoreText(liveMatch.homeScore)}</b><em>:</em><b>{scoreText(liveMatch.awayScore)}</b></div><small>{liveMatch.time || ""} {liveMatch.field ? `â€¢ ${liveMatch.field}` : ""}</small>{knockoutBadges?.balanced && <small className="public-ko-balanced">âš– Tur dengede</small>}</div>
               <div className="public-score-team away"><span>DEPLASMAN</span><strong>{liveMatch.away}</strong>{knockoutBadges?.away && <small className={`public-ko-live-badge ${knockoutBadges.away.tone}`}>{knockoutBadges.away.icon} {knockoutBadges.away.text}</small>}</div>
             </div>
-            {lastGoal && <div className="public-last-goal"><span>⚽</span><div><b>SON GOL</b><strong>{lastGoal.player}</strong><small>{lastGoal.team}{lastGoal.minute !== "" ? ` • ${lastGoal.minute}'` : ""}</small></div></div>}
-            <div className="public-tap-hint">Maç olaylarını görmek için tıkla ›</div>
+            {lastGoal && <div className="public-last-goal"><span>âš½</span><div><b>SON GOL</b><strong>{lastGoal.player}</strong><small>{lastGoal.team}{lastGoal.minute !== "" ? ` â€¢ ${lastGoal.minute}'` : ""}</small></div></div>}
+            <div className="public-tap-hint">MaÃ§ olaylarÄ±nÄ± gÃ¶rmek iÃ§in tÄ±kla â€º</div>
           </section>
         )}
 
         <section className="public-stat-grid public-stat-grid-top">
-          <article><span>👥</span><div><strong>{displayTeams.length}</strong><b>TAKIM</b><small>Mücadele ediyor</small></div></article>
-          <article><span>⚽</span><div><strong>{playedCount}</strong><b>OYNANAN MAÇ</b><small>Toplam</small></div></article>
-          <article><span>🕘</span><div><strong>{upcoming.length}</strong><b>BEKLEYEN MAÇ</b><small>Yaklaşan</small></div></article>
-          <article><span>⚽</span><div><strong>{totalGoals}</strong><b>TOPLAM GOL</b><small>Oynanan maçlar</small></div></article>
+          <article><span>ğŸ‘¥</span><div><strong>{displayTeams.length}</strong><b>TAKIM</b><small>MÃ¼cadele ediyor</small></div></article>
+          <article><span>âš½</span><div><strong>{playedCount}</strong><b>OYNANAN MAÃ‡</b><small>Toplam</small></div></article>
+          <article><span>ğŸ•˜</span><div><strong>{upcoming.length}</strong><b>BEKLEYEN MAÃ‡</b><small>YaklaÅŸan</small></div></article>
+          <article><span>âš½</span><div><strong>{totalGoals}</strong><b>TOPLAM GOL</b><small>Oynanan maÃ§lar</small></div></article>
         </section>
 
         <nav className="public-tabbar">
-          {[["overview","⚡","Genel"],["results","✅","Tamamlanan"],["fixtures","📅","Fikstür"],["standings","📊","Puan Durumu"],["scorers","👑","Gol Krallığı"],["teams","👕","Takımlar"],["knockout","🏆","Eleme Turları"]].map(([id, icon, label]) => (
+          {[["overview","âš¡","Genel"],["results","âœ…","Tamamlanan"],["fixtures","ğŸ“…","FikstÃ¼r"],["standings","ğŸ“Š","Puan Durumu"],["scorers","ğŸ‘‘","Gol KrallÄ±ÄŸÄ±"],["teams","ğŸ‘•","TakÄ±mlar"],["knockout","ğŸ†","Eleme TurlarÄ±"]].map(([id, icon, label]) => (
             <button key={id} className={activeTab === id ? "active" : ""} onClick={() => setActiveTab(id)}><span>{icon}</span>{label}</button>
           ))}
         </nav>
@@ -1200,8 +1214,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           <div className="public-dashboard-grid">
             <div className="public-dashboard-main">
               <section className="public-section public-night-panel">
-                <div className="public-section-head public-section-head-line"><div><span>MAÇ MERKEZİ</span><h2>Gecenin Maçları</h2></div>{nightMatches[0]?.date && <b>{formatDate(nightMatches[0].date, true)}</b>}</div>
-                {nightMatches.length === 0 ? <div className="public-empty-box">Bu gece için planlanmış maç bulunmuyor.</div> : (
+                <div className="public-section-head public-section-head-line"><div><span>MAÃ‡ MERKEZÄ°</span><h2>Gecenin MaÃ§larÄ±</h2></div>{nightMatches[0]?.date && <b>{formatDate(nightMatches[0].date, true)}</b>}</div>
+                {nightMatches.length === 0 ? <div className="public-empty-box">Bu gece iÃ§in planlanmÄ±ÅŸ maÃ§ bulunmuyor.</div> : (
                   <div className="public-night-list">
                     {nightMatches.map((match, index) => (
                       <button key={match.id || index} className={`public-night-row ${match.live ? "is-live" : ""} ${match.played ? "is-finished" : ""}`} onClick={() => setSelectedMatch(match)}>
@@ -1209,7 +1223,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
                         <div className="public-night-team home"><strong>{match.home}</strong></div>
                         <div className="public-night-vs">{match.live || match.played ? `${scoreText(match.homeScore)} - ${scoreText(match.awayScore)}` : "VS"}</div>
                         <div className="public-night-team away"><strong>{match.away}</strong></div>
-                        <div className="public-night-field">⚑ {match.field || "Saha 1"}</div>
+                        <div className="public-night-field">âš‘ {match.field || "Saha 1"}</div>
                       </button>
                     ))}
                   </div>
@@ -1217,10 +1231,10 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
               </section>
 
               <section className="public-section public-results-panel">
-                <div className="public-section-head"><div><span>SON DÜDÜK</span><h2>Sonuçlanan Maçlar</h2></div><b>Maça tıkla • olayları gör</b></div>
-                {recent.length === 0 ? <div className="public-empty-box public-results-empty"><span>🏆</span><strong>Henüz oynanan maç bulunmuyor.</strong><small>Maçlar tamamlandıkça burada görünecektir.</small></div> : <>
-                  <div className="public-results-list">{recent.map((match,index) => <button key={match.id || index} onClick={() => setSelectedMatch(match)}><div><span>{formatDate(match.date)} {match.time || ""}</span><small>{stageText(match,index)}</small></div><strong>{match.home}</strong><b>{scoreText(match.homeScore)} - {scoreText(match.awayScore)}</b><strong>{match.away}</strong><em>MS ›</em></button>)}</div>
-                  {completedMatches.length > 8 && <button className="public-all-results-button" onClick={() => setActiveTab("results")}>TÜM TAMAMLANAN MAÇLARI GÖR <span>›</span></button>}
+                <div className="public-section-head"><div><span>SON DÃœDÃœK</span><h2>SonuÃ§lanan MaÃ§lar</h2></div><b>MaÃ§a tÄ±kla â€¢ olaylarÄ± gÃ¶r</b></div>
+                {recent.length === 0 ? <div className="public-empty-box public-results-empty"><span>ğŸ†</span><strong>HenÃ¼z oynanan maÃ§ bulunmuyor.</strong><small>MaÃ§lar tamamlandÄ±kÃ§a burada gÃ¶rÃ¼necektir.</small></div> : <>
+                  <div className="public-results-list">{recent.map((match,index) => <button key={match.id || index} onClick={() => setSelectedMatch(match)}><div><span>{formatDate(match.date)} {match.time || ""}</span><small>{stageText(match,index)}</small></div><strong>{match.home}</strong><b>{scoreText(match.homeScore)} - {scoreText(match.awayScore)}</b><strong>{match.away}</strong><em>MS â€º</em></button>)}</div>
+                  {completedMatches.length > 8 && <button className="public-all-results-button" onClick={() => setActiveTab("results")}>TÃœM TAMAMLANAN MAÃ‡LARI GÃ–R <span>â€º</span></button>}
                 </>}
               </section>
             </div>
@@ -1234,8 +1248,8 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
               </section>
 
               <section className="public-side-card">
-                <div className="public-side-title">GOL KRALLIĞI</div>
-                {liveScorers.length === 0 ? <div className="public-side-empty">Henüz gol kaydı yok.</div> : <div className="public-mini-scorers">{liveScorers.slice(0,5).map((p,index) => <div key={p.id || index}><span>{index+1}</span><strong>{p.playerName || p.name}<small>{p.team}</small></strong><b>{p.goals}</b></div>)}</div>}
+                <div className="public-side-title">GOL KRALLIÄI</div>
+                {liveScorers.length === 0 ? <div className="public-side-empty">HenÃ¼z gol kaydÄ± yok.</div> : <div className="public-mini-scorers">{liveScorers.slice(0,5).map((p,index) => <div key={p.id || index}><span>{index+1}</span><strong>{p.playerName || p.name}<small>{p.team}</small></strong><b>{p.goals}</b></div>)}</div>}
               </section>
             </aside>
           </div>
@@ -1243,12 +1257,12 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
         {activeTab === "results" && (
           <section className="public-section public-results-archive">
-            <div className="public-section-head"><div><span>MAÇ ARŞİVİ</span><h2>Tamamlanan Maçlar</h2></div><b>{completedMatches.length} maç • Detay için maça tıkla</b></div>
-            {completedMatches.length === 0 ? <div className="public-empty-box">Henüz tamamlanan maç bulunmuyor.</div> : (
+            <div className="public-section-head"><div><span>MAÃ‡ ARÅÄ°VÄ°</span><h2>Tamamlanan MaÃ§lar</h2></div><b>{completedMatches.length} maÃ§ â€¢ Detay iÃ§in maÃ§a tÄ±kla</b></div>
+            {completedMatches.length === 0 ? <div className="public-empty-box">HenÃ¼z tamamlanan maÃ§ bulunmuyor.</div> : (
               <div className="public-results-list public-results-list-all">{completedMatches.map((match,index) => (
                 <button key={match.id || index} onClick={() => setSelectedMatch(match)}>
                   <div><span>{formatDate(match.date)} {match.time || ""}</span><small>{stageText(match,index)}</small></div>
-                  <strong>{match.home}</strong><b>{scoreText(match.homeScore)} - {scoreText(match.awayScore)}</b><strong>{match.away}</strong><em>DETAY ›</em>
+                  <strong>{match.home}</strong><b>{scoreText(match.homeScore)} - {scoreText(match.awayScore)}</b><strong>{match.away}</strong><em>DETAY â€º</em>
                 </button>
               ))}</div>
             )}
@@ -1257,21 +1271,21 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
         {activeTab === "fixtures" && (
           <section className="public-section">
-            <div className="public-section-head"><div><span>MAÇ MERKEZİ</span><h2>Fikstür</h2></div><b>{upcoming.length} karşılaşma</b></div>
-            {upcoming.length === 0 ? <div className="public-empty-box">Planlanmış yeni maç bulunmuyor.</div> : (
+            <div className="public-section-head"><div><span>MAÃ‡ MERKEZÄ°</span><h2>FikstÃ¼r</h2></div><b>{upcoming.length} karÅŸÄ±laÅŸma</b></div>
+            {upcoming.length === 0 ? <div className="public-empty-box">PlanlanmÄ±ÅŸ yeni maÃ§ bulunmuyor.</div> : (
               <div className="public-fixture-weeks">{upcomingByWeek.map((group, groupIndex) => {
                 const byeTeam = group.week ? byeTeamByWeek.get(String(group.week)) : "";
                 return (
                   <div className="public-fixture-week" key={group.weekKey}>
                     <div className="public-fixture-week-head">
-                      <strong>{group.week ? `${group.week}. HAFTA` : "FİKSTÜR"}</strong>
+                      <strong>{group.week ? `${group.week}. HAFTA` : "FÄ°KSTÃœR"}</strong>
                       {byeTeam && <span className="public-bye-team">BAY: {byeTeam}</span>}
                     </div>
                     <div className="public-fixture-grid">{group.matches.map((match, index) => (
                       <button className="public-fixture-card" key={match.id || index} onClick={() => setSelectedMatch(match)}>
-                        <div className="public-fixture-meta"><span>{stageText(match, groupIndex + index)}</span><b>{formatDate(match.date)} • {match.time || "Saat açıklanacak"}</b></div>
+                        <div className="public-fixture-meta"><span>{stageText(match, groupIndex + index)}</span><b>{formatDate(match.date)} â€¢ {match.time || "Saat aÃ§Ä±klanacak"}</b></div>
                         <div className="public-fixture-teams"><strong>{match.home}</strong><span>VS</span><strong>{match.away}</strong></div>
-                        <div className="public-fixture-place">📍 {match.field || displaySettings.venue || "Gol Park Halı Saha"}<i>Detay ›</i></div>
+                        <div className="public-fixture-place">ğŸ“ {match.field || displaySettings.venue || "Gol Park HalÄ± Saha"}<i>Detay â€º</i></div>
                       </button>
                     ))}</div>
                   </div>
@@ -1283,47 +1297,47 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
         {activeTab === "standings" && (
           <section className="public-section public-table-section">
-            <div className="public-section-head"><div><span>LİG TABLOSU</span><h2>Puan Durumu</h2></div><b>İlk 8 eleme hattı</b></div>
+            <div className="public-section-head"><div><span>LÄ°G TABLOSU</span><h2>Puan Durumu</h2></div><b>Ä°lk 8 eleme hattÄ±</b></div>
             <div className="public-table-wrap"><table className="public-standings-table"><thead><tr><th>#</th><th>TAKIM</th><th>O</th><th>G</th><th>B</th><th>M</th><th>A</th><th>Y</th><th>AV</th><th>P</th></tr></thead><tbody>
-              {liveStandings.map((team, index) => <tr key={team.team} className={index < 8 ? "qualification" : ""}><td><span className={`public-rank rank-${index + 1}`}>{index + 1}</span></td><td><strong>{team.team}</strong>{index === 7 && <small className="public-cutoff">ELEME ÇİZGİSİ</small>}</td><td>{team.played}</td><td>{team.won}</td><td>{team.drawn}</td><td>{team.lost}</td><td>{team.goalsFor}</td><td>{team.goalsAgainst}</td><td>{team.goalDifference > 0 ? `+${team.goalDifference}` : team.goalDifference}</td><td className="points">{team.points}</td></tr>)}
+              {liveStandings.map((team, index) => <tr key={team.team} className={index < 8 ? "qualification" : ""}><td><span className={`public-rank rank-${index + 1}`}>{index + 1}</span></td><td><strong>{team.team}</strong>{index === 7 && <small className="public-cutoff">ELEME Ã‡Ä°ZGÄ°SÄ°</small>}</td><td>{team.played}</td><td>{team.won}</td><td>{team.drawn}</td><td>{team.lost}</td><td>{team.goalsFor}</td><td>{team.goalsAgainst}</td><td>{team.goalDifference > 0 ? `+${team.goalDifference}` : team.goalDifference}</td><td className="points">{team.points}</td></tr>)}
             </tbody></table></div>
           </section>
         )}
 
         {activeTab === "scorers" && (
           <section className="public-section">
-            <div className="public-section-head"><div><span>BİREYSEL PERFORMANS</span><h2>Gol Krallığı</h2></div><b>Altın ayakkabı yarışı</b></div>
-            {liveScorers.length === 0 ? <div className="public-empty-box">Gol krallığı henüz oluşmadı.</div> : <>
-              <div className="public-podium">{[1,0,2].map((sourceIndex, podiumIndex) => { const p = liveScorers[sourceIndex]; if (!p) return <div key={podiumIndex} className="public-podium-card empty" />; const medal = sourceIndex === 0 ? "🥇" : sourceIndex === 1 ? "🥈" : "🥉"; return <article key={p.id || sourceIndex} className={`public-podium-card place-${sourceIndex + 1}`}><div className="public-medal">{medal}</div><span>{sourceIndex + 1}. SIRA</span><strong>{p.playerName || p.name}</strong><small>{p.team}</small><b>⚽ {p.goals} GOL</b></article>; })}</div>
-              {liveScorers.length > 3 && <div className="public-scorer-list">{liveScorers.slice(3,10).map((p,index) => <div key={p.id || index}><span>{index+4}</span><strong>{p.playerName || p.name}<small>{p.team}</small></strong><b>⚽ {p.goals}</b></div>)}</div>}
+            <div className="public-section-head"><div><span>BÄ°REYSEL PERFORMANS</span><h2>Gol KrallÄ±ÄŸÄ±</h2></div><b>AltÄ±n ayakkabÄ± yarÄ±ÅŸÄ±</b></div>
+            {liveScorers.length === 0 ? <div className="public-empty-box">Gol krallÄ±ÄŸÄ± henÃ¼z oluÅŸmadÄ±.</div> : <>
+              <div className="public-podium">{[1,0,2].map((sourceIndex, podiumIndex) => { const p = liveScorers[sourceIndex]; if (!p) return <div key={podiumIndex} className="public-podium-card empty" />; const medal = sourceIndex === 0 ? "ğŸ¥‡" : sourceIndex === 1 ? "ğŸ¥ˆ" : "ğŸ¥‰"; return <article key={p.id || sourceIndex} className={`public-podium-card place-${sourceIndex + 1}`}><div className="public-medal">{medal}</div><span>{sourceIndex + 1}. SIRA</span><strong>{p.playerName || p.name}</strong><small>{p.team}</small><b>âš½ {p.goals} GOL</b></article>; })}</div>
+              {liveScorers.length > 3 && <div className="public-scorer-list">{liveScorers.slice(3,10).map((p,index) => <div key={p.id || index}><span>{index+4}</span><strong>{p.playerName || p.name}<small>{p.team}</small></strong><b>âš½ {p.goals}</b></div>)}</div>}
             </>}
           </section>
         )}
 
         {activeTab === "teams" && (
           <section className="public-section public-teams-section">
-            <div className="public-section-head"><div><span>TAKIM KADROLARI</span><h2>Takımlar</h2></div><b>{displayTeams.length} takım</b></div>
+            <div className="public-section-head"><div><span>TAKIM KADROLARI</span><h2>TakÄ±mlar</h2></div><b>{displayTeams.length} takÄ±m</b></div>
             {!selectedTeamName ? (
               <div className="public-team-grid">
                 {displayTeams.map((team, index) => {
-                  const teamName = typeof team === "string" ? team : team?.name || team?.teamName || `Takım ${index + 1}`;
+                  const teamName = typeof team === "string" ? team : team?.name || team?.teamName || `TakÄ±m ${index + 1}`;
                   const playerCount = Array.isArray(displaySquads?.[teamName]) ? displaySquads[teamName].length : 0;
                   return (
                     <button key={teamName} type="button" className="public-team-card" onClick={() => setSelectedTeamName(teamName)}>
                       <span className="public-team-card-number">{String(index + 1).padStart(2, "0")}</span>
                       <strong>{teamName}</strong>
                       <small>{playerCount} oyuncu</small>
-                      <b>Kadroyu Gör ›</b>
+                      <b>Kadroyu GÃ¶r â€º</b>
                     </button>
                   );
                 })}
               </div>
             ) : (
               <div className="public-squad-panel">
-                <button type="button" className="public-team-back" onClick={() => setSelectedTeamName("")}>‹ Tüm Takımlar</button>
-                <div className="public-squad-title"><span>👕</span><div><small>TAKIM KADROSU</small><h3>{selectedTeamName}</h3></div></div>
+                <button type="button" className="public-team-back" onClick={() => setSelectedTeamName("")}>â€¹ TÃ¼m TakÄ±mlar</button>
+                <div className="public-squad-title"><span>ğŸ‘•</span><div><small>TAKIM KADROSU</small><h3>{selectedTeamName}</h3></div></div>
                 {(!Array.isArray(displaySquads?.[selectedTeamName]) || displaySquads[selectedTeamName].length === 0) ? (
-                  <div className="public-empty-box">Bu takım için kayıtlı oyuncu bulunmuyor.</div>
+                  <div className="public-empty-box">Bu takÄ±m iÃ§in kayÄ±tlÄ± oyuncu bulunmuyor.</div>
                 ) : (
                   <div className="public-player-list">
                     {[...displaySquads[selectedTeamName]]
@@ -1343,19 +1357,19 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
 
         {activeTab === "knockout" && (
           <section className="public-section public-knockout-section">
-            <div className="public-section-head"><div><span>ŞAMPİYONLUK YOLU</span><h2>🏆 Eleme Turları</h2></div><b>Çeyrek Final • Yarı Final • 3.'lük • Final</b></div>
-            {scheduledKnockoutMatches.length === 0 ? <div className="public-empty-box">Eleme eşleşmeleri henüz oluşmadı.</div> : (
+            <div className="public-section-head"><div><span>ÅAMPÄ°YONLUK YOLU</span><h2>ğŸ† Eleme TurlarÄ±</h2></div><b>Ã‡eyrek Final â€¢ YarÄ± Final â€¢ 3.'lÃ¼k â€¢ Final</b></div>
+            {scheduledKnockoutMatches.length === 0 ? <div className="public-empty-box">Eleme eÅŸleÅŸmeleri henÃ¼z oluÅŸmadÄ±.</div> : (
               <div className="public-knockout-stages">
-                {["ÇEYREK FİNAL", "YARI FİNAL", "3.'LÜK MAÇI", "FİNAL"].map((stage) => {
+                {["Ã‡EYREK FÄ°NAL", "YARI FÄ°NAL", "3.'LÃœK MAÃ‡I", "FÄ°NAL"].map((stage) => {
                   const matches = scheduledKnockoutMatches.filter((m) => stageText(m) === stage);
                   if (!matches.length) return null;
                   return <div className="public-knockout-stage" key={stage}><h3>{stage}</h3><div className="public-knockout-grid">{matches.map((match, index) => (
                     <button className={`public-knockout-card ${match.live ? "is-live" : ""}`} key={match.knockoutKey || match.id || index} onClick={() => setSelectedMatch(match)}>
-                      <div className="public-ko-meta"><span>{match.live ? "● CANLI" : match.played ? "MS" : match.time || "PROGRAM"}</span><small>{formatDate(match.date)} {match.field ? `• ${match.field}` : ""}</small></div>
+                      <div className="public-ko-meta"><span>{match.live ? "â— CANLI" : match.played ? "MS" : match.time || "PROGRAM"}</span><small>{formatDate(match.date)} {match.field ? `â€¢ ${match.field}` : ""}</small></div>
                       <div className="public-ko-team"><strong>{match.home}</strong><b>{match.live || match.played ? scoreText(match.homeScore) : ""}</b></div>
                       <div className="public-ko-team"><strong>{match.away}</strong><b>{match.live || match.played ? scoreText(match.awayScore) : ""}</b></div>
                       {(match.homePenalties !== "" || match.awayPenalties !== "") && <div className="public-ko-pen">PEN {safeNumber(match.homePenalties)} - {safeNumber(match.awayPenalties)}</div>}
-                      <div className="public-tap-hint">Goller • kartlar • penaltılar ›</div>
+                      <div className="public-tap-hint">Goller â€¢ kartlar â€¢ penaltÄ±lar â€º</div>
                     </button>
                   ))}</div></div>;
                 })}
@@ -1364,7 +1378,7 @@ export default function PublicTournament({ teams = [], fixtures = [], standings 
           </section>
         )}
 
-        <footer className="public-live-footer"><div><b>{tournamentName}</b><span>{displaySettings.slogan || "Kazanan Sahada Belli Olur"}</span></div><small>{lastSync ? `Son veri: ${lastSync.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "Canlı veri bağlantısı kuruluyor…"}</small></footer>
+        <footer className="public-live-footer"><div><b>{tournamentName}</b><span>{displaySettings.slogan || "Kazanan Sahada Belli Olur"}</span></div><small>{lastSync ? `Son veri: ${lastSync.toLocaleTimeString("tr-TR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}` : "CanlÄ± veri baÄŸlantÄ±sÄ± kuruluyorâ€¦"}</small></footer>
       </main>
 
       <MatchDetailModal match={selectedMatch} onClose={() => setSelectedMatch(null)} now={now} halfDurationMinutes={displaySettings.halfDurationMinutes || 30} squads={displaySquads} lineups={remoteLineups} />
