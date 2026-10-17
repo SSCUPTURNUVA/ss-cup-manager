@@ -1172,18 +1172,36 @@ export default function App() {
           </div>
         </div>
 
-        <nav className="sidebar-nav">
-          {visibleMenuItems.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`nav-item ${activePage === item.id ? "active" : ""}`}
-              onClick={() => changePage(item.id)}
-            >
-              <span className="nav-icon">{item.icon}</span>
-              <span>{item.label}</span>
+        <nav className="sidebar-nav" aria-label="Yönetim menüsü">
+          {visibleMenuItems.filter((item) => item.id === "home").map((item) => (
+            <button key={item.id} type="button" className={`nav-item ${activePage === item.id ? "active" : ""}`} onClick={() => changePage(item.id)}>
+              <span className="nav-icon">{item.icon}</span><span>{item.label}</span>
             </button>
           ))}
+          {[
+            { title: "⚽ Maç İşlemleri", ids: ["matchcenter", "fixture", "group-fixture", "dailyschedule"] },
+            { title: "🏆 Eleme Turu", ids: ["knockout-matchcenter", "knockout", "knockoutmessages"] },
+            { title: "👥 Takımlar ve İstatistikler", ids: ["teams", "teamcontacts", "standings", "group-standings", "scorers", "discipline", "statistics"] },
+            { title: "📢 Yayın ve Duyurular", ids: ["public", "announcements"] },
+            { title: "⚙️ Ayarlar ve Araçlar", ids: ["draw", "format", "settings", "backup"] },
+          ].map((group) => {
+            const entries = visibleMenuItems.filter((item) => group.ids.includes(item.id));
+            if (!entries.length) return null;
+            return (
+              <details key={group.title} defaultOpen={entries.some((item) => item.id === activePage)} style={{ margin: "5px 8px", border: "1px solid rgba(255,255,255,.14)", borderRadius: 9, overflow: "hidden" }}>
+                <summary style={{ cursor: "pointer", padding: "12px 10px", color: "#f0d38d", fontWeight: 700, fontSize: 13, userSelect: "none" }}>
+                  {group.title}
+                </summary>
+                <div style={{ padding: "0 4px 6px 10px" }}>
+                  {entries.map((item) => (
+                    <button key={item.id} type="button" className={`nav-item ${activePage === item.id ? "active" : ""}`} onClick={() => changePage(item.id)}>
+                      <span className="nav-icon">{item.icon}</span><span>{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </details>
+            );
+          })}
         </nav>
 
         <div className="sidebar-footer sidebar-footer-pro">
